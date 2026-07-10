@@ -1,9 +1,6 @@
 import { useState, useEffect, useRef, useCallback, Suspense, lazy } from "react";
 import { Usuario, Configuracion, Venta, CierreCaja } from "./types";
 import RoleSelector from "./components/RoleSelector";
-import VendedorInterface from "./components/VendedorInterface";
-import AdminInterface from "./components/AdminInterface";
-import SupervisorInterface from "./components/SupervisorInterface";
 import Login from "./components/Login";
 
 // Lazy loaded interfaces (Code Splitting)
@@ -311,7 +308,7 @@ export default function App() {
       
       {/* App Header */}
       {currentUser && (
-        <RoleSelector 
+        <RoleSelector config={config} 
           currentUser={currentUser} 
           onLogout={async () => {
             await signOut(auth);
@@ -424,7 +421,7 @@ export default function App() {
 
         ) : (
           <div className="flex-1 overflow-y-auto p-4 flex items-center justify-center">
-            <Login users={users} onLoginSuccess={(u) => {
+            <Login config={config} users={users} onLoginSuccess={(u) => {
               setCurrentUser(u);
               // [FASE 3] Get or Create resumen_diario at startup
               if (u.rol === 'vendedor') {

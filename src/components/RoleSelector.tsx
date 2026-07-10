@@ -2,11 +2,12 @@ import { Shield, Smartphone, Users, LogOut, Award } from "lucide-react";
 import { Usuario } from "../types";
 
 interface RoleSelectorProps {
+  config?: any;
   currentUser: Usuario | null;
   onLogout?: () => void;
 }
 
-export default function RoleSelector({ currentUser, onLogout }: RoleSelectorProps) {
+export default function RoleSelector({ currentUser, onLogout, config }: RoleSelectorProps) {
   if (!currentUser) return null;
 
   const isVendedor = currentUser.rol === "vendedor";
@@ -20,7 +21,7 @@ export default function RoleSelector({ currentUser, onLogout }: RoleSelectorProp
         <div className="flex items-center">
           <img 
             src="/logo.png" 
-            alt="La Nueva Era" 
+            alt={config?.formato_ticket?.titulo || "Logo del Sistema"} 
             className="h-10 w-auto object-contain filter drop-shadow-sm"
           />
         </div>

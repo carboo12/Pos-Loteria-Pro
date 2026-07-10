@@ -18,6 +18,7 @@ import {
   Search,
   QrCode,
   CheckCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Html5QrcodeScanner } from "html5-qrcode";
@@ -135,6 +136,9 @@ export default function VendedorInterface({
   const [activeTicket, setActiveTicket] = useState<Venta | null>(null);
 
   // Ticket QR/ID Search states
+  // Hardware and Permission states
+  const [cameraStatus, setCameraStatus] = useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
+
   const [qrSearchInput, setQrSearchInput] = useState("");
   const [qrSearchError, setQrSearchError] = useState<string | null>(null);
 
@@ -142,35 +146,75 @@ export default function VendedorInterface({
   const [paymentResult, setPaymentResult] = useState<{ganador: boolean, message: string, monto: number} | null>(null);
 
   // QR Scanner Effect
+
   useEffect(() => {
     if (activeTab !== "pagos") {
       setPaymentResult(null);
+      setCameraStatus('idle');
       return;
     }
 
-    const html5QrcodeScanner = new Html5QrcodeScanner(
-      "reader",
-      { fps: 10, qrbox: { width: 250, height: 250 } },
-      /* verbose= */ false
-    );
+    let scanner: Html5QrcodeScanner | null = null;
+    let isMounted = true;
+    let localStream: MediaStream | null = null;
 
-    html5QrcodeScanner.render(
-      (decodedText) => {
-        // Pause scanner after reading
-        html5QrcodeScanner.pause(true);
-        processPayment(decodedText);
-      },
-      (error) => {
-        // keep scanning
+    const initializeCamera = async () => {
+      setCameraStatus('loading');
+      try {
+        // 1. Solicitar permisos explicitamente primero (forzando cámara trasera)
+        localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        
+        if (!isMounted) {
+          // Si el usuario cambió de pestaña rápido, apagar la cámara de inmediato
+          localStream.getTracks().forEach(track => track.stop());
+          return;
+        }
+        
+        setCameraStatus('ready');
+        
+        // 2. Montar el escáner si hay permisos
+        scanner = new Html5QrcodeScanner(
+          "reader",
+          { 
+            fps: 10, 
+            qrbox: { width: 250, height: 250 },
+            videoConstraints: { facingMode: "environment" } 
+          },
+          false
+        );
+
+        scanner.render(
+          (decodedText) => {
+            scanner?.pause(true);
+            processPayment(decodedText);
+          },
+          (error) => {} // ignorar errores de frame vacío
+        );
+      } catch (err: any) {
+        console.error("Camera error:", err);
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          setCameraStatus('denied');
+        } else {
+          setCameraStatus('error');
+        }
       }
-    );
+    };
 
+    initializeCamera();
+
+    // 3. Limpieza Segura (Evitar fugas de memoria y batería)
     return () => {
-      html5QrcodeScanner.clear().catch(error => {
-        console.error("Failed to clear html5QrcodeScanner. ", error);
-      });
+      isMounted = false;
+      if (scanner) {
+        scanner.clear().catch(e => console.error("Error clearing scanner", e));
+      }
+      if (localStream) {
+        // Force stop all hardware tracks immediately
+        localStream.getTracks().forEach(track => track.stop());
+      }
     };
   }, [activeTab]);
+
 
   const processPayment = async (query: string) => {
     setLoading(true);
@@ -1530,7 +1574,32 @@ export default function VendedorInterface({
 
             {/* QR Scanner Section */}
             <div className="bg-white rounded-2xl p-4 border border-gray-300 shadow-sm flex flex-col items-center">
-              <div id="reader" className="w-full max-w-sm overflow-hidden rounded-xl border border-gray-200"></div>
+
+              {cameraStatus === 'loading' && (
+                <div className="w-full h-48 flex flex-col items-center justify-center bg-gray-50 rounded-xl border border-gray-200">
+                  <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-900 rounded-full animate-spin mb-2"></div>
+                  <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Iniciando Cámara...</p>
+                </div>
+              )}
+              
+              {cameraStatus === 'denied' && (
+                <div className="w-full p-4 bg-red-50 text-red-700 rounded-xl border border-red-200 text-center mb-4">
+                  <AlertTriangle className="w-6 h-6 mx-auto mb-1 opacity-80" />
+                  <p className="text-[11px] font-bold uppercase">Acceso Denegado</p>
+                  <p className="text-[10px] mt-1">Para escanear tickets, debes permitir el acceso a la cámara en los ajustes de tu navegador.</p>
+                </div>
+              )}
+              
+              {cameraStatus === 'error' && (
+                <div className="w-full p-4 bg-orange-50 text-orange-700 rounded-xl border border-orange-200 text-center mb-4">
+                  <AlertTriangle className="w-6 h-6 mx-auto mb-1 opacity-80" />
+                  <p className="text-[11px] font-bold uppercase">Error de Cámara</p>
+                  <p className="text-[10px] mt-1">No se detectó cámara o hardware no compatible.</p>
+                </div>
+              )}
+
+              <div className={`w-full max-w-sm overflow-hidden rounded-xl ${cameraStatus === 'ready' ? 'border border-gray-200' : 'hidden'}`} id="reader"></div>
+
               
               <div className="mt-4 w-full">
                 <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">O ingresar ID manualmente</label>

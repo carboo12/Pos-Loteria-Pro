@@ -197,7 +197,7 @@ ${config.formato_ticket.mensaje_pie}
           </head>
           <body>
             <div style="display: flex; justify-content: center; margin-bottom: 8px;">
-              <img src="${window.location.origin}/logo.png" alt="La Nueva Era" style="height: 55px; width: auto; object-fit: contain;" />
+              <img src="${window.location.origin}/logo.png" alt="${config?.formato_ticket?.titulo || 'Logo'}" style="height: 55px; width: auto; object-fit: contain;" />
             </div>
             <h2>${config.formato_ticket.titulo}</h2>
             <div>${config.formato_ticket.ruc}</div>
@@ -264,7 +264,7 @@ ${ticket.nombre_cliente ? `                <div><strong>CLIENTE:</strong> ${tick
                 alt="Código QR de Verificación"
                 style="width: 100px; height: 100px; border: 1px solid #ccc; padding: 4px; background: #fff;"
               />
-              <span style="font-size: 8px; color: #555; font-family: monospace; margin-top: 4px; text-transform: uppercase;">Verificación Rápida QR • La Nueva Era</span>
+              <span style="font-size: 8px; color: #555; font-family: monospace; margin-top: 4px; text-transform: uppercase;">Verificación Rápida QR • ${config?.formato_ticket?.titulo || 'SISTEMA'}</span>
             </div>
             <script>
               window.onload = function() {
@@ -340,7 +340,7 @@ ${ticket.nombre_cliente ? `                <div><strong>CLIENTE:</strong> ${tick
             <div className="flex justify-center mb-1">
               <img 
                 src="/logo.png" 
-                alt="La Nueva Era" 
+                alt={config?.formato_ticket?.titulo || "Logo"} 
                 className="h-12 w-auto object-contain filter drop-shadow-xs"
               />
             </div>

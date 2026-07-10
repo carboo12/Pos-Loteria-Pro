@@ -707,7 +707,7 @@ export default function AdminInterface({
       };
 
       // Header block
-      const mainTitle = config.formato_ticket?.titulo?.toUpperCase() || "LA NUEVA ERA";
+      const mainTitle = config?.formato_ticket?.titulo?.toUpperCase() || "SISTEMA DE VENTAS";
       printCenter(mainTitle, 14, true);
       printCenter("MONITOR REPORTE DIARIO", 10, true);
       printCenter("--- IMPRESORA TÉRMICA 80MM ---", 7, false);
@@ -776,7 +776,8 @@ export default function AdminInterface({
 
       drawSeparator("=");
       printCenter("FIN DEL REPORTE", 8, true);
-      printCenter("SISTEMA " + mainTitle, 7, false);
+      const ticketFooter = config?.formato_ticket?.mensaje_pie || "¡Gracias por su preferencia!";
+      printCenter(ticketFooter, 7, false);
       printCenter(now.toISOString().substring(0, 19).replace("T", " "), 6, false);
 
       // Save PDF
@@ -2150,7 +2151,7 @@ export default function AdminInterface({
                   <span className="text-[10px] font-display font-black text-gray-400 uppercase tracking-wider mb-2">Vista Previa Impresión Térmica</span>
                   <div className="bg-white border border-gray-300 shadow-sm p-4 rounded-md w-64 font-mono text-[9px] text-gray-700 relative select-none">
                     <div className="flex justify-center mb-1">
-                      <img src="/logo.png" alt="La Nueva Era" className="h-8 w-auto object-contain" />
+                      <img src="/logo.png" alt={config?.formato_ticket?.titulo || "Logo del Sistema"} className="h-8 w-auto object-contain" />
                     </div>
                     <div className="text-center font-bold text-gray-950 mb-0.5 uppercase tracking-wide">{ticketTitleInput || "EMPRESA S.A."}</div>
                     <div className="text-center text-[8px] text-gray-500 font-sans mb-2">{ticketRucInput || "INDICACIONES DEL TICKET"}</div>

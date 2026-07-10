@@ -19,11 +19,12 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 
 interface LoginProps {
+  config?: any;
   users: Usuario[];
   onLoginSuccess: (user: Usuario) => void;
 }
 
-export default function Login({ users, onLoginSuccess }: LoginProps) {
+export default function Login({ users, onLoginSuccess, config }: LoginProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -138,7 +139,7 @@ export default function Login({ users, onLoginSuccess }: LoginProps) {
       >
         <img 
           src="/logo.png" 
-          alt="La Nueva Era" 
+          alt={config?.formato_ticket?.titulo || "Logo del Sistema"} 
           className="w-48 h-auto mx-auto object-contain filter drop-shadow-md"
         />
 
