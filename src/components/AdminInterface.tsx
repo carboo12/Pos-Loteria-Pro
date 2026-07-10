@@ -1326,17 +1326,6 @@ export default function AdminInterface({
             </button>
 
             <button
-              id="sidebar-cierres"
-              onClick={() => { setActiveSection("cierres"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
-                activeSection === "cierres" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
-              }`}
-            >
-              <Briefcase className="w-4 h-4 stroke-[2]" />
-              <span>Cajas y Cierres</span>
-            </button>
-
-            <button
               id="sidebar-config"
               onClick={() => { setActiveSection("config"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
               className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
@@ -1443,7 +1432,6 @@ export default function AdminInterface({
               </div>
               <h2 className="font-display font-black text-lg md:text-xl text-gray-900 uppercase tracking-tight mt-0.5">
                 {activeSection === "dashboard" && "Dashboard de Control Vivo"}
-                {activeSection === "cierres" && "Bandeja de Cierres de Caja"}
                 {activeSection === "config" && "Configuración Global del Sistema"}
                 {activeSection === "usuarios" && "Gestión de Usuarios y Accesos"}
                 {activeSection === "resultados" && "Resultados Oficiales Sorteos"}
@@ -1453,7 +1441,6 @@ export default function AdminInterface({
               </h2>
               <p className="text-xs text-gray-500 font-sans mt-0.5 line-clamp-1">
                 {activeSection === "dashboard" && "Monitoreo en tiempo real de transacciones, estados de presencia de vendedores y auditoría."}
-                {activeSection === "cierres" && "Auditoría de arqueos reportados por vendedores en calle comparados con balances de sistema."}
                 {activeSection === "config" && "Actualización de tasas de cambio, programación de sorteos y plantillas de impresión."}
                 {activeSection === "usuarios" && "Registro de nuevos vendedores, supervisores y asignación de dependencias."}
                 {activeSection === "resultados" && "Ingrese los números ganadores oficiales de cada sorteo diario para realizar el escrutinio automático."}
@@ -1687,28 +1674,6 @@ export default function AdminInterface({
                 </div>
               </button>
 
-              {/* Widget 3: Arqueos Pendientes */}
-              <button
-                onClick={() => {
-                  setActiveSection("cierres");
-                  setIsSidebarOpen(false);
-                }}
-                className="w-full text-left bg-white p-5 rounded-2xl border border-gray-300 shadow-xs flex items-center justify-between hover:border-amber-500 hover:shadow-md active:scale-99 transition-all cursor-pointer min-h-[120px] focus:outline-none focus:ring-2 focus:ring-amber-500"
-              >
-                <div className="space-y-1">
-                  <span className="text-[10px] font-display font-black text-gray-400 uppercase tracking-widest block">Arqueos Pendientes</span>
-                  <span className="font-display font-black text-2xl text-amber-700 block">
-                    {closures.filter(c => !c.cobrado).length} Cierres Alerta
-                  </span>
-                  <span className="text-[10px] text-gray-500 font-sans block">
-                    Auditar cobros y entregas de dinero en calle ➔
-                  </span>
-                </div>
-                <div className="p-3.5 bg-amber-50 text-amber-600 rounded-xl shrink-0">
-                  <AlertCircle className="w-6 h-6 stroke-[2.5]" />
-                </div>
-              </button>
-
               {/* Widget 4: Tickets Emitidos */}
               <button
                 onClick={() => {
@@ -1934,131 +1899,6 @@ export default function AdminInterface({
                     />
                   </AreaChart>
                 </ResponsiveContainer>
-              </div>
-            </div>
-
-          </div>
-        )}
-
-        {/* SECTION 2: BANDERA DE CIERRES */}
-        {activeSection === "cierres" && (
-          <div className="space-y-6 animate-fade-in">
-            
-            <div className="bg-white rounded-2xl border border-gray-300 shadow-xs overflow-hidden">
-              <div className="p-5 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
-                <span className="font-display font-black text-xs text-gray-800 uppercase tracking-wider block">Últimos Arqueos Registrados</span>
-                <span className="text-[10px] text-gray-500 font-sans font-semibold">Total: {closures.length} cierres</span>
-              </div>
-
-              <div className="divide-y divide-gray-200">
-                {closures.slice().reverse().map((closure) => {
-                  const isCsPerfect = closure.descuadre_cs === 0;
-                  const isUsdPerfect = closure.descuadre_usd === 0;
-
-                  return (
-                    <div key={closure.id} className="p-6 hover:bg-gray-50/50 transition-colors">
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
-                        
-                        {/* Column 1: Metadata */}
-                        <div>
-                          <h4 className="font-display font-black text-sm text-gray-950 uppercase">{closure.nombre_vendedor}</h4>
-                          <span className="text-[10px] text-gray-400 font-mono block mt-0.5">ID: {closure.id_vendedor}</span>
-                          <span className="text-[10px] text-gray-500 font-sans block mt-1 font-semibold flex items-center space-x-1">
-                            <Clock className="w-3.5 h-3.5 text-gray-400" />
-                            <span>{new Date(closure.timestamp).toLocaleString("es-ES")}</span>
-                          </span>
-                        </div>
-
-                        {/* Column 2: Cordobas status */}
-                        <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
-                          <span className="text-[9px] font-display font-black text-blue-900 uppercase tracking-widest block">Córdobas (C$)</span>
-                          
-                          <div className="mt-2 space-y-1 text-xs font-mono">
-                            <div className="flex justify-between text-gray-500">
-                              <span>Físico:</span>
-                              <span className="text-gray-950 font-bold">C$ {closure.monto_entregado_cs.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between text-gray-500">
-                              <span>Sistema:</span>
-                              <span className="text-gray-950 font-bold">C$ {closure.monto_sistema_cs.toFixed(2)}</span>
-                            </div>
-                            <div className="border-t border-gray-200 my-1"></div>
-                            <div className="flex justify-between font-black text-xs">
-                              <span>Descuadre:</span>
-                              <span className={closure.descuadre_cs < 0 ? "text-[#EF4444]" : "text-[#10B981]"}>
-                                {closure.descuadre_cs >= 0 ? "+" : ""}{closure.descuadre_cs.toFixed(2)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Column 3: USD status */}
-                        <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
-                          <span className="text-[9px] font-display font-black text-emerald-700 uppercase tracking-widest block font-bold">Dólares (USD)</span>
-                          
-                          <div className="mt-2 space-y-1 text-xs font-mono">
-                            <div className="flex justify-between text-gray-500">
-                              <span>Físico:</span>
-                              <span className="text-gray-950 font-bold">$ {closure.monto_entregado_usd.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between text-gray-500">
-                              <span>Sistema:</span>
-                              <span className="text-gray-950 font-bold">$ {closure.monto_sistema_usd.toFixed(2)}</span>
-                            </div>
-                            <div className="border-t border-gray-200 my-1"></div>
-                            <div className="flex justify-between font-black text-xs">
-                              <span>Descuadre:</span>
-                              <span className={closure.descuadre_usd < 0 ? "text-[#EF4444]" : "text-[#10B981]"}>
-                                {closure.descuadre_usd >= 0 ? "+" : ""}{closure.descuadre_usd.toFixed(2)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Column 4: Auditing Action Status */}
-                        <div className="flex flex-col justify-center h-full">
-                          {(closure.descuadre_cs < 0 || closure.descuadre_usd < 0) ? (
-                            <div className="bg-red-50 border border-red-200 p-2.5 rounded-xl text-[#EF4444] text-[10px] font-sans font-bold flex items-start space-x-1.5">
-                              <ShieldAlert className="w-4.5 h-4.5 text-[#EF4444] shrink-0 mt-0.5" />
-                              <div>
-                                <span className="block uppercase tracking-wider font-bold text-red-900">Descuadre Faltante</span>
-                                <span className="text-red-700 block mt-0.5 font-medium">Requiere Auditoría Física. Se ha registrado en el arqueo del vendedor.</span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl text-emerald-700 text-[10px] font-sans font-bold flex items-start space-x-1.5">
-                              <CheckCircle className="w-4.5 h-4.5 text-emerald-600 shrink-0 mt-0.5" />
-                              <div>
-                                <span className="block uppercase tracking-wider font-bold text-emerald-950">Arqueo Conforme</span>
-                                <span className="text-emerald-700 block mt-0.5 font-medium">Caja cuadrada con éxito. No se registran discrepancias negativas.</span>
-                              </div>
-                            </div>
-                          )}
-
-                          {!closure.cobrado ? (
-                            <button
-                              onClick={() => handleMarkClosureCollected(closure.id)}
-                              className="mt-3 w-full py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-colors shadow-sm active:scale-95 flex items-center justify-center space-x-2"
-                            >
-                              <Briefcase className="w-4 h-4" />
-                              <span>Marcar como Cobrado</span>
-                            </button>
-                          ) : (
-                            <div className="mt-3 w-full py-2 bg-gray-100 border border-gray-200 text-gray-400 font-bold text-xs uppercase tracking-wider rounded-xl text-center flex items-center justify-center space-x-2">
-                              <CheckCircle className="w-4 h-4" />
-                              <span>Cobrado</span>
-                            </div>
-                          )}
-                        </div>
-
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {closures.length === 0 && (
-                  <div className="text-center py-12 text-sm text-gray-500 font-medium">No se han registrado cierres de caja el día de hoy.</div>
-                )}
               </div>
             </div>
 
@@ -3498,7 +3338,8 @@ export default function AdminInterface({
 
                       <button
                         onClick={() => setShowCobroModal(true)}
-                        className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-black uppercase tracking-wider rounded-xl cursor-pointer shadow-md transition-all active:translate-y-0.5"
+                        disabled={finanzasResumenes.length === 0 || finanzasResumenes.reduce((a, b) => a + b.vendido, 0) - finanzasResumenes.reduce((a, b) => a + b.pagado, 0) <= 0}
+                        className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-black uppercase tracking-wider rounded-xl cursor-pointer shadow-md transition-all active:translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Aplicar Cobro
                       </button>
@@ -3564,6 +3405,60 @@ export default function AdminInterface({
               </div>
 
             </div>
+
+            {/* Renderizado Visual del Historial y Anulación de Cobros (Auditoría) */}
+            <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm mt-6">
+              <div className="flex items-center space-x-3 mb-6">
+                <div className="p-2 bg-slate-100 rounded-xl">
+                  <FileText className="w-5 h-5 text-slate-700" />
+                </div>
+                <h3 className="font-display font-black text-sm uppercase text-gray-800">Historial de Cobros Recientes</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 text-[10px] uppercase font-bold text-gray-500 tracking-wider">
+                      <th className="p-3 border-b border-gray-200 rounded-tl-xl">Fecha de Cobro</th>
+                      <th className="p-3 border-b border-gray-200">Rango Evaluado</th>
+                      <th className="p-3 border-b border-gray-200">Vendedor</th>
+                      <th className="p-3 border-b border-gray-200 text-right">Total Neto</th>
+                      <th className="p-3 border-b border-gray-200 rounded-tr-xl text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-xs font-sans">
+                    {historialCobros.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-6 text-center text-gray-400 font-medium">No hay cobros registrados.</td>
+                      </tr>
+                    ) : (
+                      historialCobros.map(cobro => (
+                        <tr key={cobro.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                          <td className="p-3 text-gray-800 font-semibold">{new Date(cobro.timestamp).toLocaleString("es-NI")}</td>
+                          <td className="p-3 text-gray-500 font-mono text-[10px]">{cobro.rango_inicio} a {cobro.rango_fin}</td>
+                          <td className="p-3 font-bold text-blue-900">{cobro.nombre_vendedor}</td>
+                          <td className="p-3 text-right font-black text-green-700">C$ {cobro.total_neto.toFixed(2)}</td>
+                          <td className="p-3 text-center">
+                            <button
+                              onClick={async () => {
+                                if (window.confirm("¿Seguro que desea anular este cobro? Esta acción revertirá el balance del vendedor.")) {
+                                  await handleAnularCobro(cobro.id);
+                                  await fetchHistorialCobros();
+                                }
+                              }}
+                              className="p-1.5 bg-red-100 text-red-600 hover:bg-red-200 rounded-lg transition-colors inline-flex items-center justify-center cursor-pointer"
+                              title="Anular Cobro"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
           </div>
         )}
 
@@ -3590,9 +3485,15 @@ export default function AdminInterface({
                   Confirmar Cobro
                 </h3>
               </div>
-              <p className="text-gray-600 font-sans text-sm leading-relaxed mb-6">
+              <p className="text-gray-600 font-sans text-sm leading-relaxed mb-4">
                 ¿Confirmas que estás retirando físicamente <strong className="text-gray-900 font-black font-mono">C$ {(finanzasResumenes.reduce((a, b) => a + b.vendido, 0) - finanzasResumenes.reduce((a, b) => a + b.pagado, 0)).toFixed(2)}</strong> a este vendedor por el corte del {finanzasFechaInicio} al {finanzasFechaFin}?
               </p>
+              <div className="mb-6 p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono text-gray-600">
+                <span className="font-bold uppercase text-gray-800 block mb-1">Días a saldar ({finanzasResumenes.length}):</span>
+                {finanzasResumenes.map(r => (
+                  <div key={r.id}>- {r.id.split('_')[1] || r.id}</div>
+                ))}
+              </div>
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowCobroModal(false)}
