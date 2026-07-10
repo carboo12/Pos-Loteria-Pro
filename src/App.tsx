@@ -407,15 +407,7 @@ export default function App() {
         )}
       </div>
 
-      {/* Humble Footer containing design credit */}
-      {(!currentUser || currentUser.rol === "administrador") && (
-        <footer className="py-4 bg-white border-t border-gray-200 text-center text-gray-500 text-[10px] uppercase tracking-widest font-mono">
-          <div className="flex items-center justify-center space-x-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#1E3A8A]" />
-            <span>Lotería POS • Sistema de Alta Confiabilidad</span>
-          </div>
-        </footer>
-      )}
+
 
     </div>
   );
