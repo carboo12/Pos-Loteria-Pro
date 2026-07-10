@@ -4,11 +4,40 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import * as adminNamespace from "firebase-admin";
 import { getAuth } from "firebase-admin/auth";
+import bcrypt from "bcryptjs";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 const firebaseAdmin = ((adminNamespace as any).default || adminNamespace) as any;
 
 const app = express();
+const activePaymentLocks = new Set<string>();
+
+const checkAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "No token provided." });
+  }
+  try {
+    const token = authHeader.split(" ")[1];
+    const decoded = await getAuth().verifyIdToken(token);
+    (req as any).user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid token." });
+  }
+};
+
+
+
+function calculatePrizeMultiplier(juego: string, sorteo: string): number {
+  const cleanJuego = juego.trim();
+  if (cleanJuego === "Premia2" && sorteo.includes("(NI)")) return 4000;
+  if (cleanJuego === "Jugá 3") return 600;
+  if (cleanJuego === "Fechas") return 210;
+  if (cleanJuego === "3 Monazos") return 650;
+  return 80;
+}
+
 const PORT = 3000;
 const DB_PATH = path.join(process.cwd(), "data-store.json");
 
@@ -119,7 +148,8 @@ function initDatabase() {
 
   const initialDB = {
     usuarios: [
-      { id: "admin_1", nombre: "Administrador Global", usuario: "admin", rol: "administrador", estado: "activo", conexion: "online", activo: true, region: "Nicaragua", email: "carboo12@gmail.com", id_supervisor: "", vendedoresAsignados: [] }
+      { id: "admin_1",
+      requiereCambioPassword: true, nombre: "Administrador Global", usuario: "admin", rol: "administrador", estado: "activo", conexion: "online", activo: true, region: "Nicaragua", email: "carboo12@gmail.com", id_supervisor: "", vendedoresAsignados: [] }
     ],
     configuracion: {
       tasa_cambio: 36.50,
@@ -376,7 +406,7 @@ async function syncDatabaseUsersToFirebaseAuth() {
             password: "Loto123456!",
             displayName: u.nombre
           });
-          console.log(`[Firebase Auth Sync] Creado: ${u.email} con contraseña provisional: Loto123456!`);
+          // console.log cleared
         } catch (createError: any) {
           console.error(`[Firebase Auth Sync] Error al crear ${u.email}:`, createError);
         }
@@ -541,7 +571,12 @@ app.get("/api/reloj", (req, res) => {
 
 // Setup Administrator Account Route (Temporary / Recovery utility)
 app.post("/api/setup-admin", async (req, res) => {
-  const adminEmail = "carboo12@gmail.com";
+  const hasAdmin = db.usuarios.some((u: any) => u.rol === "administrador");
+  if (hasAdmin) {
+    return res.status(403).json({ success: false, message: "Ya existe un administrador en el sistema." });
+  }
+
+  const adminEmail = req.body.email || "admin@sistema.com";
   let userInDb = db.usuarios.find((u: any) => u.email.toLowerCase() === adminEmail.toLowerCase());
   
   if (!userInDb) {
@@ -601,10 +636,14 @@ app.post("/api/setup-admin", async (req, res) => {
 
 // Users
 app.get("/api/usuarios", (req, res) => {
-  res.json(db.usuarios);
+  const safeUsers = db.usuarios.map((u: any) => {
+    const { password, ...safeUser } = u;
+    return safeUser;
+  });
+  res.json(safeUsers);
 });
 
-app.post("/api/usuarios", (req, res) => {
+app.post("/api/usuarios", checkAuth, (req, res) => {
   const { nombre, usuario, rol, email, password, estado, region, id_supervisor, vendedoresAsignados } = req.body;
   if (!nombre || !rol || !email || !usuario || !password) {
     return res.status(400).json({ error: "Nombre, Usuario (nickname), Contraseña, Rol y Correo son campos obligatorios." });
@@ -642,7 +681,8 @@ app.post("/api/usuarios", (req, res) => {
     vendedoresAsignados: (resolvedRol === "supervisor" && Array.isArray(vendedoresAsignados)) ? vendedoresAsignados : []
   };
 
-  db.usuarios.push(newUser);
+  if (newUser.password) { newUser.password = bcrypt.hashSync(newUser.password, 10); }
+db.usuarios.push(newUser);
 
   // If this is a supervisor and has assigned vendors, update those vendors' supervisor ID
   if (newUser.rol === "supervisor" && newUser.vendedoresAsignados.length > 0) {
@@ -724,7 +764,7 @@ app.put("/api/usuarios/:id", (req, res) => {
   res.json(user);
 });
 
-app.delete("/api/usuarios/:id", (req, res) => {
+app.delete("/api/usuarios/:id", checkAuth, (req, res) => {
   const { id } = req.params;
   const index = db.usuarios.findIndex((u: any) => u.id === id);
 
@@ -864,7 +904,7 @@ app.get("/api/cobros", (req, res) => {
   res.json(db.configuracion.cobros || []);
 });
 
-app.post("/api/cobros", (req, res) => {
+app.post("/api/cobros", checkAuth, (req, res) => {
   const { id_vendedor, id_supervisor, monto_cs, monto_usd, comentario } = req.body;
   if (!id_vendedor || !id_supervisor || monto_cs === undefined || monto_usd === undefined) {
     return res.status(400).json({ error: "Vendedor, Supervisor, monto en C$ y monto en USD son obligatorios." });
@@ -916,7 +956,7 @@ app.get("/api/configuracion", (req, res) => {
   res.json(db.configuracion);
 });
 
-app.put("/api/configuracion", (req, res) => {
+app.put("/api/configuracion", checkAuth, (req, res) => {
   const { tasa_cambio, formato_ticket, sorteos } = req.body;
 
   if (tasa_cambio !== undefined) {
@@ -1016,7 +1056,7 @@ app.get("/api/ventas", (req, res) => {
   res.json(db.ventas);
 });
 
-app.post("/api/ventas", (req, res) => {
+app.post("/api/ventas", checkAuth, (req, res) => {
   const { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente, premio_posible_cs } = req.body;
 
   if (!juego || !sorteo || !numero_jugado || !monto_pago || !moneda || !id_vendedor) {
@@ -1281,52 +1321,69 @@ app.post("/api/ventas/:id/anular", (req, res) => {
 // Validación y Pago de Tickets con QR
 app.post("/api/ventas/:id/pagar", (req, res) => {
   const { id } = req.params;
-  const sale = db.ventas.find((v: any) => v.id === id || v.numero_ticket === id || (v.firma_digital && v.firma_digital.toUpperCase() === id.toUpperCase()));
 
-  if (!sale) {
-    return res.status(404).json({ error: "Ticket no encontrado." });
+  if (activePaymentLocks.has(id)) {
+    return res.status(409).json({ error: "Transacción en proceso, por favor espere." });
   }
+  activePaymentLocks.add(id);
 
-  if (sale.anulado || sale.estado === "anulado") {
-    return res.status(400).json({ error: "Este ticket está anulado." });
-  }
+  try {
+    const sale = db.ventas.find((v: any) => v.id === id || v.numero_ticket === id || (v.firma_digital && v.firma_digital.toUpperCase() === id.toUpperCase()));
 
-  if (sale.estado === "pagado") {
-    return res.status(400).json({ error: "Este ticket ya ha sido pagado." });
-  }
+    if (!sale) {
+      return res.status(404).json({ error: "Ticket no encontrado." });
+    }
 
-  if (sale.estado === "perdedor") {
-    return res.status(400).json({ error: "Este ticket ya fue procesado y no resultó ganador." });
-  }
+    if (sale.anulado || sale.estado === "anulado") {
+      return res.status(400).json({ error: "Este ticket está anulado." });
+    }
 
-  const saleDateStr = sale.timestamp_servidor.split("T")[0];
-  const resultado = (db.configuracion.resultados || []).find((r: any) => {
-    if (r.fecha !== saleDateStr) return false;
-    const sorteoObj = db.configuracion.sorteos.find((s: any) => s.id === r.id_sorteo);
-    return sorteoObj && sorteoObj.nombre === sale.sorteo && sorteoObj.juego === sale.juego;
-  });
+    if (sale.estado === "pagado") {
+      return res.status(400).json({ error: "Este ticket ya ha sido pagado." });
+    }
 
-  if (!resultado) {
-    return res.status(400).json({ error: "Aún no hay resultados registrados para este sorteo." });
-  }
+    if (sale.estado === "perdedor") {
+      return res.status(400).json({ error: "Este ticket ya fue procesado y no resultó ganador." });
+    }
 
-  if (String(resultado.numero_ganador) === String(sale.numero_jugado)) {
-    sale.estado = "pagado";
-    saveToDB();
-    return res.json({ 
-      message: "¡Ganador!", 
-      ganador: true, 
-      ticket: sale,
-      monto_ganado_cs: sale.premio_posible_cs || 0 
+    const saleDateStr = sale.timestamp_servidor.split("T")[0];
+    const resultado = (db.configuracion.resultados || []).find((r: any) => {
+      if (r.fecha !== saleDateStr) return false;
+      const sorteoObj = db.configuracion.sorteos.find((s: any) => s.id === r.id_sorteo);
+      return sorteoObj && sorteoObj.nombre === sale.sorteo && sorteoObj.juego === sale.juego;
     });
-  } else {
-    sale.estado = "perdedor";
-    saveToDB();
-    return res.json({ 
-      message: "Ticket No Premiado.", 
-      ganador: false, 
-      ticket: sale 
-    });
+
+    if (!resultado) {
+      return res.status(400).json({ error: "Aún no hay resultados registrados para este sorteo." });
+    }
+
+    if (String(resultado.numero_ganador) === String(sale.numero_jugado)) {
+      // Calcular el premio real del lado del servidor
+      const multiplicador = calculatePrizeMultiplier(sale.juego, sale.sorteo);
+      const montoInCs = sale.moneda === "USD" ? sale.monto_pago * (db.configuracion.tasa_cambio || 36.5) : sale.monto_pago;
+      const premioReal = montoInCs * multiplicador;
+
+      sale.estado = "pagado";
+      sale.premio_posible_cs = premioReal; // Sobrescribir con el calculado por el servidor
+      
+      saveToDB();
+      return res.json({ 
+        message: "¡Ganador!", 
+        ganador: true, 
+        ticket: sale,
+        monto_ganado_cs: premioReal 
+      });
+    } else {
+      sale.estado = "perdedor";
+      saveToDB();
+      return res.json({ 
+        message: "Ticket No Premiado.", 
+        ganador: false, 
+        ticket: sale 
+      });
+    }
+  } finally {
+    activePaymentLocks.delete(id);
   }
 });
 

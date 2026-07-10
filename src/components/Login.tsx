@@ -48,8 +48,8 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
       const data = await res.json();
       if (data.success) {
         setSetupSuccessMsg(`¡Inicialización exitosa! ${data.fbStatus}`);
-        setEmail("carboo12@gmail.com");
-        setPassword("Loto123456!");
+        // setEmail("carboo12@gmail.com");
+        // setPassword("Loto123456!");
       } else {
         setError(data.message || "Error al inicializar el usuario administrador.");
       }
@@ -118,7 +118,7 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
 
   const fillCredentials = (demoEmail: string) => {
     setEmail(demoEmail);
-    setPassword("Loto123456!");
+    // setPassword("Loto123456!");
     setError(null);
   };
 

@@ -40,6 +40,7 @@ import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import TicketPreviewModal from "./TicketPreviewModal";
+import { QrScannerModal } from "./QrScannerModal";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -424,6 +425,7 @@ export default function AdminInterface({
   // Ticket QR/ID Search states for Admin Dashboard
   const [activeTicket, setActiveTicket] = useState<Venta | null>(null);
   const [qrSearchInput, setQrSearchInput] = useState("");
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [qrSearchError, setQrSearchError] = useState<string | null>(null);
 
   const handleTicketQrSearch = (e: FormEvent) => {
@@ -1609,13 +1611,18 @@ export default function AdminInterface({
                 type="text"
                 value={qrSearchInput}
                 onChange={(e) => setQrSearchInput(e.target.value)}
-                placeholder="Ingrese ID de ticket o enlace del código QR..."
-                className="w-full pl-9 pr-4 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl text-xs font-sans font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                placeholder="Ingrese ID de ticket o enlace del código QR (Presione Enter)..."
+                className="w-full pl-9 pr-10 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl text-xs font-sans font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
               />
               <Search className="w-4 h-4 text-gray-400 absolute left-3 top-[14px]" />
+              {/* Lupa para forzar submit si no quieren presionar enter */}
+              <button type="submit" className="absolute right-2 top-2 p-1.5 text-gray-400 hover:text-blue-600 transition-colors cursor-pointer">
+                <Search className="w-4 h-4" />
+              </button>
             </div>
             <button
-              type="submit"
+              type="button"
+              onClick={() => setIsScannerOpen(true)}
               className="px-5 py-2.5 min-h-[44px] bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-display font-black tracking-wider uppercase transition-colors flex items-center justify-center space-x-2 cursor-pointer shadow-sm shrink-0"
             >
               <QrCode className="w-4 h-4" />
@@ -3607,6 +3614,17 @@ export default function AdminInterface({
       </AnimatePresence>
 
       </main>
+
+      {/* Qr Scanner Modal */}
+      {isScannerOpen && (
+        <QrScannerModal
+          onScan={(data) => {
+            setQrSearchInput(data);
+            setIsScannerOpen(false);
+          }}
+          onClose={() => setIsScannerOpen(false)}
+        />
+      )}
 
       {/* Ticket Viewer Modal */}
       {activeTicket && (
