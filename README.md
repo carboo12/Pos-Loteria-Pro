@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="/logo.png" alt="La Nueva Era" width="200" />
+ 
   <h1 align="center">Punto de Venta — Lotería</h1>
   <p align="center">
     Sistema POS multi-país para la venta de números de lotería en <strong>Nicaragua</strong> y <strong>Honduras</strong>
