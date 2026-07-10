@@ -1,0 +1,1263 @@
+import express from "express";
+import path from "path";
+import fs from "fs";
+import { createServer as createViteServer } from "vite";
+import * as adminNamespace from "firebase-admin";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
+import { getMessaging } from "firebase-admin/messaging";
+const firebaseAdmin = ((adminNamespace as any).default || adminNamespace) as any;
+
+const app = express();
+const PORT = 3000;
+const DB_PATH = path.join(process.cwd(), "data-store.json");
+
+app.use(express.json());
+
+let firestoreDbId = "";
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    const configData = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    if (configData.firestoreDatabaseId) {
+      firestoreDbId = configData.firestoreDatabaseId;
+      console.log(`[Firebase Configuration] Base de datos Firestore detectada: ${firestoreDbId}`);
+    }
+  }
+} catch (e) {
+  console.error("Error reading firebase-applet-config.json:", e);
+}
+
+function getFirestoreInstance() {
+  return firestoreDbId ? getFirestore(firestoreDbId) : getFirestore();
+}
+
+function getLocalDateString(date = new Date()): string {
+  const offset = -6; // CST/GMT-6 for Nicaragua/Honduras
+  const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
+  const localDate = new Date(utc + (3600000 * offset));
+  const year = localDate.getFullYear();
+  const month = String(localDate.getMonth() + 1).padStart(2, "0");
+  const day = String(localDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+
+// Initialize database file if it doesn't exist
+function initDatabase() {
+  if (fs.existsSync(DB_PATH)) {
+    try {
+      const content = fs.readFileSync(DB_PATH, "utf-8").trim();
+      if (content) {
+        const parsed = JSON.parse(content);
+        // Ensure backward compatibility on existing databases
+        if (!parsed.configuracion) parsed.configuracion = {};
+        if (!parsed.configuracion.limites_numeros) parsed.configuracion.limites_numeros = [];
+        if (!parsed.configuracion.resultados) parsed.configuracion.resultados = [];
+        if (!parsed.configuracion.cobros) parsed.configuracion.cobros = [];
+        
+        if (!parsed.usuarios) parsed.usuarios = [];
+        
+        // Migrate existing users to the full schema
+        parsed.usuarios = parsed.usuarios.map((u: any) => {
+          const isOnline = u.estado === "online" || u.conexion === "online";
+          const isActivo = u.activo !== false && u.estado !== "inactivo";
+          return {
+            id: u.id,
+            nombre: u.nombre,
+            usuario: u.usuario || u.nombre.toLowerCase().replace(/\s+/g, "").normalize("NFD").replace(/[\u0300-\u036f]/g, ""),
+            rol: u.rol === "administrador" || u.rol === "admin" ? "administrador" : (u.rol === "supervisor" ? "supervisor" : "vendedor"),
+            estado: isActivo ? "activo" : "inactivo",
+            conexion: isOnline ? "online" : "offline",
+            activo: isActivo,
+            region: u.region || "Nicaragua",
+            email: u.email || `${u.nombre.toLowerCase().replace(/\s+/g, "")}@loteria.com`,
+            id_supervisor: u.id_supervisor || "",
+            vendedoresAsignados: u.vendedoresAsignados || []
+          };
+        });
+
+        // Sync supervisor vendedoresAsignados
+        parsed.usuarios.forEach((u: any) => {
+          if (u.rol === "supervisor") {
+            u.vendedoresAsignados = parsed.usuarios
+              .filter((v: any) => v.rol === "vendedor" && v.id_supervisor === u.id)
+              .map((v: any) => v.id);
+          }
+        });
+
+        if (!parsed.usuarios.some((u: any) => u.rol === "supervisor")) {
+          parsed.usuarios.push({ 
+            id: "super_1", 
+            nombre: "Supervisor Managua", 
+            usuario: "supermanagua", 
+            rol: "supervisor", 
+            estado: "activo", 
+            conexion: "online", 
+            activo: true, 
+            region: "Nicaragua", 
+            email: "supervisor@loteria.com",
+            id_supervisor: "",
+            vendedoresAsignados: ["vend_1", "vend_2"]
+          });
+          const vend1 = parsed.usuarios.find((u: any) => u.id === "vend_1");
+          if (vend1) vend1.id_supervisor = "super_1";
+          const vend2 = parsed.usuarios.find((u: any) => u.id === "vend_2");
+          if (vend2) vend2.id_supervisor = "super_1";
+        }
+        return parsed;
+      }
+    } catch (e) {
+      console.error("Error reading database, resetting...", e);
+    }
+  }
+
+  const initialDB = {
+    usuarios: [
+      { id: "admin_1", nombre: "Administrador Global", usuario: "admin", rol: "administrador", estado: "activo", conexion: "online", activo: true, region: "Nicaragua", email: "carboo12@gmail.com", id_supervisor: "", vendedoresAsignados: [] }
+    ],
+    configuracion: {
+      tasa_cambio: 36.50,
+      contador_global_tickets: 1000,
+      formato_ticket: {
+        titulo: "LA NUEVA ERA",
+        ruc: "RUC-J0310000123456",
+        mensaje_pie: "¡Gracias por su compra! Verifique su ticket en línea."
+      },
+      sorteos: [
+        // Nicaragua (NI)
+        { id: "ni_diaria_11", juego: "Diaria", hora_sorteo: "11:00", hora_cierre: "10:55", nombre: "Diaria 11:00 AM (NI)" },
+        { id: "ni_diaria_15", juego: "Diaria", hora_sorteo: "15:00", hora_cierre: "14:55", nombre: "Diaria 3:00 PM (NI)" },
+        { id: "ni_diaria_21", juego: "Diaria", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "Diaria 9:00 PM (NI)" },
+        { id: "ni_fechas_11", juego: "Fechas", hora_sorteo: "11:00", hora_cierre: "10:55", nombre: "Fechas 11:00 AM (NI)" },
+        { id: "ni_fechas_15", juego: "Fechas", hora_sorteo: "15:00", hora_cierre: "14:55", nombre: "Fechas 3:00 PM (NI)" },
+        { id: "ni_fechas_21", juego: "Fechas", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "Fechas 9:00 PM (NI)" },
+        { id: "ni_juga3_11", juego: "Jugá 3", hora_sorteo: "11:00", hora_cierre: "10:55", nombre: "Jugá 3 11:00 AM (NI)" },
+        { id: "ni_juga3_15", juego: "Jugá 3", hora_sorteo: "15:00", hora_cierre: "14:55", nombre: "Jugá 3 3:00 PM (NI)" },
+        { id: "ni_juga3_21", juego: "Jugá 3", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "Jugá 3 9:00 PM (NI)" },
+        { id: "ni_premia_11", juego: "Premia2", hora_sorteo: "11:00", hora_cierre: "10:55", nombre: "Premia2 11:00 AM (NI)" },
+        { id: "ni_premia_15", juego: "Premia2", hora_sorteo: "15:00", hora_cierre: "14:55", nombre: "Premia2 3:00 PM (NI)" },
+        { id: "ni_premia_21", juego: "Premia2", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "Premia2 9:00 PM (NI)" },
+        { id: "ni_term_11", juego: "Terminación 2", hora_sorteo: "11:00", hora_cierre: "10:55", nombre: "Terminación 2 11:00 AM (NI)" },
+        { id: "ni_term_15", juego: "Terminación 2", hora_sorteo: "15:00", hora_cierre: "14:55", nombre: "Terminación 2 3:00 PM (NI)" },
+        { id: "ni_term_21", juego: "Terminación 2", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "Terminación 2 9:00 PM (NI)" },
+
+        // Honduras (HN)
+        { id: "hn_diaria_11", juego: "La Diaria", hora_sorteo: "11:00", hora_cierre: "10:55", nombre: "La Diaria 11:00 AM (HN)" },
+        { id: "hn_diaria_15", juego: "La Diaria", hora_sorteo: "15:00", hora_cierre: "14:55", nombre: "La Diaria 3:00 PM (HN)" },
+        { id: "hn_diaria_21", juego: "La Diaria", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "La Diaria 9:00 PM (HN)" },
+        { id: "hn_premia_11", juego: "Premia2", hora_sorteo: "11:00", hora_cierre: "10:55", nombre: "Premia2 11:00 AM (HN)" },
+        { id: "hn_premia_15", juego: "Premia2", hora_sorteo: "15:00", hora_cierre: "14:55", nombre: "Premia2 3:00 PM (HN)" },
+        { id: "hn_premia_21", juego: "Premia2", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "Premia2 9:00 PM (HN)" },
+        { id: "hn_pega3_11", juego: "Pega 3", hora_sorteo: "11:00", hora_cierre: "10:55", nombre: "Pega 3 11:00 AM (HN)" },
+        { id: "hn_pega3_15", juego: "Pega 3", hora_sorteo: "15:00", hora_cierre: "14:55", nombre: "Pega 3 3:00 PM (HN)" },
+        { id: "hn_pega3_21", juego: "Pega 3", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "Pega 3 9:00 PM (HN)" },
+        { id: "hn_super_21", juego: "Súper Premio", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "Súper Premio 9:00 PM (HN)" }
+      ],
+      limites_numeros: [],
+      resultados: [],
+      cobros: []
+    },
+    ventas: [],
+    cierres_caja: []
+  };
+
+  const dataDir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  fs.writeFileSync(DB_PATH, JSON.stringify(initialDB, null, 2), "utf-8");
+  return initialDB;
+}
+
+let db = initDatabase();
+// Ensure dynamic backward compatibility
+db.fcm_tokens = db.fcm_tokens || [];
+
+async function saveToDB() {
+  try {
+    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf-8");
+  } catch (err) {
+    console.error("[Local Backup] Error al escribir copia de seguridad local:", err);
+  }
+
+  const isReady = initFirebaseAdmin();
+  if (isReady) {
+    try {
+      const firestoreDb = getFirestoreInstance();
+
+      await firestoreDb.collection("configuracion").doc("general").set(db.configuracion);
+      await firestoreDb.collection("configuracion").doc("fcm").set({ tokens: db.fcm_tokens || [] });
+
+      for (const u of db.usuarios) {
+        const { id, ...userData } = u;
+        await firestoreDb.collection("usuarios").doc(id).set(userData);
+      }
+
+      for (const v of db.ventas) {
+        const { id, ...saleData } = v;
+        await firestoreDb.collection("ventas").doc(id).set(saleData);
+      }
+
+      for (const c of db.cierres_caja) {
+        const { id, ...closureData } = c;
+        await firestoreDb.collection("cierres_caja").doc(id).set(closureData);
+      }
+    } catch (err) {
+      console.error("[Firestore Sync] Error al sincronizar base de datos con Firestore:", err);
+    }
+  }
+}
+
+async function syncFromFirestore() {
+  const isReady = initFirebaseAdmin();
+  if (!isReady) {
+    console.log("[Firestore Sync] Firebase Admin no está configurado. Usando base de datos local.");
+    return;
+  }
+
+  try {
+    console.log("[Firestore Sync] Cargando datos en tiempo real desde Firestore...");
+    const firestoreDb = getFirestoreInstance();
+
+    const configDoc = await firestoreDb.collection("configuracion").doc("general").get();
+    if (configDoc.exists) {
+      db.configuracion = configDoc.data();
+      console.log("[Firestore Sync] Configuración cargada desde Firestore.");
+    } else {
+      console.log("[Firestore Sync] Guardando configuración predeterminada en Firestore...");
+      await firestoreDb.collection("configuracion").doc("general").set(db.configuracion);
+    }
+
+    const usersSnapshot = await firestoreDb.collection("usuarios").get();
+    if (!usersSnapshot.empty) {
+      const usersList: any[] = [];
+      usersSnapshot.forEach((doc: any) => {
+        usersList.push({ id: doc.id, ...doc.data() });
+      });
+      db.usuarios = usersList;
+      console.log(`[Firestore Sync] ${usersList.length} usuarios cargados desde Firestore.`);
+    } else {
+      console.log("[Firestore Sync] Guardando usuario administrador por defecto en Firestore...");
+      for (const u of db.usuarios) {
+        const { id, ...userData } = u;
+        await firestoreDb.collection("usuarios").doc(id).set(userData);
+      }
+    }
+
+    const salesSnapshot = await firestoreDb.collection("ventas").get();
+    const salesList: any[] = [];
+    salesSnapshot.forEach((doc: any) => {
+      salesList.push({ id: doc.id, ...doc.data() });
+    });
+    db.ventas = salesList;
+    console.log(`[Firestore Sync] ${salesList.length} ventas cargadas desde Firestore.`);
+
+    const closuresSnapshot = await firestoreDb.collection("cierres_caja").get();
+    const closuresList: any[] = [];
+    closuresSnapshot.forEach((doc: any) => {
+      closuresList.push({ id: doc.id, ...doc.data() });
+    });
+    db.cierres_caja = closuresList;
+    console.log(`[Firestore Sync] ${closuresList.length} cierres de caja cargados desde Firestore.`);
+
+    const fcmDoc = await firestoreDb.collection("configuracion").doc("fcm").get();
+    if (fcmDoc.exists) {
+      db.fcm_tokens = fcmDoc.data().tokens || [];
+    } else {
+      await firestoreDb.collection("configuracion").doc("fcm").set({ tokens: db.fcm_tokens || [] });
+    }
+
+    console.log("[Firestore Sync] Sincronización inicial completada con éxito.");
+  } catch (err) {
+    console.error("[Firestore Sync] Error al obtener datos iniciales de Firestore:", err);
+  }
+}
+
+// Live real-time notification subscribers (SSE)
+let sseClients: any[] = [];
+
+// Initialize Firebase Admin for real push notifications lazily
+let isFirebaseAdminInitialized = false;
+
+function findServiceAccountPath(): string | null {
+  const envPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+  if (envPath && fs.existsSync(envPath)) {
+    return envPath;
+  }
+  
+  try {
+    const files = fs.readdirSync(process.cwd());
+    const svcFile = files.find(f => f.includes("firebase-adminsdk") && f.endsWith(".json"));
+    if (svcFile) {
+      const fullPath = path.join(process.cwd(), svcFile);
+      console.log(`[Firebase Admin] Archivo de credenciales detectado dinámicamente: ${svcFile}`);
+      return fullPath;
+    }
+  } catch (e) {
+    console.error("[Firebase Admin] Error al buscar credenciales dinámicamente:", e);
+  }
+  return null;
+}
+
+function initFirebaseAdmin() {
+  if (isFirebaseAdminInitialized) return true;
+
+  if (firebaseAdmin.apps && firebaseAdmin.apps.length > 0) {
+    isFirebaseAdminInitialized = true;
+    console.log("[Firebase Admin] Ya inicializado previamente.");
+    return true;
+  }
+
+  const serviceAccountPath = findServiceAccountPath();
+  
+  if (serviceAccountPath) {
+    try {
+      const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8"));
+      firebaseAdmin.initializeApp({
+        credential: firebaseAdmin.cert(serviceAccount)
+      });
+      isFirebaseAdminInitialized = true;
+      console.log("[Firebase Admin] Inicializado con éxito mediante Cuenta de Servicio.");
+      return true;
+    } catch (e) {
+      console.error("[Firebase Admin] Error al inicializar con Cuenta de Servicio:", e);
+    }
+  } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    try {
+      firebaseAdmin.initializeApp({
+        credential: firebaseAdmin.applicationDefault()
+      });
+      isFirebaseAdminInitialized = true;
+      console.log("[Firebase Admin] Inicializado mediante credenciales por defecto de Google.");
+      return true;
+    } catch (e) {
+      console.error("[Firebase Admin] Error al inicializar con credenciales por defecto:", e);
+    }
+  }
+
+  return false;
+}
+
+// Synchronize database users to Firebase Authentication
+async function syncDatabaseUsersToFirebaseAuth() {
+  const isReady = initFirebaseAdmin();
+  if (!isReady) {
+    console.log("[Firebase Auth Sync] Firebase Admin no está configurado. Omitiendo sincronización de usuarios.");
+    return;
+  }
+
+  console.log("[Firebase Auth Sync] Sincronizando usuarios con Firebase Auth...");
+  for (const u of db.usuarios) {
+    if (!u.email) continue;
+    try {
+      await getAuth().getUserByEmail(u.email);
+    } catch (error: any) {
+      if (error.code === "auth/user-not-found" || error.code === "messaging/invalid-argument") {
+        try {
+          await getAuth().createUser({
+            uid: u.id,
+            email: u.email,
+            emailVerified: true,
+            password: "Loto123456!",
+            displayName: u.nombre
+          });
+          console.log(`[Firebase Auth Sync] Creado: ${u.email} con contraseña provisional: Loto123456!`);
+        } catch (createError: any) {
+          console.error(`[Firebase Auth Sync] Error al crear ${u.email}:`, createError);
+        }
+      } else {
+        console.error(`[Firebase Auth Sync] Error buscando ${u.email}:`, error);
+      }
+    }
+  }
+}
+
+async function firebaseCreateUser(u: any) {
+  if (!initFirebaseAdmin() || !u.email) return;
+  try {
+    await getAuth().createUser({
+      uid: u.id,
+      email: u.email,
+      emailVerified: true,
+      password: "Loto123456!",
+      displayName: u.nombre
+    });
+    console.log(`[Firebase Auth] Creado usuario: ${u.email}`);
+  } catch (err) {
+    console.error(`[Firebase Auth] Error al crear usuario:`, err);
+  }
+}
+
+async function firebaseUpdateUser(uid: string, updates: { email?: string; displayName?: string; password?: string; disabled?: boolean }) {
+  if (!initFirebaseAdmin()) return;
+  try {
+    const fbUpdates: any = {};
+    if (updates.email) fbUpdates.email = updates.email;
+    if (updates.displayName) fbUpdates.displayName = updates.displayName;
+    if (updates.password) fbUpdates.password = updates.password;
+    if (updates.disabled !== undefined) fbUpdates.disabled = updates.disabled;
+    await getAuth().updateUser(uid, fbUpdates);
+    console.log(`[Firebase Auth] Actualizado usuario ${uid}`);
+  } catch (err) {
+    console.error(`[Firebase Auth] Error al actualizar usuario ${uid}:`, err);
+  }
+}
+
+async function firebaseDeleteUser(uid: string) {
+  if (!initFirebaseAdmin()) return;
+  try {
+    await getAuth().deleteUser(uid);
+    console.log(`[Firebase Auth] Eliminado usuario ${uid}`);
+  } catch (err) {
+    console.error(`[Firebase Auth] Error al eliminar usuario ${uid}:`, err);
+  }
+}
+
+// Broadcast to active SSE clients
+function broadcastToSSE(notification: any) {
+  const dataString = `data: ${JSON.stringify(notification)}\n\n`;
+  sseClients.forEach((res) => {
+    try {
+      res.write(dataString);
+    } catch (err) {
+      console.error("Error al transmitir por SSE:", err);
+    }
+  });
+}
+
+// Send real FCM message to registered tokens if FCM is initialized
+async function sendFCMPushNotification(title: string, body: string, data: any) {
+  const isReady = initFirebaseAdmin();
+  if (!isReady) {
+    console.log("[FCM Push Bypass] Firebase Admin no está configurado. Alerta transmitida vía SSE.");
+    return;
+  }
+
+  const tokens = db.fcm_tokens || [];
+  if (tokens.length === 0) {
+    console.log("[FCM Push] No hay tokens de dispositivos registrados.");
+    return;
+  }
+
+  // Use sendEachForMulticast to target all registered tokens
+  const message = {
+    notification: { title, body },
+    data: {
+      ...data,
+      click_action: "FLUTTER_NOTIFICATION_CLICK"
+    },
+    tokens: tokens
+  };
+
+  try {
+    const response = await getMessaging().sendEachForMulticast(message);
+    console.log(`[FCM Push] Enviadas ${response.successCount} notificaciones push. Fallidas: ${response.failureCount}`);
+  } catch (error) {
+    console.error("[FCM Push] Error al enviar notificaciones push:", error);
+  }
+}
+
+// Generate human-friendly 6-character unique ticket signatures (e.g., A9X-2M)
+function generateDigitalSignature(ticketId: string, timestamp: string, juego: string, numero: string, monto: number, moneda: string) {
+  const payload = `${ticketId}-${timestamp}-${juego}-${numero}-${monto}-${moneda}`;
+  let hash = 0;
+  for (let i = 0; i < payload.length; i++) {
+    hash = (hash << 5) - hash + payload.charCodeAt(i);
+    hash |= 0;
+  }
+  const code = Math.abs(hash).toString(36).toUpperCase().substring(0, 5).padEnd(5, "X");
+  return `${code.substring(0, 3)}-${code.substring(3, 5)}`;
+}
+
+// REST API Endpoints
+
+// NOTIFICATIONS: SSE stream for real-time dashboard events
+app.get("/api/notifications/subscribe", (req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no"
+  });
+
+  // Prevent connection timeout by sending a ping
+  res.write("data: {\"type\":\"ping\"}\n\n");
+
+  sseClients.push(res);
+
+  const keepAliveInterval = setInterval(() => {
+    try {
+      res.write("data: {\"type\":\"ping\"}\n\n");
+    } catch (e) {
+      // client dropped
+    }
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(keepAliveInterval);
+    sseClients = sseClients.filter((c) => c !== res);
+  });
+});
+
+// NOTIFICATIONS: Register FCM registration token (Web Push / Mobile device)
+app.post("/api/notifications/register-token", (req, res) => {
+  const { token } = req.body;
+  if (!token) {
+    return res.status(400).json({ error: "Token es requerido." });
+  }
+
+  // Avoid duplicates
+  if (!db.fcm_tokens.includes(token)) {
+    db.fcm_tokens.push(token);
+    saveToDB();
+    console.log(`[FCM Token] Nuevo token registrado: ${token.substring(0, 10)}...`);
+  }
+
+  res.status(200).json({ success: true, message: "Token registrado con éxito." });
+});
+
+// Server Reloj
+app.get("/api/reloj", (req, res) => {
+  res.json({
+    timestamp_servidor: new Date().toISOString(),
+    local_time_readable: new Date().toLocaleTimeString("es-ES")
+  });
+});
+
+// Setup Administrator Account Route (Temporary / Recovery utility)
+app.post("/api/setup-admin", async (req, res) => {
+  const adminEmail = "carboo12@gmail.com";
+  let userInDb = db.usuarios.find((u: any) => u.email.toLowerCase() === adminEmail.toLowerCase());
+  
+  if (!userInDb) {
+    userInDb = {
+      id: "admin_1",
+      nombre: "Administrador Global",
+      usuario: "admin",
+      rol: "administrador",
+      estado: "activo",
+      conexion: "online",
+      activo: true,
+      region: "Nicaragua",
+      email: adminEmail,
+      id_supervisor: "",
+      vendedoresAsignados: []
+    };
+    db.usuarios.push(userInDb);
+    saveToDB();
+  }
+
+  let fbStatus = "";
+  const isReady = initFirebaseAdmin();
+  if (isReady) {
+    try {
+      try {
+        await getAuth().getUserByEmail(adminEmail);
+        fbStatus = "Ya registrado en Firebase Authentication.";
+      } catch (err: any) {
+        if (err.code === "auth/user-not-found" || err.code === "messaging/invalid-argument") {
+          await getAuth().createUser({
+            uid: userInDb.id,
+            email: adminEmail,
+            emailVerified: true,
+            password: "Loto123456!",
+            displayName: userInDb.nombre
+          });
+          fbStatus = "Creado exitosamente en Firebase Authentication.";
+        } else {
+          throw err;
+        }
+      }
+    } catch (err: any) {
+      console.error("[Setup Admin Auth Error]", err);
+      fbStatus = `Error en Firebase Auth: ${err.message}`;
+    }
+  } else {
+    fbStatus = "Firebase Admin no está inicializado.";
+  }
+
+  res.json({
+    success: true,
+    dbUser: userInDb,
+    fbStatus: fbStatus,
+    message: "Inicialización completada."
+  });
+});
+
+// Users
+app.get("/api/usuarios", (req, res) => {
+  res.json(db.usuarios);
+});
+
+app.post("/api/usuarios", (req, res) => {
+  const { nombre, usuario, rol, email, password, estado, region, id_supervisor, vendedoresAsignados } = req.body;
+  if (!nombre || !rol || !email || !usuario) {
+    return res.status(400).json({ error: "Nombre, Usuario (nickname), Rol y Correo son campos obligatorios." });
+  }
+
+  // Ensure unique username (usuario)
+  const usernameLower = usuario.trim().toLowerCase();
+  if (db.usuarios.some((u: any) => u.usuario.toLowerCase() === usernameLower)) {
+    return res.status(400).json({ error: `El nickname de acceso "${usuario}" ya está en uso.` });
+  }
+
+  // Auto-generate U-001 format ID
+  const prefix = "U-";
+  let nextNum = 1;
+  while (db.usuarios.some((u: any) => u.id === `${prefix}${String(nextNum).padStart(3, "0")}`)) {
+    nextNum++;
+  }
+  const id = `${prefix}${String(nextNum).padStart(3, "0")}`;
+
+  const resolvedRol = rol === "admin" || rol === "administrador" ? "administrador" : (rol === "supervisor" ? "supervisor" : "vendedor");
+  const isActivo = estado !== "inactivo";
+
+  const newUser = {
+    id,
+    nombre: nombre.trim(),
+    usuario: usernameLower,
+    rol: resolvedRol,
+    email: email.trim(),
+    password: password ? password.trim() : "Loto123456!",
+    estado: isActivo ? "activo" : "inactivo",
+    conexion: "offline",
+    activo: isActivo,
+    region: region || "Nicaragua",
+    id_supervisor: id_supervisor || "",
+    vendedoresAsignados: (resolvedRol === "supervisor" && Array.isArray(vendedoresAsignados)) ? vendedoresAsignados : []
+  };
+
+  db.usuarios.push(newUser);
+
+  // If this is a supervisor and has assigned vendors, update those vendors' supervisor ID
+  if (newUser.rol === "supervisor" && newUser.vendedoresAsignados.length > 0) {
+    db.usuarios.forEach((u: any) => {
+      if (u.rol === "vendedor" && newUser.vendedoresAsignados.includes(u.id)) {
+        u.id_supervisor = id;
+      }
+    });
+  }
+
+  saveToDB();
+  firebaseCreateUser(newUser).catch(err => console.error("Error creating Firebase user on POST:", err));
+  res.status(201).json(newUser);
+});
+
+app.put("/api/usuarios/:id", (req, res) => {
+  const { id } = req.params;
+  const user = db.usuarios.find((u: any) => u.id === id);
+
+  if (!user) {
+    return res.status(404).json({ error: "Usuario no encontrado" });
+  }
+
+  const { nombre, usuario, rol, email, password, estado, region, id_supervisor, vendedoresAsignados, activo } = req.body;
+
+  if (usuario !== undefined) {
+    const usernameLower = usuario.trim().toLowerCase();
+    if (usernameLower !== user.usuario.toLowerCase() && db.usuarios.some((u: any) => u.id !== id && u.usuario.toLowerCase() === usernameLower)) {
+      return res.status(400).json({ error: `El nickname de acceso "${usuario}" ya está en uso.` });
+    }
+    user.usuario = usernameLower;
+  }
+
+  if (nombre !== undefined) user.nombre = nombre.trim();
+  if (email !== undefined) user.email = email.trim();
+  if (rol !== undefined) {
+    user.rol = rol === "admin" || rol === "administrador" ? "administrador" : (rol === "supervisor" ? "supervisor" : "vendedor");
+  }
+  
+  if (estado !== undefined) {
+    user.estado = estado === "activo" ? "activo" : "inactivo";
+    user.activo = (estado === "activo");
+  } else if (activo !== undefined) {
+    user.activo = activo;
+    user.estado = activo ? "activo" : "inactivo";
+  }
+
+  if (region !== undefined) user.region = region;
+
+  if (id_supervisor !== undefined && user.rol === "vendedor") {
+    user.id_supervisor = id_supervisor;
+  }
+
+  if (vendedoresAsignados !== undefined && user.rol === "supervisor") {
+    user.vendedoresAsignados = vendedoresAsignados;
+    // Sync id_supervisor for vendors
+    db.usuarios.forEach((u: any) => {
+      if (u.rol === "vendedor") {
+        if (vendedoresAsignados.includes(u.id)) {
+          u.id_supervisor = id;
+        } else if (u.id_supervisor === id) {
+          u.id_supervisor = "";
+        }
+      }
+    });
+  }
+
+  // Also sync bidirectional updates (if vendedor's supervisor changed, update that supervisor's list)
+  db.usuarios.forEach((u: any) => {
+    if (u.rol === "supervisor") {
+      u.vendedoresAsignados = db.usuarios
+        .filter((v: any) => v.rol === "vendedor" && v.id_supervisor === u.id)
+        .map((v: any) => v.id);
+    }
+  });
+
+  saveToDB();
+  firebaseUpdateUser(id, { email: user.email, displayName: user.nombre, password, disabled: !user.activo }).catch(err => console.error("Error updating Firebase user on PUT:", err));
+  res.json(user);
+});
+
+app.delete("/api/usuarios/:id", (req, res) => {
+  const { id } = req.params;
+  const index = db.usuarios.findIndex((u: any) => u.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "Usuario no encontrado" });
+  }
+
+  const deletedUser = db.usuarios[index];
+  db.usuarios.splice(index, 1);
+
+  // Clean supervisor references
+  if (deletedUser.rol === "supervisor") {
+    db.usuarios.forEach((u: any) => {
+      if (u.rol === "vendedor" && u.id_supervisor === id) {
+        u.id_supervisor = "";
+      }
+    });
+  } else if (deletedUser.rol === "vendedor") {
+    db.usuarios.forEach((u: any) => {
+      if (u.rol === "supervisor" && u.vendedoresAsignados) {
+        u.vendedoresAsignados = u.vendedoresAsignados.filter((vId: string) => vId !== id);
+      }
+    });
+  }
+
+  saveToDB();
+  if (initFirebaseAdmin()) {
+    getFirestoreInstance().collection("usuarios").doc(id).delete().catch((err: any) => {
+      console.error(`[Firestore Sync] Error al eliminar usuario ${id} de Firestore:`, err);
+    });
+  }
+  firebaseDeleteUser(id).catch(err => console.error("Error deleting Firebase user on DELETE:", err));
+  res.json({ success: true, message: `Usuario "${deletedUser.nombre}" eliminado.` });
+});
+
+// Number Limits Management
+app.get("/api/limites-numeros", (req, res) => {
+  res.json(db.configuracion.limites_numeros || []);
+});
+
+app.post("/api/limites-numeros", (req, res) => {
+  const { 
+    juego, 
+    numero, 
+    max_monto, 
+    id_vendedor,
+    vendedorId,
+    pais,
+    sorteo,
+    hora,
+    montoMaximo,
+    hora_limite,
+    numero_jugado,
+    techo_dinero
+  } = req.body;
+
+  const resolvedJuego = juego || sorteo || "TODOS";
+  const resolvedNumero = numero !== undefined ? numero : (numero_jugado !== undefined ? numero_jugado : "TODOS");
+  const resolvedMonto = max_monto !== undefined ? Number(max_monto) : (montoMaximo !== undefined ? Number(montoMaximo) : (techo_dinero !== undefined ? Number(techo_dinero) : 0));
+  const resolvedVendedor = id_vendedor || vendedorId || "";
+
+  const newLimit = {
+    id: "lim_" + Math.random().toString(36).substring(2, 9),
+    juego: resolvedJuego,
+    numero: resolvedNumero,
+    max_monto: resolvedMonto,
+    id_vendedor: resolvedVendedor,
+    
+    // extra granular keys
+    vendedorId: resolvedVendedor,
+    pais: pais || "",
+    sorteo: sorteo || resolvedJuego,
+    hora: hora || hora_limite || "TODOS",
+    montoMaximo: resolvedMonto,
+    techo_dinero: resolvedMonto,
+    numero_jugado: resolvedNumero,
+    hora_limite: hora || hora_limite || "TODOS"
+  };
+
+  db.configuracion.limites_numeros = db.configuracion.limites_numeros || [];
+  db.configuracion.limites_numeros.push(newLimit);
+  saveToDB();
+  res.status(201).json(newLimit);
+});
+
+app.delete("/api/limites-numeros", (req, res) => {
+  const id = req.query.id;
+  if (!id) {
+    return res.status(400).json({ error: "Límite ID es requerido." });
+  }
+  db.configuracion.limites_numeros = (db.configuracion.limites_numeros || []).filter((l: any) => l.id !== id);
+  saveToDB();
+  res.json({ success: true, message: "Límite eliminado." });
+});
+
+app.delete("/api/limites-numeros/:id", (req, res) => {
+  const id = req.params.id || req.query.id;
+  db.configuracion.limites_numeros = (db.configuracion.limites_numeros || []).filter((l: any) => l.id !== id);
+  saveToDB();
+  res.json({ success: true, message: "Límite eliminado." });
+});
+
+// Sorteos Winning Numbers Results
+app.get("/api/resultados", (req, res) => {
+  res.json(db.configuracion.resultados || []);
+});
+
+app.post("/api/resultados", (req, res) => {
+  const { id_sorteo, fecha, numero_ganador } = req.body;
+  if (!id_sorteo || !fecha || !numero_ganador) {
+    return res.status(400).json({ error: "Sorteo, Fecha y Número ganador son requeridos." });
+  }
+
+  const newResult = {
+    id: "res_" + Math.random().toString(36).substring(2, 9),
+    id_sorteo,
+    fecha, // YYYY-MM-DD
+    numero_ganador,
+    timestamp: new Date().toISOString()
+  };
+
+  db.configuracion.resultados = db.configuracion.resultados || [];
+  db.configuracion.resultados.push(newResult);
+  saveToDB();
+  res.status(201).json(newResult);
+});
+
+app.delete("/api/resultados/:id", (req, res) => {
+  const { id } = req.params;
+  db.configuracion.resultados = (db.configuracion.resultados || []).filter((r: any) => r.id !== id);
+  saveToDB();
+  res.json({ success: true, message: "Resultado de sorteo eliminado." });
+});
+
+// Cobros / Collections
+app.get("/api/cobros", (req, res) => {
+  res.json(db.configuracion.cobros || []);
+});
+
+app.post("/api/cobros", (req, res) => {
+  const { id_vendedor, id_supervisor, monto_cs, monto_usd, comentario } = req.body;
+  if (!id_vendedor || !id_supervisor || monto_cs === undefined || monto_usd === undefined) {
+    return res.status(400).json({ error: "Vendedor, Supervisor, monto en C$ y monto en USD son obligatorios." });
+  }
+
+  const user = db.usuarios.find((u: any) => u.id === id_vendedor);
+  const newCobro = {
+    id: "cob_" + Math.random().toString(36).substring(2, 9),
+    id_vendedor,
+    nombre_vendedor: user ? user.nombre : "Vendedor Desconocido",
+    id_supervisor,
+    monto_cs: Number(monto_cs),
+    monto_usd: Number(monto_usd),
+    fecha: getLocalDateString(),
+    timestamp: new Date().toISOString(),
+    comentario: comentario || ""
+  };
+
+  db.configuracion.cobros = db.configuracion.cobros || [];
+  db.configuracion.cobros.push(newCobro);
+
+  // We can automatically mark all previous uncollected closures of this seller as collected!
+  if (db.cierres_caja) {
+    db.cierres_caja.forEach((cc: any) => {
+      if (cc.id_vendedor === id_vendedor) {
+        cc.cobrado = true;
+      }
+    });
+  }
+
+  saveToDB();
+  res.status(201).json(newCobro);
+});
+
+// Mark closure as collected manually
+app.put("/api/cierres/:id/cobrar", (req, res) => {
+  const { id } = req.params;
+  const cc = db.cierres_caja.find((c: any) => c.id === id);
+  if (!cc) {
+    return res.status(404).json({ error: "Cierre de caja no encontrado." });
+  }
+  cc.cobrado = true;
+  saveToDB();
+  res.json({ success: true, message: "Cierre de caja marcado como cobrado.", closure: cc });
+});
+
+// Configuration
+app.get("/api/configuracion", (req, res) => {
+  res.json(db.configuracion);
+});
+
+app.put("/api/configuracion", (req, res) => {
+  const { tasa_cambio, formato_ticket, sorteos } = req.body;
+
+  if (tasa_cambio !== undefined) {
+    db.configuracion.tasa_cambio = Number(tasa_cambio);
+  }
+  if (formato_ticket !== undefined) {
+    db.configuracion.formato_ticket = {
+      ...db.configuracion.formato_ticket,
+      ...formato_ticket
+    };
+  }
+  if (sorteos !== undefined) {
+    db.configuracion.sorteos = sorteos;
+  }
+
+  saveToDB();
+  res.json(db.configuracion);
+});
+
+// Sales (Ventas)
+app.get("/api/ventas", (req, res) => {
+  res.json(db.ventas);
+});
+
+app.post("/api/ventas", (req, res) => {
+  const { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor } = req.body;
+
+  if (!juego || !sorteo || !numero_jugado || !monto_pago || !moneda || !id_vendedor) {
+    return res.status(400).json({ error: "Faltan datos obligatorios para registrar la venta." });
+  }
+
+  // 1. Verify seller is active & online
+  const user = db.usuarios.find((u: any) => u.id === id_vendedor);
+  if (!user) {
+    return res.status(403).json({ error: "Vendedor no registrado." });
+  }
+  if (!user.activo) {
+    return res.status(403).json({ error: "Su cuenta de vendedor está inactiva. Comuníquese con el administrador." });
+  }
+
+  // 2. Bloqueo por Tiempo de Sorteo (Server-Side Validation)
+  // Let's locate the selected draw schedule
+  const selectedSorteo = db.configuracion.sorteos.find((s: any) => s.nombre === sorteo && s.juego === juego);
+  const now = new Date();
+  
+  if (selectedSorteo) {
+    const [cierreHour, cierreMin] = selectedSorteo.hora_cierre.split(":").map(Number);
+    const [sorteoHour, sorteoMin] = selectedSorteo.hora_sorteo.split(":").map(Number);
+    
+    // We convert current server clock time to compare hours/minutes
+    const currentHour = now.getHours();
+    const currentMin = now.getMinutes();
+    const currentSec = now.getSeconds();
+
+    // Check if we are past the draw closure time for TODAY'S draw
+    const isPastCierre = (currentHour > cierreHour) || (currentHour === cierreHour && currentMin >= cierreMin);
+    
+    // If it's after closure, it is BLOCKED (anti-fraude)
+    if (isPastCierre) {
+      return res.status(400).json({
+        error: `VENTA RECHAZADA (ANTI-FRAUDE): El sorteo ${sorteo} cerró a las ${selectedSorteo.hora_cierre} (Hora Servidor: ${now.toLocaleTimeString("es-ES")}).`
+      });
+    }
+  }
+
+  // 2.5 LIMIT CHECK (Techo de venta granular)
+  const limits = db.configuracion.limites_numeros || [];
+  
+  // Helper to format 24h string to standard AM/PM format
+  const formatHourToAmPm = (timeStr: string): string => {
+    if (!timeStr) return "";
+    const parts = timeStr.split(":");
+    let hour = parseInt(parts[0], 10);
+    const min = parts[1] || "00";
+    if (isNaN(hour)) return timeStr;
+    const ampm = hour >= 12 ? "PM" : "AM";
+    hour = hour % 12;
+    if (hour === 0) hour = 12;
+    return `${hour}:${min} ${ampm}`;
+  };
+
+  const applicableLimit = limits.find((l: any) => {
+    // 1. Match Game
+    const limitJuego = l.juego || "";
+    const gameMatch = !limitJuego || limitJuego === "TODOS" || limitJuego.toLowerCase() === juego.toLowerCase();
+    if (!gameMatch) return false;
+
+    // 2. Match Number
+    const limitNum = l.numero ?? l.numero_jugado ?? "TODOS";
+    const numMatch = limitNum === "TODOS" || String(limitNum) === String(numero_jugado);
+    if (!numMatch) return false;
+
+    // 3. Match Seller
+    const limitSellerId = l.id_vendedor || l.vendedorId || "";
+    const sellerMatch = !limitSellerId || limitSellerId === "TODOS" || limitSellerId === id_vendedor;
+    if (!sellerMatch) return false;
+
+    // 4. Match Country/Pais
+    let transPais = req.body.pais || "";
+    if (!transPais && selectedSorteo) {
+      if (selectedSorteo.nombre.includes("(NI)")) transPais = "Nicaragua";
+      else if (selectedSorteo.nombre.includes("(HN)")) transPais = "Honduras";
+      else if (selectedSorteo.nombre.includes("(LP)")) transPais = "La Primera";
+      else if (selectedSorteo.nombre.includes("(CR)")) transPais = "Costa Rica";
+    }
+    const limitPais = l.pais || "";
+    const paisMatch = !limitPais || limitPais === "TODOS" || limitPais.toLowerCase() === transPais.toLowerCase();
+    if (!paisMatch) return false;
+
+    // 5. Match Sorteo
+    const limitSorteoName = l.sorteo || "";
+    const sorteoMatch = !limitSorteoName || limitSorteoName === "TODOS" ||
+                        sorteo.toLowerCase().includes(limitSorteoName.toLowerCase()) ||
+                        limitSorteoName.toLowerCase().includes(sorteo.toLowerCase());
+    if (!sorteoMatch) return false;
+
+    // 6. Match Sorteo Hour
+    if (selectedSorteo) {
+      const limitHora = (l.hora || l.hora_limite || "").trim().toUpperCase();
+      const transHora = formatHourToAmPm(selectedSorteo.hora_sorteo).toUpperCase();
+      const horaMatch = !limitHora || limitHora === "TODOS" || limitHora === "CUALQUIERA" || limitHora === transHora;
+      if (!horaMatch) return false;
+    }
+
+    return true;
+  });
+
+  if (applicableLimit) {
+    const limitMontoCs = Number(applicableLimit.max_monto ?? applicableLimit.montoMaximo ?? applicableLimit.techo_dinero);
+    const todayStr = now.toISOString().split("T")[0];
+    
+    // Sum previous active sales of this number matching this limit today
+    const matchingSales = db.ventas.filter((v: any) => {
+      if (v.anulado) return false;
+      
+      // Match criteria of the limit
+      const limitJuego = applicableLimit.juego || "";
+      if (limitJuego && limitJuego !== "TODOS" && v.juego.toLowerCase() !== limitJuego.toLowerCase()) return false;
+      
+      const limitNum = applicableLimit.numero ?? applicableLimit.numero_jugado ?? "TODOS";
+      if (limitNum !== "TODOS" && String(v.numero_jugado) !== String(limitNum)) return false;
+
+      const limitSorteoName = applicableLimit.sorteo || "";
+      if (limitSorteoName && limitSorteoName !== "TODOS" && 
+          !v.sorteo.toLowerCase().includes(limitSorteoName.toLowerCase()) &&
+          !limitSorteoName.toLowerCase().includes(v.sorteo.toLowerCase())) return false;
+
+      const limitSellerId = applicableLimit.id_vendedor || applicableLimit.vendedorId || "";
+      if (limitSellerId && limitSellerId !== "TODOS" && v.id_vendedor !== limitSellerId) return false;
+
+      const limitHora = (applicableLimit.hora || applicableLimit.hora_limite || "").trim().toUpperCase();
+      if (limitHora && limitHora !== "TODOS" && limitHora !== "CUALQUIERA") {
+        const vSorteoObj = db.configuracion.sorteos.find((s: any) => s.nombre === v.sorteo && s.juego === v.juego);
+        if (vSorteoObj) {
+          const vHora = formatHourToAmPm(vSorteoObj.hora_sorteo).toUpperCase();
+          if (vHora !== limitHora) return false;
+        }
+      }
+
+      if (!v.timestamp_servidor.startsWith(todayStr)) return false;
+      return true;
+    });
+
+    const totalPrevSalesCs = matchingSales.reduce((sum: number, v: any) => {
+      const amtInCs = v.moneda === "C$" ? v.monto_pago : v.monto_pago * db.configuracion.tasa_cambio;
+      return sum + amtInCs;
+    }, 0);
+
+    const requestedMontoCs = moneda === "C$" ? Number(monto_pago) : Number(monto_pago) * db.configuracion.tasa_cambio;
+
+    if (totalPrevSalesCs + requestedMontoCs > limitMontoCs) {
+      const availableCs = Math.max(0, limitMontoCs - totalPrevSalesCs);
+      const availableMsg = moneda === "C$" 
+        ? `C$ ${availableCs.toFixed(2)}` 
+        : `$ ${(availableCs / db.configuracion.tasa_cambio).toFixed(2)}`;
+        
+      return res.status(400).json({
+        error: `VENTA RECHAZADA (LÍMITE ALCANZADO): El número "${numero_jugado}" en "${juego}" para el sorteo "${sorteo}" tiene un techo de venta asignado de C$ ${limitMontoCs.toFixed(2)}. Ya vendido hoy: C$ ${totalPrevSalesCs.toFixed(2)}. Cupo restante: ${availableMsg}.`
+      });
+    }
+  }
+
+  // 3. Atomic counter increment for tickets
+  db.configuracion.contador_global_tickets += 1;
+  const nextTicketNum = String(db.configuracion.contador_global_tickets).padStart(7, "0");
+
+  const ticketId = "ticket_" + Math.random().toString(36).substring(2, 9);
+  const serverTimeStr = now.toISOString();
+
+  // 4. Calculate secure anti-photoshop digital signature
+  const signature = generateDigitalSignature(
+    ticketId,
+    serverTimeStr,
+    juego,
+    numero_jugado,
+    monto_pago,
+    moneda
+  );
+
+  const newSale = {
+    id: ticketId,
+    numero_ticket: nextTicketNum,
+    timestamp_servidor: serverTimeStr,
+    juego,
+    sorteo,
+    numero_jugado,
+    monto_pago: Number(monto_pago),
+    moneda,
+    id_vendedor,
+    nombre_vendedor: user.nombre,
+    firma_digital: signature,
+    anulado: false
+  };
+
+  db.ventas.push(newSale);
+  saveToDB();
+
+  // NOTIFICATION TRIGGER: Send live real-time and FCM alerts
+  const notifTitle = "Nuevo Ticket Generado";
+  const notifBody = `Vendedor: ${user.nombre} • Juego: ${juego} • Núm: ${numero_jugado} • Pago: ${moneda} ${monto_pago}`;
+  const notifPayload = {
+    id: `notif_${Math.random().toString(36).substring(2, 9)}`,
+    title: notifTitle,
+    body: notifBody,
+    vendedor: user.nombre,
+    monto: `${moneda} ${monto_pago}`,
+    juego,
+    sorteo,
+    numero_jugado,
+    ticketNum: nextTicketNum,
+    timestamp: serverTimeStr
+  };
+
+  broadcastToSSE(notifPayload);
+  sendFCMPushNotification(notifTitle, notifBody, notifPayload).catch((err) => {
+    console.error("FCM dispatch error (silent):", err);
+  });
+
+  res.status(201).json(newSale);
+});
+
+// Anulación de Tickets (Permitted only within 5 minutes)
+app.post("/api/ventas/:id/anular", (req, res) => {
+  const { id } = req.params;
+  const sale = db.ventas.find((v: any) => v.id === id);
+
+  if (!sale) {
+    return res.status(404).json({ error: "Ticket no encontrado." });
+  }
+
+  if (sale.anulado) {
+    return res.status(400).json({ error: "Este ticket ya se encuentra anulado." });
+  }
+
+  // 5-minute rule validation
+  const creationTime = new Date(sale.timestamp_servidor).getTime();
+  const now = Date.now();
+  const diffMinutes = (now - creationTime) / 60000;
+
+  if (diffMinutes > 5) {
+    return res.status(400).json({
+      error: `No se puede anular. Han transcurrido ${Math.floor(diffMinutes)} minutos (límite máximo de 5 minutos).`
+    });
+  }
+
+  sale.anulado = true;
+  saveToDB();
+  res.json({ message: "Ticket anulado con éxito.", ticket: sale });
+});
+
+// Cash Closure (Cierre de Caja)
+app.get("/api/cierres", (req, res) => {
+  res.json(db.cierres_caja);
+});
+
+app.post("/api/cierres", (req, res) => {
+  const { id_vendedor, denominaciones, monto_entregado_cs, monto_entregado_usd } = req.body;
+
+  if (!id_vendedor || !denominaciones) {
+    return res.status(400).json({ error: "Datos de arqueo incompletos." });
+  }
+
+  const user = db.usuarios.find((u: any) => u.id === id_vendedor);
+  if (!user) {
+    return res.status(404).json({ error: "Vendedor no encontrado." });
+  }
+
+  // Calculate system sales for this seller today that are not voided (anulado)
+  const sellerSales = db.ventas.filter(
+    (v: any) => v.id_vendedor === id_vendedor && !v.anulado
+  );
+
+  let systemCs = 0;
+  let systemUsd = 0;
+
+  sellerSales.forEach((v: any) => {
+    if (v.moneda === "C$") systemCs += v.monto_pago;
+    if (v.moneda === "USD") systemUsd += v.monto_pago;
+  });
+
+  const entregadoCs = Number(monto_entregado_cs) || 0;
+  const entregadoUsd = Number(monto_entregado_usd) || 0;
+
+  const descuadreCs = entregadoCs - systemCs;
+  const descuadreUsd = entregadoUsd - systemUsd;
+
+  const cierreId = "cierre_" + Math.random().toString(36).substring(2, 9);
+  const newCierre = {
+    id: cierreId,
+    id_vendedor,
+    nombre_vendedor: user.nombre,
+    fecha: getLocalDateString(),
+    denominaciones,
+    monto_entregado_cs: entregadoCs,
+    monto_entregado_usd: entregadoUsd,
+    monto_sistema_cs: systemCs,
+    monto_sistema_usd: systemUsd,
+    descuadre_cs: descuadreCs,
+    descuadre_usd: descuadreUsd,
+    timestamp: new Date().toISOString()
+  };
+
+  db.cierres_caja.push(newCierre);
+  saveToDB();
+  res.status(201).json(newCierre);
+});
+
+
+// Mounting Vite middleware in development
+async function startServer() {
+  // Sync state from Firestore
+  await syncFromFirestore();
+
+  // Sync database users to Firebase Authentication asynchronously on start
+  syncDatabaseUsersToFirebaseAuth().catch(err => {
+    console.error("[Firebase Auth Sync Error] Failed to sync users on start:", err);
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`[Express API] Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();

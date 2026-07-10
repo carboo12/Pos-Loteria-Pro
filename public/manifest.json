@@ -1,0 +1,22 @@
+{
+  "name": "Punto de Venta - Lotería",
+  "short_name": "Loto POS",
+  "description": "Sistema de Punto de Venta para Loterías de Nicaragua y Honduras",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#1e293b",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ]
+}

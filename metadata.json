@@ -1,0 +1,6 @@
+{
+  "name": "La Nueva Era",
+  "description": "Sistema SaaS premium de alto contraste para la gestión y venta de números de lotería en Nicaragua, Honduras, Costa Rica, El Salvador y República Dominicana, con control de límites anti-fraude y reportes avanzados.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
