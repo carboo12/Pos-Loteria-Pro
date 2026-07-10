@@ -38,7 +38,7 @@ function calculatePrizeMultiplier(juego: string, sorteo: string): number {
   return 80;
 }
 
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || "3000", 10);
 const DB_PATH = path.join(process.cwd(), "data-store.json");
 
 app.use(express.json());
