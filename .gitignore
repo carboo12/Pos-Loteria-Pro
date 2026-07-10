@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Firebase service account credentials (keep local, never commit)
+rapigestion-2-firebase-adminsdk-fbsvc-6ff1c24cfb.json
+*firebase-adminsdk*.json
+
+# opencode local config (contains keys & secrets)
+opencode.json
