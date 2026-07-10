@@ -1934,6 +1934,9 @@ export default function AdminInterface({
                 <div className="bg-gray-100 p-4 rounded-2xl flex flex-col items-center justify-center border border-gray-200">
                   <span className="text-[10px] font-display font-black text-gray-400 uppercase tracking-wider mb-2">Vista Previa Impresión Térmica</span>
                   <div className="bg-white border border-gray-300 shadow-sm p-4 rounded-md w-64 font-mono text-[9px] text-gray-700 relative select-none">
+                    <div className="flex justify-center mb-1">
+                      <img src="/logo.png" alt="La Nueva Era" className="h-8 w-auto object-contain" />
+                    </div>
                     <div className="text-center font-bold text-gray-950 mb-0.5 uppercase tracking-wide">{ticketTitleInput || "EMPRESA S.A."}</div>
                     <div className="text-center text-[8px] text-gray-500 font-sans mb-2">{ticketRucInput || "INDICACIONES DEL TICKET"}</div>
                     <div className="border-t border-dashed border-gray-300 my-1.5"></div>

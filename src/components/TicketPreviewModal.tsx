@@ -193,6 +193,7 @@ ${config.formato_ticket.mensaje_pie}
             <div style="display: flex; justify-content: center; margin-bottom: 8px;">
               <img src="${window.location.origin}/logo.png" alt="La Nueva Era" style="height: 55px; width: auto; object-fit: contain;" />
             </div>
+            <h2>${config.formato_ticket.titulo}</h2>
             <div>${config.formato_ticket.ruc}</div>
             <hr />
             <div style="text-align: left;">
@@ -336,6 +337,9 @@ ${config.formato_ticket.mensaje_pie}
                 alt="La Nueva Era" 
                 className="h-12 w-auto object-contain filter drop-shadow-xs"
               />
+            </div>
+            <div className="text-center font-bold text-gray-950 text-xs uppercase tracking-wide mb-0.5">
+              {config.formato_ticket.titulo}
             </div>
             <div className="text-center text-[10px] text-gray-500 font-sans tracking-wide mb-3">
               {config.formato_ticket.ruc}

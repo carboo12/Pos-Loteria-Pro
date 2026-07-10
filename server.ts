@@ -56,6 +56,11 @@ function initDatabase() {
         if (!parsed.configuracion.resultados) parsed.configuracion.resultados = [];
         if (!parsed.configuracion.cobros) parsed.configuracion.cobros = [];
         
+        // Migrate old default "Indicaciones del Ticket" value
+        if (parsed.configuracion.formato_ticket?.ruc === "RUC-J0310000123456") {
+          parsed.configuracion.formato_ticket.ruc = "exiga su ticket en su compra de su numero.";
+        }
+        
         if (!parsed.usuarios) parsed.usuarios = [];
         
         // Migrate existing users to the full schema
@@ -121,7 +126,7 @@ function initDatabase() {
       contador_global_tickets: 1000,
       formato_ticket: {
         titulo: "LA NUEVA ERA",
-        ruc: "RUC-J0310000123456",
+        ruc: "exiga su ticket en su compra de su numero.",
         mensaje_pie: "¡Gracias por su compra! Verifique su ticket en línea."
       },
       sorteos: [

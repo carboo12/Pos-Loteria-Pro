@@ -28,7 +28,7 @@
 - **Problema**: La función que calcula qué ventas son "de hoy" para el resumen de caja usa el reloj local, no el servidor. Si el reloj está desfasado, el vendedor ve datos del día equivocado.
 - **Solución**: Reemplazar con una versión que use `getSyncedNow()`.
 - **Impacto**: Exactitud del cierre de caja
-
+qui
 ---
 
 ## 🟠 INCOMPLETAS — Existen pero les falta lógica
