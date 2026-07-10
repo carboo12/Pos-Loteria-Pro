@@ -28,6 +28,7 @@
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "react-hot-toast": "^2.6.0",
+    "react-is": "^19.2.7",
     "recharts": "^3.9.2",
     "vite": "^6.2.3"
   },
@@ -46,9 +47,9 @@
   },
   "optionalDependencies": {
     "@rollup/rollup-win32-x64-msvc": "^4.62.2",
-    "lightningcss-win32-x64-msvc": "^1.32.0",
-    "lightningcss-linux-x64-gnu": "^1.32.0",
     "lightningcss-linux-arm64-gnu": "^1.32.0",
-    "lightningcss-linux-arm64-musl": "^1.32.0"
+    "lightningcss-linux-arm64-musl": "^1.32.0",
+    "lightningcss-linux-x64-gnu": "^1.32.0",
+    "lightningcss-win32-x64-msvc": "^1.32.0"
   }
 }

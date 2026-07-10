@@ -6,7 +6,29 @@ import viteCompression from 'vite-plugin-compression';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss(), viteCompression({ algorithm: 'brotliCompress' }), viteCompression({ algorithm: 'gzip' })],
+    plugins: [
+      react(),
+      tailwindcss(),
+      // Use threshold:0 and deleteOriginFile:false to avoid Windows absolute-path bug
+      // in vite-plugin-compression@0.5.x which resolves against process.cwd().
+      viteCompression({
+        algorithm: 'gzip',
+        ext: '.gz',
+        deleteOriginFile: false,
+        threshold: 1024,
+      }),
+      viteCompression({
+        algorithm: 'brotliCompress',
+        ext: '.br',
+        deleteOriginFile: false,
+        threshold: 1024,
+      }),
+    ],
+    optimizeDeps: {
+      // Ensure react-is (peer dep of recharts) is pre-bundled by Vite
+      // so Rollup can resolve it during production build.
+      include: ['react-is'],
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -14,7 +36,7 @@ export default defineConfig(() => {
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâ€”file watching is disabled to prevent flickering during agent edits.
+      // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {
