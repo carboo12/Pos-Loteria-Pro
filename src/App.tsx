@@ -1,10 +1,24 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense, lazy } from "react";
 import { Usuario, Configuracion, Venta, CierreCaja } from "./types";
 import RoleSelector from "./components/RoleSelector";
 import VendedorInterface from "./components/VendedorInterface";
 import AdminInterface from "./components/AdminInterface";
 import SupervisorInterface from "./components/SupervisorInterface";
 import Login from "./components/Login";
+
+// Lazy loaded interfaces (Code Splitting)
+const VendedorInterface = lazy(() => import("./components/VendedorInterface"));
+const AdminInterface = lazy(() => import("./components/AdminInterface"));
+const SupervisorInterface = lazy(() => import("./components/SupervisorInterface"));
+
+// Loader Component for Suspense
+const SuspenseLoader = () => (
+  <div className="flex-1 flex flex-col items-center justify-center min-h-[50vh] animate-pulse">
+    <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+    <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Cargando Interfaz...</p>
+  </div>
+);
+
 import { auth } from "./lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { AlertTriangle, Clock, Lock, ShieldCheck, Sun } from "lucide-react";
@@ -353,6 +367,7 @@ export default function App() {
             
             /* Admin view desktop-first */
             <div className="w-full flex-1 flex flex-col min-h-0 overflow-hidden animate-fade-in">
+                <Suspense fallback={<SuspenseLoader />}>
               <AdminInterface
                 user={currentUser}
                 config={config}
@@ -368,12 +383,14 @@ export default function App() {
                 onDeleteUser={handleDeleteUser}
                 simulatedSupervisorId={simulatedSupervisorId}
               />
+                </Suspense>
             </div>
 
           ) : currentUser.rol === "supervisor" ? (
 
             /* Supervisor view */
             <div className="w-full flex-1 flex flex-col min-h-0 overflow-hidden animate-fade-in">
+                <Suspense fallback={<SuspenseLoader />}>
               <SupervisorInterface
                 user={currentUser}
                 config={config}
@@ -384,12 +401,14 @@ export default function App() {
                 closures={closures}
                 onUpdateUser={handleUpdateUser}
               />
+                </Suspense>
             </div>
 
           ) : (
             
             /* Vendedor view mobile-first with point-of-sale layout */
             <div className="w-full flex-1 flex flex-col min-h-0 overflow-hidden animate-fade-in">
+                <Suspense fallback={<SuspenseLoader />}>
               <VendedorInterface
                 user={currentUser}
                 config={config}
@@ -398,6 +417,7 @@ export default function App() {
                 onNewSaleCreated={handleNewSaleCreated}
                 serverTime={serverTime}
               />
+                </Suspense>
             </div>
 
           )
