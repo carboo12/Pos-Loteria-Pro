@@ -38,7 +38,7 @@ function calculatePrizeMultiplier(juego: string, sorteo: string): number {
   return 80;
 }
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const DB_PATH = path.join(process.cwd(), "data-store.json");
 
 app.use(express.json());
@@ -1766,7 +1766,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Express API] Server running on http://localhost:${PORT}`);
+    console.log(`[Express API] Servidor corriendo exitosamente en el puerto ${PORT}`);
   });
 }
 
