@@ -23,7 +23,6 @@
     "jspdf": "^4.2.1",
     "jsqr": "^1.4.0",
     "lightningcss": "^1.32.0",
-    "lightningcss-win32-x64-msvc": "^1.32.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",
@@ -47,6 +46,9 @@
   },
   "optionalDependencies": {
     "@rollup/rollup-win32-x64-msvc": "^4.62.2",
-    "lightningcss-linux-x64-gnu": "^1.32.0"
+    "lightningcss-win32-x64-msvc": "^1.32.0",
+    "lightningcss-linux-x64-gnu": "^1.32.0",
+    "lightningcss-linux-arm64-gnu": "^1.32.0",
+    "lightningcss-linux-arm64-musl": "^1.32.0"
   }
 }
