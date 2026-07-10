@@ -1103,7 +1103,7 @@ export default function AdminInterface({
       `}>
         
         {/* Brand & Stats info */}
-        <div>
+        <div className="flex-1 overflow-y-auto">
           <div className="p-6 bg-blue-950 border-b border-blue-900 flex justify-between items-center">
             <div>
               <span className="font-display font-black text-lg tracking-wider text-white uppercase block">PANEL ADMIN</span>
@@ -1204,7 +1204,7 @@ export default function AdminInterface({
         </div>
 
         {/* Global info footer */}
-        <div className="p-4 bg-slate-905 border-t border-slate-900 text-[10px] font-sans text-slate-400">
+        <div className="p-4 pb-16 md:pb-24 bg-blue-950/50 border-t border-blue-900 text-[10px] font-sans text-blue-200">
           <div className="flex justify-between items-center py-1">
             <span>Tasa de Cambio:</span>
             <span className="text-white font-black font-mono">C$ {config.tasa_cambio.toFixed(2)}</span>
@@ -1222,7 +1222,7 @@ export default function AdminInterface({
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto max-h-screen">
+      <main className="flex-1 p-4 md:p-8 pb-24 md:pb-32 overflow-y-auto max-h-screen">
         
         {/* Unified Top Header Bar with Hamburger Menu Trigger */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-gray-300 pb-5 mb-6 gap-4 bg-white md:bg-transparent p-4 md:p-0 rounded-2xl shadow-xs md:shadow-none">
