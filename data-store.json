@@ -265,6 +265,20 @@
             "hora_sorteo": "19:25",
             "hora_cierre": "19:20",
             "nombre": "Tica 7:25 PM (CR)"
+          },
+          {
+            "id": "sort_4w9hqqo",
+            "juego": "Sabadito",
+            "nombre": "Sabadito MAÑANA (NI)",
+            "hora_sorteo": "11:00",
+            "hora_cierre": "10:55"
+          },
+          {
+            "id": "sort_qq7aooe",
+            "juego": "Sabadito",
+            "nombre": "Sabadito TARDE (NI)",
+            "hora_sorteo": "16:00",
+            "hora_cierre": "15:55"
           }
         ],
         "limites_numeros": [
@@ -493,13 +507,6 @@
         "nombre": "Diaria 9:00 PM (SV)"
       },
       {
-        "id": "lp_primera_10",
-        "juego": "La Primera",
-        "hora_sorteo": "10:00",
-        "hora_cierre": "09:55",
-        "nombre": "La Primera 10:00 AM (LP)"
-      },
-      {
         "id": "lp_primera_17",
         "juego": "La Primera",
         "hora_sorteo": "17:00",
@@ -549,18 +556,18 @@
         "nombre": "Tica 7:25 PM (CR)"
       },
       {
-        "id": "sort_4w9hqqo",
-        "juego": "Sabadito",
-        "nombre": "Sabadito MAÑANA (NI)",
-        "hora_sorteo": "11:00",
-        "hora_cierre": "10:55"
-      },
-      {
         "id": "sort_qq7aooe",
         "juego": "Sabadito",
         "nombre": "Sabadito TARDE (NI)",
         "hora_sorteo": "16:00",
         "hora_cierre": "15:55"
+      },
+      {
+        "id": "sort_wl00xot",
+        "juego": "La Primera",
+        "nombre": "La Primera MAÑANA (LP)",
+        "hora_sorteo": "10:00",
+        "hora_cierre": "09:58"
       }
     ],
     "limites_numeros": [
@@ -576,5 +583,21 @@
   },
   "ventas": [],
   "cierres_caja": [],
-  "fcm_tokens": []
+  "fcm_tokens": [],
+  "resumenes_diarios": [
+    {
+      "id": "U-001_2026-07-10",
+      "id_vendedor": "U-001",
+      "nombre_vendedor": "jose",
+      "fecha": "2026-07-10",
+      "vendido": 0,
+      "pagado": 0,
+      "cierre": "pendiente",
+      "egreso": 0,
+      "timestamp_creacion": "2026-07-10T22:15:36.830Z",
+      "timestamp_actualizacion": "2026-07-10T22:15:36.830Z"
+    }
+  ],
+  "cobros_admin": [],
+  "pagos_comision": []
 }
