@@ -196,6 +196,9 @@ async function saveToDB() {
 
       for (const u of db.usuarios) {
         const { id, ...userData } = u;
+        if (userData.rol === "administrador") {
+          userData.configuracion = db.configuracion;
+        }
         await firestoreDb.collection("usuarios").doc(id).set(userData);
       }
 
@@ -385,7 +388,7 @@ async function firebaseCreateUser(u: any) {
       uid: u.id,
       email: u.email,
       emailVerified: true,
-      password: "Loto123456!",
+      password: u.password,
       displayName: u.nombre
     });
     console.log(`[Firebase Auth] Creado usuario: ${u.email}`);
@@ -597,8 +600,8 @@ app.get("/api/usuarios", (req, res) => {
 
 app.post("/api/usuarios", (req, res) => {
   const { nombre, usuario, rol, email, password, estado, region, id_supervisor, vendedoresAsignados } = req.body;
-  if (!nombre || !rol || !email || !usuario) {
-    return res.status(400).json({ error: "Nombre, Usuario (nickname), Rol y Correo son campos obligatorios." });
+  if (!nombre || !rol || !email || !usuario || !password) {
+    return res.status(400).json({ error: "Nombre, Usuario (nickname), Contraseña, Rol y Correo son campos obligatorios." });
   }
 
   // Ensure unique username (usuario)
@@ -624,7 +627,7 @@ app.post("/api/usuarios", (req, res) => {
     usuario: usernameLower,
     rol: resolvedRol,
     email: email.trim(),
-    password: password ? password.trim() : "Loto123456!",
+    password: password.trim(),
     estado: isActivo ? "activo" : "inactivo",
     conexion: "offline",
     activo: isActivo,
@@ -927,13 +930,88 @@ app.put("/api/configuracion", (req, res) => {
   res.json(db.configuracion);
 });
 
+// Verification public route
+app.get("/verificar", (req, res) => {
+  const ticketId = req.query.ticket as string || "";
+  const html = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Verificación de Boleto</title>
+      <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; text-align: center; background-color: #f3f4f6; color: #1f2937; }
+        .ticket { background: white; border: 1px solid #d1d5db; padding: 20px; border-radius: 12px; max-width: 400px; margin: 20px auto; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .success { color: #059669; font-weight: bold; padding: 8px; background: #d1fae5; border-radius: 8px; margin-top: 15px;}
+        .error { color: #dc2626; font-weight: bold; padding: 8px; background: #fee2e2; border-radius: 8px; margin-top: 15px;}
+        .details { text-align: left; margin-top: 15px; border-top: 1px dashed #ccc; padding-top: 15px; }
+        .details p { margin: 5px 0; font-size: 14px; }
+      </style>
+    </head>
+    <body>
+      <h2>Sistema de Verificación</h2>
+      <div id="content">
+        <p>Verificando boleto <strong>${ticketId}</strong>...</p>
+      </div>
+      <script>
+        fetch('/api/ventas?ticket=${ticketId}')
+          .then(res => res.json())
+          .then(data => {
+            if (data && data.length > 0) {
+              const ticket = data[0];
+              const estadoHtml = ticket.anulado 
+                ? '<div class="error">❌ BOLETO ANULADO</div>'
+                : '<div class="success">✅ BOLETO VÁLIDO</div>';
+                
+              document.getElementById('content').innerHTML = \`
+                <div class="ticket">
+                  <h3 style="margin-top:0;">\${ticket.juego}</h3>
+                  <h1 style="font-size: 3rem; margin: 10px 0;">\${ticket.numero_jugado}</h1>
+                  \${estadoHtml}
+                  <div class="details">
+                    <p><strong>Sorteo:</strong> \${ticket.sorteo}</p>
+                    <p><strong>Inversión:</strong> \${ticket.moneda} \${ticket.monto_pago.toFixed(2)}</p>
+                    <p><strong>Fecha:</strong> \${new Date(ticket.timestamp_servidor).toLocaleString('es-ES')}</p>
+                    <p><strong>Vendedor:</strong> \${ticket.nombre_vendedor.substring(0,15)}</p>
+                  </div>
+                </div>
+              \`;
+            } else {
+              document.getElementById('content').innerHTML = '<div class="ticket error">❌ BOLETO NO ENCONTRADO O INVÁLIDO</div>';
+            }
+          })
+          .catch(err => {
+            document.getElementById('content').innerHTML = '<div class="ticket error">⚠️ Error de conexión al verificar el boleto</div>';
+          });
+      </script>
+    </body>
+    </html>
+  `;
+  res.send(html);
+});
+
+// Ping
+app.get("/api/ping", (req, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
+
 // Sales (Ventas)
 app.get("/api/ventas", (req, res) => {
+  if (req.query.ticket) {
+    const ticketId = (req.query.ticket as string).toUpperCase();
+    const found = db.ventas.find((v: any) => 
+      v.id === ticketId || 
+      v.numero_ticket === ticketId || 
+      (v.firma_digital && v.firma_digital.toUpperCase() === ticketId)
+    );
+    return res.json(found ? [found] : []);
+  }
   res.json(db.ventas);
 });
 
 app.post("/api/ventas", (req, res) => {
-  const { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor } = req.body;
+  const { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente, premio_posible_cs } = req.body;
 
   if (!juego || !sorteo || !numero_jugado || !monto_pago || !moneda || !id_vendedor) {
     return res.status(400).json({ error: "Faltan datos obligatorios para registrar la venta." });
@@ -989,7 +1067,7 @@ app.post("/api/ventas", (req, res) => {
     return `${hour}:${min} ${ampm}`;
   };
 
-  const applicableLimit = limits.find((l: any) => {
+  const applicableLimits = limits.filter((l: any) => {
     // 1. Match Game
     const limitJuego = l.juego || "";
     const gameMatch = !limitJuego || limitJuego === "TODOS" || limitJuego.toLowerCase() === juego.toLowerCase();
@@ -1035,7 +1113,7 @@ app.post("/api/ventas", (req, res) => {
     return true;
   });
 
-  if (applicableLimit) {
+  for (const applicableLimit of applicableLimits) {
     const limitMontoCs = Number(applicableLimit.max_monto ?? applicableLimit.montoMaximo ?? applicableLimit.techo_dinero);
     const todayStr = now.toISOString().split("T")[0];
     
@@ -1084,8 +1162,11 @@ app.post("/api/ventas", (req, res) => {
         ? `C$ ${availableCs.toFixed(2)}` 
         : `$ ${(availableCs / db.configuracion.tasa_cambio).toFixed(2)}`;
         
+      const limitTypeMsg = (!applicableLimit.id_vendedor || applicableLimit.id_vendedor === "TODOS") 
+        ? "GLOBAL" : "INDIVIDUAL (Vendedor)";
+
       return res.status(400).json({
-        error: `VENTA RECHAZADA (LÍMITE ALCANZADO): El número "${numero_jugado}" en "${juego}" para el sorteo "${sorteo}" tiene un techo de venta asignado de C$ ${limitMontoCs.toFixed(2)}. Ya vendido hoy: C$ ${totalPrevSalesCs.toFixed(2)}. Cupo restante: ${availableMsg}.`
+        error: `VENTA RECHAZADA (LÍMITE ${limitTypeMsg}): El número "${numero_jugado}" en "${juego}" para el sorteo "${sorteo}" tiene un techo de venta asignado de C$ ${limitMontoCs.toFixed(2)}. Ya vendido hoy: C$ ${totalPrevSalesCs.toFixed(2)}. Cupo restante: ${availableMsg}.`
       });
     }
   }
@@ -1118,6 +1199,8 @@ app.post("/api/ventas", (req, res) => {
     moneda,
     id_vendedor,
     nombre_vendedor: user.nombre,
+    nombre_cliente: nombre_cliente || "Genérico",
+    premio_posible_cs: Number(premio_posible_cs) || 0,
     firma_digital: signature,
     anulado: false
   };
@@ -1149,9 +1232,10 @@ app.post("/api/ventas", (req, res) => {
   res.status(201).json(newSale);
 });
 
-// Anulación de Tickets (Permitted only within 5 minutes)
+// Anulación de Tickets (Basado en Hora de Cierre o Admin)
 app.post("/api/ventas/:id/anular", (req, res) => {
   const { id } = req.params;
+  const { userRole } = req.body;
   const sale = db.ventas.find((v: any) => v.id === id);
 
   if (!sale) {
@@ -1162,15 +1246,23 @@ app.post("/api/ventas/:id/anular", (req, res) => {
     return res.status(400).json({ error: "Este ticket ya se encuentra anulado." });
   }
 
-  // 5-minute rule validation
-  const creationTime = new Date(sale.timestamp_servidor).getTime();
-  const now = Date.now();
-  const diffMinutes = (now - creationTime) / 60000;
-
-  if (diffMinutes > 5) {
-    return res.status(400).json({
-      error: `No se puede anular. Han transcurrido ${Math.floor(diffMinutes)} minutos (límite máximo de 5 minutos).`
-    });
+  // If not admin, validate against hora_cierre
+  if (userRole !== "admin" && userRole !== "administrador") {
+    const selectedSorteo = db.configuracion.sorteos.find((s: any) => s.nombre === sale.sorteo && s.juego === sale.juego);
+    if (selectedSorteo) {
+      const now = new Date();
+      const [cierreHour, cierreMin] = selectedSorteo.hora_cierre.split(":").map(Number);
+      const currentHour = now.getHours();
+      const currentMin = now.getMinutes();
+      
+      const isPastCierre = (currentHour > cierreHour) || (currentHour === cierreHour && currentMin >= cierreMin);
+      
+      if (isPastCierre) {
+        return res.status(400).json({
+          error: `VENTA BLOQUEADA: El sorteo ${sale.sorteo} ya cerró a las ${selectedSorteo.hora_cierre}. No se puede anular.`
+        });
+      }
+    }
   }
 
   sale.anulado = true;
@@ -1235,6 +1327,17 @@ app.post("/api/cierres", (req, res) => {
   res.status(201).json(newCierre);
 });
 
+// Marcar cierre como cobrado
+app.patch("/api/cierres/:id", (req, res) => {
+  const { id } = req.params;
+  const cc = db.cierres_caja.find((c: any) => c.id === id);
+  if (!cc) {
+    return res.status(404).json({ error: "Cierre de caja no encontrado." });
+  }
+  cc.cobrado = true;
+  saveToDB();
+  res.json({ success: true, message: "Cierre marcado como cobrado exitosamente.", closure: cc });
+});
 
 // Mounting Vite middleware in development
 async function startServer() {

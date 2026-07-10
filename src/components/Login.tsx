@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "../lib/firebase";
 import { Usuario } from "../types";
+import toast from "react-hot-toast";
 import { 
   Lock, 
   Mail, 
@@ -85,6 +86,7 @@ export default function Login({ users, onLoginSuccess }: LoginProps) {
           setLoading(false);
           return;
         }
+        toast.success(`¡Bienvenido de nuevo, ${matchedUser.nombre}!`, { position: 'top-center' });
         onLoginSuccess(matchedUser);
       } else {
         setError("Usuario autenticado pero no registrado en la base de datos de lotería.");
@@ -139,9 +141,7 @@ export default function Login({ users, onLoginSuccess }: LoginProps) {
           alt="La Nueva Era" 
           className="w-48 h-auto mx-auto object-contain filter drop-shadow-md"
         />
-        <p className="text-xs text-gray-500 font-mono tracking-widest mt-3 uppercase">
-          PWA MULTI-PAÍS • INICIO DE SESIÓN
-        </p>
+
       </motion.div>
 
       {/* Main Login Card */}
@@ -151,9 +151,7 @@ export default function Login({ users, onLoginSuccess }: LoginProps) {
         transition={{ duration: 0.4, delay: 0.1 }}
         className="bg-white rounded-3xl shadow-xl border border-gray-100 p-6 sm:p-8 w-full"
       >
-        <h2 className="text-lg font-bold text-gray-950 uppercase tracking-wide mb-4">
-          Acceso Autorizado
-        </h2>
+
 
         {error && (
           <motion.div 

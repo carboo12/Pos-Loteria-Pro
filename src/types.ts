@@ -83,6 +83,8 @@ export interface Venta {
   moneda: "C$" | "USD";
   id_vendedor: string;
   nombre_vendedor: string;
+  nombre_cliente?: string;
+  premio_posible_cs?: number;
   firma_digital: string; // e.g. "A9X-2M"
   anulado: boolean;
 }

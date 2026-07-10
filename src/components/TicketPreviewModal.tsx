@@ -99,16 +99,22 @@ export default function TicketPreviewModal({ ticket, config, onClose, userRole =
     return new Date();
   })();
 
-  const drawTime = extractTimeFromSorteo(ticket.sorteo);
-  const pastDraw = isTimePast(drawTime, syncedNow);
-  const isBlocked = userRole === "vendedor" && pastDraw;
+  const isBlocked = (() => {
+    if (userRole === "admin" || userRole === "administrador") return false;
+    const s = config.sorteos?.find(x => x.nombre === ticket.sorteo && x.juego === ticket.juego);
+    if (!s) return false; // Falback if draw not found
+    const [cierreHour, cierreMin] = s.hora_cierre.split(":").map(Number);
+    const currentHour = syncedNow.getHours();
+    const currentMin = syncedNow.getMinutes();
+    return (currentHour > cierreHour) || (currentHour === cierreHour && currentMin >= cierreMin);
+  })();
 
   const multiplier = calculatePrizeMultiplier(ticket.juego, ticket.sorteo);
   // Premios siempre en C$ (moneda local). Si el boleto fue en USD, convertir con tasa_cambio.
   const montoInCs = ticket.moneda === "USD"
     ? ticket.monto_pago * (config.tasa_cambio || 36.50)
     : ticket.monto_pago;
-  const potentialPrizeCs = montoInCs * multiplier;
+  const potentialPrizeCs = ticket.premio_posible_cs ?? (montoInCs * multiplier);
 
   const formatTicketDate = (isoString: string) => {
     try {
@@ -144,16 +150,16 @@ export default function TicketPreviewModal({ ticket, config, onClose, userRole =
 ${config.formato_ticket.titulo}
 ${config.formato_ticket.ruc}
 --------------------------------
-TICKET: #${ticket.numero_ticket}
-FECHA: ${formatTicketDate(ticket.timestamp_servidor)}
-VENDEDOR: ${ticket.nombre_vendedor}
---------------------------------
-JUEGO: ${ticket.juego.toUpperCase()}
+  TICKET: #${ticket.numero_ticket}
+  FECHA: ${formatTicketDate(ticket.timestamp_servidor)}
+  VENDEDOR: ${ticket.nombre_vendedor}
+${ticket.nombre_cliente ? `  CLIENTE: ${ticket.nombre_cliente}\n` : ""}  --------------------------------
+  JUEGO: ${ticket.juego.toUpperCase()}
 SORTEO: ${ticket.sorteo}
-NÚMERO JUGADO: [ ${ticket.numero_jugado} ]
-MONTO: ${ticket.moneda} ${ticket.monto_pago.toFixed(2)}
-PREMIO POSIBLE: ${ticket.moneda} ${potentialPrize.toFixed(2)}
---------------------------------
+  NÚMERO JUGADO: [ ${ticket.numero_jugado} ]
+  MONTO: ${ticket.moneda} ${ticket.monto_pago.toFixed(2)}
+  PREMIO POSIBLE: C$ ${potentialPrizeCs.toFixed(2)}
+  --------------------------------
 FIRMA DIGITAL: ${ticket.firma_digital}
 --------------------------------
 ${config.formato_ticket.mensaje_pie}
@@ -196,12 +202,12 @@ ${config.formato_ticket.mensaje_pie}
             <h2>${config.formato_ticket.titulo}</h2>
             <div>${config.formato_ticket.ruc}</div>
             <hr />
-            <div style="text-align: left;">
-              <div><strong>TICKET:</strong> #${ticket.numero_ticket}</div>
-              <div><strong>FECHA:</strong> ${formatTicketDate(ticket.timestamp_servidor)}</div>
-              <div><strong>VENDEDOR:</strong> ${ticket.nombre_vendedor}</div>
-            </div>
-            <hr />
+              <div style="text-align: left;">
+                <div><strong>TICKET:</strong> #${ticket.numero_ticket}</div>
+                <div><strong>FECHA:</strong> ${formatTicketDate(ticket.timestamp_servidor)}</div>
+                <div><strong>VENDEDOR:</strong> ${ticket.nombre_vendedor}</div>
+${ticket.nombre_cliente ? `                <div><strong>CLIENTE:</strong> ${ticket.nombre_cliente}</div>\n` : ""}              </div>
+              <hr />
             <div style="font-weight: bold;">${ticket.juego.toUpperCase()}</div>
             <div>Sorteo: ${ticket.sorteo}</div>
             <div style="margin: 8px 0;">
@@ -234,7 +240,7 @@ ${config.formato_ticket.mensaje_pie}
                     <div style="font-size: 10px; font-weight: bold;">GANADOR: ${rObj.numero_ganador}</div>
                     <div style="font-size: 14px; font-weight: bold; margin-top: 2px;">🎉 ¡BOLETO PREMIADO!</div>
                     <div style="font-size: 9px; margin-top: 4px; font-weight: bold;">CANTIDAD A PAGAR:</div>
-                    <div style="font-size: 18px; font-weight: bold; font-family: monospace;">${ticket.moneda} ${potentialPrize.toFixed(2)}</div>
+                    <div style="font-size: 18px; font-weight: bold; font-family: monospace;">C$ ${potentialPrizeCs.toFixed(2)}</div>
                   </div>
                 `;
               } else {
@@ -254,7 +260,7 @@ ${config.formato_ticket.mensaje_pie}
             <hr />
             <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 10px;">
               <img 
-                src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=https://lanuevaera.net/verificar?ticket=${ticket.numero_ticket}%26firma=${ticket.firma_digital}"
+                src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${window.location.origin}/verificar?ticket=${ticket.numero_ticket}%26firma=${ticket.firma_digital}"
                 alt="Código QR de Verificación"
                 style="width: 100px; height: 100px; border: 1px solid #ccc; padding: 4px; background: #fff;"
               />
@@ -361,6 +367,12 @@ ${config.formato_ticket.mensaje_pie}
                 <span>VENDEDOR:</span>
                 <span className="text-gray-950 uppercase truncate max-w-[150px]">{ticket.nombre_vendedor}</span>
               </div>
+              {ticket.nombre_cliente && (
+                <div className="flex justify-between">
+                  <span>CLIENTE:</span>
+                  <span className="text-gray-950 uppercase truncate max-w-[150px]">{ticket.nombre_cliente}</span>
+                </div>
+              )}
             </div>
 
             <div className="border-t border-dashed border-gray-300 my-2" />
@@ -474,7 +486,7 @@ ${config.formato_ticket.mensaje_pie}
               
               <div className="flex flex-col items-center bg-gray-50 p-2 rounded-xl border border-gray-200">
                 <img 
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=https://lanuevaera.net/verificar?ticket=${ticket.numero_ticket}%26firma=${ticket.firma_digital}`}
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${window.location.origin}/verificar?ticket=${ticket.numero_ticket}%26firma=${ticket.firma_digital}`}
                   alt="QR Verificación"
                   className="w-20 h-20 bg-white p-1 rounded-lg border border-gray-200 shadow-xs"
                   referrerPolicy="no-referrer"

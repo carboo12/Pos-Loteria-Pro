@@ -52,6 +52,15 @@ interface VendedorInterfaceProps {
   serverTime: string;
 }
 
+function calculatePrizeMultiplier(juego: string, sorteo: string): number {
+  const cleanJuego = juego.trim();
+  if (cleanJuego === "Premia2" && sorteo.includes("(NI)")) return 4000;
+  if (cleanJuego === "Jugá 3") return 600;
+  if (cleanJuego === "Fechas") return 210;
+  if (cleanJuego === "3 Monazos") return 650;
+  return 80;
+}
+
 export default function VendedorInterface({
   user,
   config,
@@ -72,9 +81,33 @@ export default function VendedorInterface({
   const [numeroJugado, setNumeroJugado] = useState("");
   const [montoPago, setMontoPago] = useState("");
   const [moneda, setMoneda] = useState<"C$" | "USD">("C$");
+  const [nombreCliente, setNombreCliente] = useState("Genérico");
   
-  // Connection state simulator
-  const [isOnline, setIsOnline] = useState(true);
+  // Connection state
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    
+    const pingInterval = setInterval(async () => {
+      if (!navigator.onLine) return;
+      try {
+        const res = await fetch("/api/ping");
+        setIsOnline(res.ok);
+      } catch (e) {
+        setIsOnline(false);
+      }
+    }, 30000);
+    
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      clearInterval(pingInterval);
+    };
+  }, []);
 
   // Time synchronization offset
   const [clockOffset, setClockOffset] = useState(0);
@@ -102,7 +135,7 @@ export default function VendedorInterface({
   const [qrSearchInput, setQrSearchInput] = useState("");
   const [qrSearchError, setQrSearchError] = useState<string | null>(null);
 
-  const handleTicketQrSearch = (e: FormEvent) => {
+  const handleTicketQrSearch = async (e: FormEvent) => {
     e.preventDefault();
     setQrSearchError(null);
     const query = qrSearchInput.trim();
@@ -143,13 +176,25 @@ export default function VendedorInterface({
       setActiveTicket(found);
       setQrSearchInput("");
     } else {
-      setQrSearchError(`No se encontró ningún ticket con ID, número o firma: "${query}"`);
+      try {
+        const response = await fetch(`/api/ventas?ticket=${cleanNum}`);
+        if (!response.ok) throw new Error("Error en red");
+        const data = await response.json();
+        if (data && data.length > 0) {
+          setActiveTicket(data[0]);
+          setQrSearchInput("");
+        } else {
+          setQrSearchError(`No se encontró ningún ticket con ID, número o firma: "${query}"`);
+        }
+      } catch (err) {
+        setQrSearchError(`No se encontró ningún ticket con ID, número o firma: "${query}"`);
+      }
     }
   };
 
   // Mappings of games by country
   const PAISES_GAMES = {
-    Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2"],
+    Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"],
     Honduras: ["La Diaria", "Premia2", "Pega 3", "Súper Premio"],
     "El Salvador": ["Diaria"],
     "La Primera": ["La Primera"],
@@ -199,7 +244,7 @@ export default function VendedorInterface({
 
   // Helper to format Date as YYYY-MM-DD
   const getTodayString = () => {
-    const d = new Date();
+    const d = getSyncedNow();
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
@@ -513,6 +558,10 @@ export default function VendedorInterface({
       return;
     }
 
+    const multiplier = calculatePrizeMultiplier(selectedJuego, selectedSorteo);
+    const montoInCs = moneda === "USD" ? numericAmount * (config.tasa_cambio || 36.50) : numericAmount;
+    const premioPosibleCs = montoInCs * multiplier;
+
     // Offline simulation behavior
     if (!isOnline) {
       setErrorMessage("ERROR DE CONEXIÓN: No se puede conectar con el servidor. Ticket guardado en cola local offline.");
@@ -529,6 +578,8 @@ export default function VendedorInterface({
         moneda: moneda,
         id_vendedor: user.id,
         nombre_vendedor: user.nombre,
+        nombre_cliente: nombreCliente.trim() || "Genérico",
+        premio_posible_cs: premioPosibleCs,
         firma_digital: "OFFLINE-QUEUED",
         anulado: false
       };
@@ -542,6 +593,7 @@ export default function VendedorInterface({
         // reset forms
         setNumeroJugado("");
         setMontoPago("");
+        setNombreCliente("Genérico");
       }, 800);
       return;
     }
@@ -557,7 +609,9 @@ export default function VendedorInterface({
           numero_jugado: numeroJugado,
           monto_pago: numericAmount,
           moneda: moneda,
-          id_vendedor: user.id
+          id_vendedor: user.id,
+          nombre_cliente: nombreCliente.trim() || "Genérico",
+          premio_posible_cs: premioPosibleCs
         })
       });
 
@@ -572,6 +626,7 @@ export default function VendedorInterface({
       setSuccessMessage(`Ticket #${data.numero_ticket} emitido con éxito.`);
       setNumeroJugado("");
       setMontoPago("");
+      setNombreCliente("Genérico");
       onRefreshSales();
     } catch (err: any) {
       setErrorMessage(err.message || "Ocurrió un error inesperado al emitir el ticket.");
@@ -593,7 +648,9 @@ export default function VendedorInterface({
     setLoading(true);
     try {
       const response = await fetch(`/api/ventas/${ticketId}/anular`, {
-        method: "POST"
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userRole: user.rol })
       });
       const data = await response.json();
       
@@ -678,7 +735,7 @@ export default function VendedorInterface({
   };
 
   return (
-    <div id="vendedor-container" className="flex flex-col bg-[#F3F4F6] flex-1 w-full">
+    <div id="vendedor-container" className="flex flex-col bg-[#F3F4F6] h-full w-full overflow-hidden">
       
       {/* Vendedor Bar */}
       <div className="bg-[#1E3A8A] text-white px-4 py-3 flex flex-col justify-between border-b border-blue-950">
@@ -694,12 +751,7 @@ export default function VendedorInterface({
             {/* Live simulator connection switch */}
             <button
               id="conn-toggle"
-              onClick={() => {
-                setIsOnline(!isOnline);
-                setErrorMessage(null);
-                setSuccessMessage(null);
-              }}
-              className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all shadow-inner border cursor-pointer ${
+              className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all shadow-inner border ${
                 isOnline 
                   ? "bg-[#10B981] border-[#0F9F6F] text-white" 
                   : "bg-[#EF4444] border-[#D83A3A] text-white"
@@ -868,24 +920,37 @@ export default function VendedorInterface({
             <div>
               <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1.5">1. Seleccione Juego ({selectedPais})</label>
               <div className="grid grid-cols-3 gap-1.5">
-                {PAISES_GAMES[selectedPais as keyof typeof PAISES_GAMES]?.map((juego) => (
-                  <button
-                    key={juego}
-                    id={`game-select-${juego.replace(/\s+/g, "-")}`}
-                    onClick={() => {
-                      setSelectedJuego(juego);
-                      setErrorMessage(null);
-                      setSuccessMessage(null);
-                    }}
-                    className={`py-2.5 px-1 rounded-xl text-[10px] font-display font-black transition-all border text-center cursor-pointer truncate shadow-xs ${
-                      selectedJuego === juego
-                        ? "bg-[#1E3A8A] text-white border-blue-900 font-bold"
-                        : "bg-white text-gray-800 border-gray-300 hover:bg-gray-100"
-                    }`}
-                  >
-                    {juego.toUpperCase()}
-                  </button>
-                ))}
+                {PAISES_GAMES[selectedPais as keyof typeof PAISES_GAMES]?.map((juego) => {
+                  const isSabadito = juego === "Sabadito";
+                  const isWeekend = [0, 6].includes(getSyncedNow().getDay());
+                  const disabled = isSabadito && !isWeekend;
+
+                  return (
+                    <button
+                      key={juego}
+                      id={`game-select-${juego.replace(/\s+/g, "-")}`}
+                      onClick={() => {
+                        if (disabled) {
+                          setErrorMessage("Sabadito solo está disponible Sábados y Domingos.");
+                          return;
+                        }
+                        setSelectedJuego(juego);
+                        setErrorMessage(null);
+                        setSuccessMessage(null);
+                      }}
+                      disabled={disabled}
+                      className={`py-2.5 px-1 rounded-xl text-[10px] font-display font-black transition-all border text-center truncate shadow-xs ${
+                        disabled ? "opacity-50 cursor-not-allowed bg-gray-200 text-gray-500 border-gray-300" : "cursor-pointer"
+                      } ${
+                        !disabled && selectedJuego === juego
+                          ? "bg-[#1E3A8A] text-white border-blue-900 font-bold"
+                          : !disabled ? "bg-white text-gray-800 border-gray-300 hover:bg-gray-100" : ""
+                      }`}
+                    >
+                      {juego.toUpperCase()}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -1034,6 +1099,30 @@ export default function VendedorInterface({
                     }`}
                   />
                 </div>
+              </div>
+
+              {/* Nombre del Cliente */}
+              <div className="col-span-12 mt-2">
+                <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">Nombre del Cliente</label>
+                <input
+                  type="text"
+                  value={nombreCliente}
+                  onChange={(e) => setNombreCliente(e.target.value)}
+                  placeholder="Genérico"
+                  className="w-full p-2.5 rounded-xl border-2 border-gray-300 text-sm font-semibold focus:outline-none focus:border-blue-900 bg-white text-gray-900 shadow-inner"
+                />
+              </div>
+
+              {/* Posible Premio Indicator */}
+              <div className="col-span-12 mt-3 bg-blue-50 border border-blue-200 rounded-xl p-3 flex justify-between items-center">
+                <span className="text-xs font-display font-black text-blue-900 uppercase tracking-wider">Premio Posible:</span>
+                <span className="font-mono text-lg font-black text-emerald-600">
+                  C$ {(() => {
+                    const amt = Number(montoPago) || 0;
+                    const amtCs = moneda === "USD" ? amt * (config.tasa_cambio || 36.50) : amt;
+                    return (amtCs * calculatePrizeMultiplier(selectedJuego, selectedSorteo)).toFixed(2);
+                  })()}
+                </span>
               </div>
             </div>
 
@@ -1248,8 +1337,9 @@ export default function VendedorInterface({
             ) : (
               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
                 {displayedSales.map((sale) => {
-                  const secondsRemaining = getSecondsRemaining(sale.timestamp_servidor);
-                  const canVoid = secondsRemaining > 0 && !sale.anulado;
+                  const saleSorteo = config?.sorteos?.find(s => s.nombre === sale.sorteo && s.juego === sale.juego);
+                  const isClosed = saleSorteo ? isSorteoCerrado(saleSorteo) : true;
+                  const canVoid = !isClosed && !sale.anulado;
 
                   return (
                     <div 
@@ -1322,12 +1412,12 @@ export default function VendedorInterface({
                               className="px-2.5 py-1 bg-[#EF4444] hover:bg-[#D83A3A] text-white font-sans font-bold text-xs rounded-lg flex items-center space-x-1 cursor-pointer shadow-xs animate-pulse"
                             >
                               <X className="w-3.5 h-3.5 stroke-[2.5]" />
-                              <span>Anular ({secondsRemaining}s)</span>
+                              <span>Anular</span>
                             </button>
                           ) : (
                             !sale.anulado && (
                               <span className="text-[10px] text-gray-400 font-sans italic self-center">
-                                Bloqueado (&gt;5m)
+                                Sorteo Cerrado
                               </span>
                             )
                           )}

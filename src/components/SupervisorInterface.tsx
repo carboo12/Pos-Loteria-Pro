@@ -87,8 +87,32 @@ export default function SupervisorInterface({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [allCobros, setAllCobros] = useState<CobroVendedor[]>([]);
   
-  // Simulated connection and live clock to match Vendedor POS visual identity
-  const [isOnline, setIsOnline] = useState(true);
+  // Automatic connection state
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    
+    const pingInterval = setInterval(async () => {
+      if (!navigator.onLine) return;
+      try {
+        const res = await fetch("/api/ping");
+        setIsOnline(res.ok);
+      } catch (e) {
+        setIsOnline(false);
+      }
+    }, 30000);
+    
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      clearInterval(pingInterval);
+    };
+  }, []);
+  
   const [timeText, setTimeText] = useState("");
 
   useEffect(() => {
@@ -306,13 +330,8 @@ export default function SupervisorInterface({
             </button>
 
             {/* Simulated Live Connection indicators */}
-            <button
-              onClick={() => {
-                setIsOnline(!isOnline);
-                setErrorMessage(null);
-                setSuccessMessage(null);
-              }}
-              className={`flex items-center space-x-1 px-3 min-h-[44px] rounded-full text-[9px] font-black uppercase transition-all shadow-inner border cursor-pointer ${
+              <button
+                className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all shadow-inner border ${
                 isOnline 
                   ? "bg-[#10B981] border-[#0F9F6F] text-white" 
                   : "bg-[#EF4444] border-[#D83A3A] text-white"

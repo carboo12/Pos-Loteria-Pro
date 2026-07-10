@@ -8,6 +8,7 @@ import Login from "./components/Login";
 import { auth } from "./lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { AlertTriangle, Clock, Lock, ShieldCheck, Sun } from "lucide-react";
+import { Toaster } from "react-hot-toast";
 
 // Session inactivity timeout configuration
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
@@ -325,6 +326,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <Toaster position="top-right" />
 
       {/* Main viewport with strict layout checks */}
       <div className="flex-1 w-full flex flex-col min-h-0 overflow-hidden">

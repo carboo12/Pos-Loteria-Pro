@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
 import { jsPDF } from "jspdf";
+import toast from "react-hot-toast";
 import TicketPreviewModal from "./TicketPreviewModal";
 import {
   ResponsiveContainer,
@@ -154,7 +155,11 @@ export default function AdminInterface({
   // Local form states
   const [exchangeRateInput, setExchangeRateInput] = useState(String(config.tasa_cambio));
   const [ticketTitleInput, setTicketTitleInput] = useState(config.formato_ticket.titulo);
-  const [ticketRucInput, setTicketRucInput] = useState(config.formato_ticket.ruc);
+  const [ticketRucInput, setTicketRucInput] = useState(
+    config.formato_ticket.ruc === "RUC-J0310000123456" || config.formato_ticket.ruc.includes("RUC")
+      ? "pida su ticket en su compra."
+      : config.formato_ticket.ruc
+  );
   const [ticketFooterInput, setTicketFooterInput] = useState(config.formato_ticket.mensaje_pie);
 
   // Advanced User CRUD states
@@ -248,7 +253,7 @@ export default function AdminInterface({
 
   useEffect(() => {
     const PAISES_GAMES: Record<string, string[]> = {
-      Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2"],
+      Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"],
       Honduras: ["La Diaria", "Premia2", "Pega 3", "Súper Premio"],
       "El Salvador": ["Diaria"],
       "La Primera": ["La Primera"],
@@ -311,8 +316,10 @@ export default function AdminInterface({
   };
 
   // Feedback notifications
-  const [alertText, setAlertText] = useState<string | null>(null);
-  const [successText, setSuccessText] = useState<string | null>(null);
+  const alertText = null;
+  const setAlertText = (text: string | null) => { if (text) toast.error(text, { position: 'bottom-center' }); };
+  const successText = null;
+  const setSuccessText = (text: string | null) => { if (text) toast.success(text, { position: 'bottom-center' }); };
   const [submitting, setSubmitting] = useState(false);
 
   // Notifications Hub State
@@ -427,8 +434,11 @@ export default function AdminInterface({
   const totalSellersCount = activeSellers.length;
   const onlineSellersCount = activeSellers.filter(u => u.conexion === "online").length;
 
+  const today = new Date().toISOString().substring(0, 10);
+
   const activeSales = sales.filter(s => {
     if (s.anulado) return false;
+    if (s.timestamp_servidor && !s.timestamp_servidor.startsWith(today)) return false;
     if (simulatedSupervisorId) {
       const seller = users.find(u => u.id === s.id_vendedor);
       return seller && seller.id_supervisor === simulatedSupervisorId;
@@ -438,6 +448,7 @@ export default function AdminInterface({
   
   const voidedSales = sales.filter(s => {
     if (!s.anulado) return false;
+    if (s.timestamp_servidor && !s.timestamp_servidor.startsWith(today)) return false;
     if (simulatedSupervisorId) {
       const seller = users.find(u => u.id === s.id_vendedor);
       return seller && seller.id_supervisor === simulatedSupervisorId;
@@ -540,7 +551,8 @@ export default function AdminInterface({
       };
 
       // Header block
-      printCenter("RAPIGESTION", 14, true);
+      const mainTitle = config.formato_ticket?.titulo?.toUpperCase() || "LA NUEVA ERA";
+      printCenter(mainTitle, 14, true);
       printCenter("MONITOR REPORTE DIARIO", 10, true);
       printCenter("--- IMPRESORA TÉRMICA 80MM ---", 7, false);
       y += 1;
@@ -567,7 +579,7 @@ export default function AdminInterface({
       // Sales by Game
       printCenter("VENTAS POR TIPO DE JUEGO", 9, true);
       y += 1;
-      ["Diaria", "La Diaria", "Premia2", "Jugá 3", "Fechas", "Pega 3", "Súper Premio", "3 Monazos", "Tica", "Terminación 2", "La Primera"].forEach((juego) => {
+      ["Diaria", "La Diaria", "Premia2", "Jugá 3", "Fechas", "Pega 3", "Súper Premio", "3 Monazos", "Tica", "Terminación 2", "Sabadito", "La Primera"].forEach((juego) => {
         const stats = gameStats[juego] || { cs: 0, usd: 0, count: 0 };
         if (stats.count === 0) return; // skip games with no sales
         const totalGameCs = stats.cs + (stats.usd * config.tasa_cambio);
@@ -608,7 +620,7 @@ export default function AdminInterface({
 
       drawSeparator("=");
       printCenter("FIN DEL REPORTE", 8, true);
-      printCenter("SISTEMA RAPIGESTION PRO", 7, false);
+      printCenter("SISTEMA " + mainTitle, 7, false);
       printCenter(now.toISOString().substring(0, 19).replace("T", " "), 6, false);
 
       // Save PDF
@@ -780,6 +792,25 @@ export default function AdminInterface({
       onRefreshUsers();
     } else {
       setAlertText("Error al eliminar el usuario.");
+    }
+  };
+
+  // Mark closure as collected (cobrado)
+  const handleMarkClosureCollected = async (closureId: string) => {
+    setAlertText(null);
+    setSuccessText(null);
+    try {
+      const res = await fetch(`/api/cierres/${closureId}`, {
+        method: "PATCH"
+      });
+      if (res.ok) {
+        setSuccessText("El cierre de caja ha sido marcado como cobrado exitosamente.");
+      } else {
+        const data = await res.json();
+        setAlertText(data.error || "Error al marcar el cierre como cobrado.");
+      }
+    } catch (err) {
+      setAlertText("Error de red al marcar el cierre como cobrado.");
     }
   };
 
@@ -1826,6 +1857,21 @@ export default function AdminInterface({
                               </div>
                             </div>
                           )}
+
+                          {!closure.cobrado ? (
+                            <button
+                              onClick={() => handleMarkClosureCollected(closure.id)}
+                              className="mt-3 w-full py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-colors shadow-sm active:scale-95 flex items-center justify-center space-x-2"
+                            >
+                              <Briefcase className="w-4 h-4" />
+                              <span>Marcar como Cobrado</span>
+                            </button>
+                          ) : (
+                            <div className="mt-3 w-full py-2 bg-gray-100 border border-gray-200 text-gray-400 font-bold text-xs uppercase tracking-wider rounded-xl text-center flex items-center justify-center space-x-2">
+                              <CheckCircle className="w-4 h-4" />
+                              <span>Cobrado</span>
+                            </div>
+                          )}
                         </div>
 
                       </div>
@@ -1942,6 +1988,10 @@ export default function AdminInterface({
                     <div className="border-t border-dashed border-gray-300 my-1.5"></div>
                     <div>TICKET: #0001045</div>
                     <div>VENDEDOR: Diana Martínez</div>
+                    <div className="flex justify-between items-center text-[7px] text-gray-600 mt-0.5 font-bold">
+                      <span>Lunes 06 de Julio del 2026</span>
+                      <span>15:00:23</span>
+                    </div>
                     <div className="border-t border-dashed border-gray-300 my-1.5"></div>
                     <div className="text-center bg-gray-50 p-1.5 border border-gray-100 rounded">
                       <div className="font-bold">DIARIA 3:00 PM</div>
@@ -1949,7 +1999,13 @@ export default function AdminInterface({
                       <div>MONTO: C$ 100.00</div>
                     </div>
                     <div className="border-t border-dashed border-gray-300 my-1.5"></div>
-                    <div className="text-center text-[7.5px] italic text-gray-500">{ticketFooterInput || "Gracias por su compra."}</div>
+                    <div className="text-center text-[7.5px] italic text-gray-500 mb-2">{ticketFooterInput || "Gracias por su compra."}</div>
+                    
+                    {/* Fake QR Code */}
+                    <div className="flex flex-col items-center justify-center mt-1">
+                      <QrCode className="w-10 h-10 text-gray-900" strokeWidth={1.2} />
+                      <span className="text-[6px] text-gray-400 font-mono tracking-widest mt-0.5">0001045-987654</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2037,7 +2093,7 @@ export default function AdminInterface({
                       onChange={(e) => setNewSorteoJuego(e.target.value)}
                       className="w-full px-2 py-2 min-h-[44px] bg-white border border-gray-300 rounded-lg text-xs font-semibold focus:outline-none"
                     >
-                      {((newSorteoPais === "Nicaragua" ? ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2"] :
+                      {((newSorteoPais === "Nicaragua" ? ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"] :
                          newSorteoPais === "Honduras" ? ["La Diaria", "Premia2", "Pega 3", "Súper Premio"] :
                          newSorteoPais === "El Salvador" ? ["Diaria"] :
                          newSorteoPais === "La Primera" ? ["La Primera"] :
@@ -2695,12 +2751,12 @@ export default function AdminInterface({
                         }}
                         className="w-full px-3 py-2 min-h-[44px] bg-white border border-gray-300 rounded-xl text-xs font-bold text-gray-900 focus:outline-none"
                       >
-                        {((selectedPaisLimite === "Nicaragua" ? ["TODOS", "Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2"] :
+                        {((selectedPaisLimite === "Nicaragua" ? ["TODOS", "Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"] :
                            selectedPaisLimite === "Honduras" ? ["TODOS", "La Diaria", "Premia2", "Pega 3", "Súper Premio"] :
                            selectedPaisLimite === "El Salvador" ? ["TODOS", "Diaria"] :
                            selectedPaisLimite === "La Primera" ? ["TODOS", "La Primera"] :
                            selectedPaisLimite === "Costa Rica" ? ["TODOS", "3 Monazos", "Tica"] :
-                           ["TODOS", "Diaria", "La Diaria", "Jugá 3", "3 Monazos", "Premia2", "Pega 3", "Súper Premio", "La Primera", "Tica", "Fechas", "Terminación 2"])).map(j => (
+                           ["TODOS", "Diaria", "La Diaria", "Jugá 3", "3 Monazos", "Premia2", "Pega 3", "Súper Premio", "La Primera", "Tica", "Fechas", "Terminación 2", "Sabadito"])).map(j => (
                           <option key={j} value={j}>{j}</option>
                         ))}
                       </select>
@@ -2816,7 +2872,14 @@ export default function AdminInterface({
                           return (
                             <tr key={lim.id} className="hover:bg-gray-50">
                               <td className="p-2.5 font-bold text-gray-700 uppercase">
-                                {lim.id_vendedor === "TODOS" ? "GLOBAL (TODOS)" : matchedUser?.nombre || "Vendedor"}
+                                {lim.id_vendedor === "TODOS" ? (
+                                  <span className="bg-indigo-100 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded text-[10px]">GLOBAL (TODOS)</span>
+                                ) : (
+                                  <div className="flex flex-col">
+                                    <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded text-[10px] w-fit mb-0.5">INDIVIDUAL</span>
+                                    <span className="text-[11px] truncate max-w-[120px]" title={matchedUser?.nombre || "Vendedor"}>{matchedUser?.nombre || "Vendedor"}</span>
+                                  </div>
+                                )}
                               </td>
                               <td className="p-2.5 font-mono text-gray-600 font-bold uppercase">
                                 {lim.pais || "TODOS"}

@@ -11,14 +11,280 @@
       "region": "Nicaragua",
       "email": "carboo12@gmail.com",
       "id_supervisor": "",
-      "vendedoresAsignados": []
+      "vendedoresAsignados": [],
+      "configuracion": {
+        "tasa_cambio": 36.5,
+        "contador_global_tickets": 1045,
+        "formato_ticket": {
+          "titulo": "LA NUEVA ERA",
+          "ruc": "pida su ticke 23",
+          "mensaje_pie": "¡Gracias por su compra! Verifique su ticket en línea."
+        },
+        "sorteos": [
+          {
+            "id": "ni_diaria_11",
+            "juego": "Diaria",
+            "hora_sorteo": "11:00",
+            "hora_cierre": "10:55",
+            "nombre": "Diaria 11:00 AM (NI)"
+          },
+          {
+            "id": "ni_diaria_15",
+            "juego": "Diaria",
+            "hora_sorteo": "15:00",
+            "hora_cierre": "14:55",
+            "nombre": "Diaria 3:00 PM (NI)"
+          },
+          {
+            "id": "ni_diaria_21",
+            "juego": "Diaria",
+            "hora_sorteo": "21:00",
+            "hora_cierre": "20:55",
+            "nombre": "Diaria 9:00 PM (NI)"
+          },
+          {
+            "id": "ni_fechas_11",
+            "juego": "Fechas",
+            "hora_sorteo": "11:00",
+            "hora_cierre": "10:55",
+            "nombre": "Fechas 11:00 AM (NI)"
+          },
+          {
+            "id": "ni_fechas_15",
+            "juego": "Fechas",
+            "hora_sorteo": "15:00",
+            "hora_cierre": "14:55",
+            "nombre": "Fechas 3:00 PM (NI)"
+          },
+          {
+            "id": "ni_fechas_21",
+            "juego": "Fechas",
+            "hora_sorteo": "21:00",
+            "hora_cierre": "20:55",
+            "nombre": "Fechas 9:00 PM (NI)"
+          },
+          {
+            "id": "ni_juga3_11",
+            "juego": "Jugá 3",
+            "hora_sorteo": "11:00",
+            "hora_cierre": "10:55",
+            "nombre": "Jugá 3 11:00 AM (NI)"
+          },
+          {
+            "id": "ni_juga3_15",
+            "juego": "Jugá 3",
+            "hora_sorteo": "15:00",
+            "hora_cierre": "14:55",
+            "nombre": "Jugá 3 3:00 PM (NI)"
+          },
+          {
+            "id": "ni_juga3_21",
+            "juego": "Jugá 3",
+            "hora_sorteo": "21:00",
+            "hora_cierre": "20:55",
+            "nombre": "Jugá 3 9:00 PM (NI)"
+          },
+          {
+            "id": "ni_premia_11",
+            "juego": "Premia2",
+            "hora_sorteo": "11:00",
+            "hora_cierre": "10:55",
+            "nombre": "Premia2 11:00 AM (NI)"
+          },
+          {
+            "id": "ni_premia_15",
+            "juego": "Premia2",
+            "hora_sorteo": "15:00",
+            "hora_cierre": "14:55",
+            "nombre": "Premia2 3:00 PM (NI)"
+          },
+          {
+            "id": "ni_premia_21",
+            "juego": "Premia2",
+            "hora_sorteo": "21:00",
+            "hora_cierre": "20:55",
+            "nombre": "Premia2 9:00 PM (NI)"
+          },
+          {
+            "id": "ni_term_11",
+            "juego": "Terminación 2",
+            "hora_sorteo": "11:00",
+            "hora_cierre": "10:55",
+            "nombre": "Terminación 2 11:00 AM (NI)"
+          },
+          {
+            "id": "ni_term_15",
+            "juego": "Terminación 2",
+            "hora_sorteo": "15:00",
+            "hora_cierre": "14:55",
+            "nombre": "Terminación 2 3:00 PM (NI)"
+          },
+          {
+            "id": "ni_term_21",
+            "juego": "Terminación 2",
+            "hora_sorteo": "21:00",
+            "hora_cierre": "20:55",
+            "nombre": "Terminación 2 9:00 PM (NI)"
+          },
+          {
+            "id": "hn_diaria_11",
+            "juego": "La Diaria",
+            "hora_sorteo": "11:00",
+            "hora_cierre": "10:55",
+            "nombre": "La Diaria 11:00 AM (HN)"
+          },
+          {
+            "id": "hn_diaria_15",
+            "juego": "La Diaria",
+            "hora_sorteo": "15:00",
+            "hora_cierre": "14:55",
+            "nombre": "La Diaria 3:00 PM (HN)"
+          },
+          {
+            "id": "hn_diaria_21",
+            "juego": "La Diaria",
+            "hora_sorteo": "21:00",
+            "hora_cierre": "20:55",
+            "nombre": "La Diaria 9:00 PM (HN)"
+          },
+          {
+            "id": "hn_premia_11",
+            "juego": "Premia2",
+            "hora_sorteo": "11:00",
+            "hora_cierre": "10:55",
+            "nombre": "Premia2 11:00 AM (HN)"
+          },
+          {
+            "id": "hn_premia_15",
+            "juego": "Premia2",
+            "hora_sorteo": "15:00",
+            "hora_cierre": "14:55",
+            "nombre": "Premia2 3:00 PM (HN)"
+          },
+          {
+            "id": "hn_premia_21",
+            "juego": "Premia2",
+            "hora_sorteo": "21:00",
+            "hora_cierre": "20:55",
+            "nombre": "Premia2 9:00 PM (HN)"
+          },
+          {
+            "id": "hn_pega3_11",
+            "juego": "Pega 3",
+            "hora_sorteo": "11:00",
+            "hora_cierre": "10:55",
+            "nombre": "Pega 3 11:00 AM (HN)"
+          },
+          {
+            "id": "hn_pega3_15",
+            "juego": "Pega 3",
+            "hora_sorteo": "15:00",
+            "hora_cierre": "14:55",
+            "nombre": "Pega 3 3:00 PM (HN)"
+          },
+          {
+            "id": "hn_pega3_21",
+            "juego": "Pega 3",
+            "hora_sorteo": "21:00",
+            "hora_cierre": "20:55",
+            "nombre": "Pega 3 9:00 PM (HN)"
+          },
+          {
+            "id": "hn_super_21",
+            "juego": "Súper Premio",
+            "hora_sorteo": "21:00",
+            "hora_cierre": "20:55",
+            "nombre": "Súper Premio 9:00 PM (HN)"
+          },
+          {
+            "id": "sv_diaria_11",
+            "juego": "Diaria",
+            "hora_sorteo": "11:00",
+            "hora_cierre": "10:55",
+            "nombre": "Diaria 11:00 AM (SV)"
+          },
+          {
+            "id": "sv_diaria_21",
+            "juego": "Diaria",
+            "hora_sorteo": "21:00",
+            "hora_cierre": "20:55",
+            "nombre": "Diaria 9:00 PM (SV)"
+          },
+          {
+            "id": "lp_primera_10",
+            "juego": "La Primera",
+            "hora_sorteo": "10:00",
+            "hora_cierre": "09:55",
+            "nombre": "La Primera 10:00 AM (LP)"
+          },
+          {
+            "id": "lp_primera_17",
+            "juego": "La Primera",
+            "hora_sorteo": "17:00",
+            "hora_cierre": "16:55",
+            "nombre": "La Primera 5:00 PM (LP)"
+          },
+          {
+            "id": "cr_monazo_1248",
+            "juego": "3 Monazos",
+            "hora_sorteo": "12:48",
+            "hora_cierre": "12:43",
+            "nombre": "3 Monazos 12:48 PM (CR)"
+          },
+          {
+            "id": "cr_monazo_1625",
+            "juego": "3 Monazos",
+            "hora_sorteo": "16:25",
+            "hora_cierre": "16:20",
+            "nombre": "3 Monazos 4:25 PM (CR)"
+          },
+          {
+            "id": "cr_monazo_1925",
+            "juego": "3 Monazos",
+            "hora_sorteo": "19:25",
+            "hora_cierre": "19:20",
+            "nombre": "3 Monazos 7:25 PM (CR)"
+          },
+          {
+            "id": "cr_tica_1248",
+            "juego": "Tica",
+            "hora_sorteo": "12:48",
+            "hora_cierre": "12:43",
+            "nombre": "Tica 12:48 PM (CR)"
+          },
+          {
+            "id": "cr_tica_1625",
+            "juego": "Tica",
+            "hora_sorteo": "16:25",
+            "hora_cierre": "16:20",
+            "nombre": "Tica 4:25 PM (CR)"
+          },
+          {
+            "id": "cr_tica_1925",
+            "juego": "Tica",
+            "hora_sorteo": "19:25",
+            "hora_cierre": "19:20",
+            "nombre": "Tica 7:25 PM (CR)"
+          }
+        ],
+        "limites_numeros": [
+          {
+            "juego": "Diaria",
+            "numero": "77",
+            "max_monto": 200,
+            "id_vendedor": "vend_1"
+          }
+        ],
+        "resultados": [],
+        "cobros": []
+      }
     },
     {
       "id": "U-001",
-      "nombre": "jose miguel",
-      "usuario": "elchaparro",
+      "nombre": "jose",
+      "usuario": "jose",
       "rol": "vendedor",
-      "email": "chaparro2@gmail.com",
+      "email": "jose01@gmail.com",
       "password": "123456",
       "estado": "activo",
       "conexion": "offline",
@@ -33,7 +299,7 @@
     "contador_global_tickets": 1045,
     "formato_ticket": {
       "titulo": "LA NUEVA ERA",
-      "ruc": "RUC-J0310000123456",
+      "ruc": "pida su ticke 23",
       "mensaje_pie": "¡Gracias por su compra! Verifique su ticket en línea."
     },
     "sorteos": [
@@ -281,6 +547,20 @@
         "hora_sorteo": "19:25",
         "hora_cierre": "19:20",
         "nombre": "Tica 7:25 PM (CR)"
+      },
+      {
+        "id": "sort_4w9hqqo",
+        "juego": "Sabadito",
+        "nombre": "Sabadito MAÑANA (NI)",
+        "hora_sorteo": "11:00",
+        "hora_cierre": "10:55"
+      },
+      {
+        "id": "sort_qq7aooe",
+        "juego": "Sabadito",
+        "nombre": "Sabadito TARDE (NI)",
+        "hora_sorteo": "16:00",
+        "hora_cierre": "15:55"
       }
     ],
     "limites_numeros": [
