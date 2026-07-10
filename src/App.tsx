@@ -404,7 +404,17 @@ export default function App() {
 
         ) : (
           <div className="flex-1 overflow-y-auto p-4 flex items-center justify-center">
-            <Login users={users} onLoginSuccess={(u) => setCurrentUser(u)} />
+            <Login users={users} onLoginSuccess={(u) => {
+              setCurrentUser(u);
+              // [FASE 3] Get or Create resumen_diario at startup
+              if (u.rol === 'vendedor') {
+                fetch("/api/resumen-diario/init", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ id_vendedor: u.id, nombre_vendedor: u.nombre })
+                }).catch(e => console.error("Error init resumen diario:", e));
+              }
+            }} />
           </div>
         )}
       </div>

@@ -164,7 +164,10 @@ function initDatabase() {
       cobros: []
     },
     ventas: [],
-    cierres_caja: []
+    cierres_caja: [],
+    resumenes_diarios: [],
+    cobros_admin: [],
+    pagos_comision: []
   };
 
   const dataDir = path.dirname(DB_PATH);
@@ -178,6 +181,9 @@ function initDatabase() {
 let db = initDatabase();
 // Ensure dynamic backward compatibility
 db.fcm_tokens = db.fcm_tokens || [];
+db.resumenes_diarios = db.resumenes_diarios || [];
+db.cobros_admin = db.cobros_admin || [];
+db.pagos_comision = db.pagos_comision || [];
 
 async function saveToDB() {
   try {
@@ -1202,7 +1208,8 @@ app.post("/api/ventas", (req, res) => {
     nombre_cliente: nombre_cliente || "Genérico",
     premio_posible_cs: Number(premio_posible_cs) || 0,
     firma_digital: signature,
-    anulado: false
+    anulado: false,
+    estado: "pendiente"
   };
 
   db.ventas.push(newSale);
@@ -1266,8 +1273,61 @@ app.post("/api/ventas/:id/anular", (req, res) => {
   }
 
   sale.anulado = true;
+  sale.estado = "anulado";
   saveToDB();
   res.json({ message: "Ticket anulado con éxito.", ticket: sale });
+});
+
+// Validación y Pago de Tickets con QR
+app.post("/api/ventas/:id/pagar", (req, res) => {
+  const { id } = req.params;
+  const sale = db.ventas.find((v: any) => v.id === id || v.numero_ticket === id || (v.firma_digital && v.firma_digital.toUpperCase() === id.toUpperCase()));
+
+  if (!sale) {
+    return res.status(404).json({ error: "Ticket no encontrado." });
+  }
+
+  if (sale.anulado || sale.estado === "anulado") {
+    return res.status(400).json({ error: "Este ticket está anulado." });
+  }
+
+  if (sale.estado === "pagado") {
+    return res.status(400).json({ error: "Este ticket ya ha sido pagado." });
+  }
+
+  if (sale.estado === "perdedor") {
+    return res.status(400).json({ error: "Este ticket ya fue procesado y no resultó ganador." });
+  }
+
+  const saleDateStr = sale.timestamp_servidor.split("T")[0];
+  const resultado = (db.configuracion.resultados || []).find((r: any) => {
+    if (r.fecha !== saleDateStr) return false;
+    const sorteoObj = db.configuracion.sorteos.find((s: any) => s.id === r.id_sorteo);
+    return sorteoObj && sorteoObj.nombre === sale.sorteo && sorteoObj.juego === sale.juego;
+  });
+
+  if (!resultado) {
+    return res.status(400).json({ error: "Aún no hay resultados registrados para este sorteo." });
+  }
+
+  if (String(resultado.numero_ganador) === String(sale.numero_jugado)) {
+    sale.estado = "pagado";
+    saveToDB();
+    return res.json({ 
+      message: "¡Ganador!", 
+      ganador: true, 
+      ticket: sale,
+      monto_ganado_cs: sale.premio_posible_cs || 0 
+    });
+  } else {
+    sale.estado = "perdedor";
+    saveToDB();
+    return res.json({ 
+      message: "Ticket No Premiado.", 
+      ganador: false, 
+      ticket: sale 
+    });
+  }
 });
 
 // Cash Closure (Cierre de Caja)
@@ -1337,6 +1397,291 @@ app.patch("/api/cierres/:id", (req, res) => {
   cc.cobrado = true;
   saveToDB();
   res.json({ success: true, message: "Cierre marcado como cobrado exitosamente.", closure: cc });
+});
+
+// FASE 2: API de Resumen Diario, Cobros y Pagos
+
+// ============================================================================
+// FASE 3: STARTUP SYNC, BACKFILL Y AUDITORÍA
+// ============================================================================
+
+// Sincronización robusta "Get or Create" para el Resumen Diario
+function getOrCreateResumenDiario(id_vendedor: string, nombre_vendedor: string, dateStr: string) {
+  const resumenId = `${id_vendedor}_${dateStr}`;
+  let resumen = db.resumenes_diarios.find((r: any) => r.id === resumenId);
+  
+  if (!resumen) {
+    resumen = {
+      id: resumenId,
+      id_vendedor,
+      nombre_vendedor,
+      fecha: dateStr,
+      vendido: 0,
+      pagado: 0,
+      cierre: 'pendiente',
+      egreso: 0,
+      timestamp_creacion: new Date().toISOString(),
+      timestamp_actualizacion: new Date().toISOString()
+    };
+    db.resumenes_diarios.push(resumen);
+    saveToDB();
+  }
+  return resumen;
+}
+
+// Endpoint invocado desde App.tsx (Login) para inicializar el día
+app.post("/api/resumen-diario/init", (req, res) => {
+  const { id_vendedor, nombre_vendedor } = req.body;
+  if (!id_vendedor || !nombre_vendedor) {
+    return res.status(400).json({ error: "Faltan datos." });
+  }
+  
+  const today = new Date();
+  const dateStr = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, '0') + "-" + String(today.getDate()).padStart(2, '0');
+  
+  const resumen = getOrCreateResumenDiario(id_vendedor, nombre_vendedor, dateStr);
+  res.json({ success: true, resumen });
+});
+
+// Endpoint de migración histórica (Backfill)
+app.post("/api/admin/backfill-resumenes", (req, res) => {
+  const { default_status = 'pagado' } = req.body; // Puede ser 'pagado' o 'pendiente'
+  
+  // 1. Obtener todas las ventas no anuladas
+  const ventasValidas = db.ventas.filter((v: any) => v.estado !== 'anulado');
+  
+  // 2. Agrupar por vendedor y fecha
+  const groups: Record<string, { id_vendedor: string, nombre_vendedor: string, fecha: string, vendido: number, pagado: number }> = {};
+  
+  ventasValidas.forEach((v: any) => {
+    const d = new Date(v.timestamp);
+    const dateStr = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, '0') + "-" + String(d.getDate()).padStart(2, '0');
+    const key = `${v.id_vendedor}_${dateStr}`;
+    
+    if (!groups[key]) {
+      groups[key] = {
+        id_vendedor: v.id_vendedor,
+        nombre_vendedor: v.nombre_vendedor || "Vendedor",
+        fecha: dateStr,
+        vendido: 0,
+        pagado: 0
+      };
+    }
+    
+    groups[key].vendido += v.total_cs || 0;
+    if (v.estado === 'pagado') {
+      groups[key].pagado += v.monto_ganado_cs || 0;
+    }
+  });
+  
+  // 3. Upsert en resumenes_diarios
+  let migrados = 0;
+  for (const key in groups) {
+    const g = groups[key];
+    let resumen = db.resumenes_diarios.find((r: any) => r.id === key);
+    
+    if (!resumen) {
+      resumen = {
+        id: key,
+        id_vendedor: g.id_vendedor,
+        nombre_vendedor: g.nombre_vendedor,
+        fecha: g.fecha,
+        vendido: g.vendido,
+        pagado: g.pagado,
+        cierre: default_status, // Estado por defecto elegido por el admin
+        egreso: default_status === 'pagado' ? (g.vendido - g.pagado) : 0,
+        timestamp_creacion: new Date().toISOString(),
+        timestamp_actualizacion: new Date().toISOString()
+      };
+      db.resumenes_diarios.push(resumen);
+      migrados++;
+    } else {
+      // Solo actualizamos los montos si ya existe, no tocamos el estado para no corromper cobros actuales
+      resumen.vendido = g.vendido;
+      resumen.pagado = g.pagado;
+      resumen.timestamp_actualizacion = new Date().toISOString();
+      migrados++;
+    }
+  }
+  
+  saveToDB();
+  res.json({ success: true, message: `Migración completada. ${migrados} resúmenes diarios actualizados/creados.` });
+});
+
+// Endpoint de Anulación de Cobro
+app.post("/api/cobros/:id/anular", (req, res) => {
+  const { id } = req.params;
+  
+  const cobro = db.cobros_admin.find((c: any) => c.id === id);
+  if (!cobro) {
+    return res.status(404).json({ error: "Cobro no encontrado." });
+  }
+  
+  if (cobro.estado === 'anulado') {
+    return res.status(400).json({ error: "El cobro ya se encuentra anulado." });
+  }
+  
+  // 1. Anular el cobro
+  cobro.estado = 'anulado';
+  
+  // 2. Revertir los resumenes_diarios asociados
+  let resumenesRevertidos = 0;
+  db.resumenes_diarios.forEach((r: any) => {
+    if (r.id_cobro === id) {
+      r.cierre = 'pendiente';
+      r.egreso = 0;
+      delete r.id_cobro;
+      delete r.timestamp_cobro;
+      delete r.procesado_por;
+      r.timestamp_actualizacion = new Date().toISOString();
+      resumenesRevertidos++;
+    }
+  });
+  
+  // 3. Anular pagos de comisión relacionados
+  let comisionesAnuladas = 0;
+  db.pagos_comision.forEach((p: any) => {
+    if (p.id_cobro_relacionado === id && p.estado !== 'anulado') {
+      p.estado = 'anulado';
+      comisionesAnuladas++;
+    }
+  });
+  
+  saveToDB();
+  res.json({ 
+    success: true, 
+    message: "Cobro anulado exitosamente.", 
+    resumenes_revertidos: resumenesRevertidos,
+    comisiones_anuladas: comisionesAnuladas
+  });
+});
+
+
+app.get("/api/resumen-diario/pendientes", (req, res) => {
+  const { id_vendedor, fecha_inicio, fecha_fin } = req.query;
+  if (!id_vendedor || !fecha_inicio || !fecha_fin) {
+    return res.status(400).json({ error: "Faltan parámetros" });
+  }
+  
+  const start = new Date(fecha_inicio as string).getTime();
+  const end = new Date(fecha_fin as string).getTime() + 86400000;
+  
+  const ventasPeriodo = db.ventas.filter((v: any) => 
+    v.id_vendedor === id_vendedor && 
+    new Date(v.timestamp).getTime() >= start &&
+    new Date(v.timestamp).getTime() < end
+  );
+  
+  const grouped: Record<string, any> = {};
+  ventasPeriodo.forEach((v: any) => {
+    const d = new Date(v.timestamp);
+    const dateStr = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,'0') + "-" + String(d.getDate()).padStart(2,'0');
+    if (!grouped[dateStr]) {
+      grouped[dateStr] = { vendido: 0, pagado: 0 };
+    }
+    if (v.estado !== 'anulado') {
+      grouped[dateStr].vendido += v.total_cs || 0;
+    }
+    if (v.estado === 'pagado') {
+      grouped[dateStr].pagado += v.monto_ganado_cs || 0;
+    }
+  });
+  
+  const resumenes = [];
+  let hayVentas = Object.keys(grouped).length > 0;
+
+  for (const dateStr of Object.keys(grouped)) {
+    const id = `${id_vendedor}_${dateStr}`;
+    const existente = db.resumenes_diarios.find((r: any) => r.id === id);
+    if (existente && existente.cierre === 'pagado') {
+      continue;
+    }
+    
+    const vendedorInfo = db.usuarios.find((u:any) => u.id === id_vendedor);
+    
+    resumenes.push({
+      id,
+      id_vendedor,
+      nombre_vendedor: vendedorInfo ? vendedorInfo.nombre : "Desconocido",
+      fecha: dateStr,
+      vendido: grouped[dateStr].vendido,
+      pagado: grouped[dateStr].pagado,
+      cierre: 'pendiente',
+      egreso: 0,
+      timestamp_creacion: new Date().toISOString(),
+      timestamp_actualizacion: new Date().toISOString()
+    });
+  }
+  
+  if (hayVentas && resumenes.length === 0) {
+    return res.json({ resumenes: [], mensaje: "Los días dentro de este rango ya han sido liquidados y cobrados anteriormente." });
+  }
+
+  res.json({ resumenes, mensaje: "" });
+});
+
+app.post("/api/cobros/procesar", (req, res) => {
+  const { id_admin, id_vendedor, rango_inicio, rango_fin, dias_cerrados, total_vendido, total_pagado, total_neto } = req.body;
+  
+  const admin = db.usuarios.find((u:any) => u.id === id_admin);
+  const vendedor = db.usuarios.find((u:any) => u.id === id_vendedor);
+  
+  const id_cobro = `cobro_${Date.now()}`;
+  const timestamp = new Date().toISOString();
+  
+  const nuevoCobro = {
+    id: id_cobro,
+    id_admin,
+    nombre_admin: admin ? admin.nombre : "Admin",
+    id_vendedor,
+    nombre_vendedor: vendedor ? vendedor.nombre : "Vendedor",
+    rango_inicio,
+    rango_fin,
+    total_vendido,
+    total_pagado,
+    total_neto,
+    dias_cerrados: dias_cerrados.map((d:any) => d.id),
+    timestamp
+  };
+  
+  db.cobros_admin.push(nuevoCobro);
+  
+  for (const dia of dias_cerrados) {
+    let rd = db.resumenes_diarios.find((r:any) => r.id === dia.id);
+    if (!rd) {
+      rd = { ...dia };
+      db.resumenes_diarios.push(rd);
+    }
+    rd.cierre = 'pagado';
+    rd.egreso = rd.vendido - rd.pagado;
+    rd.id_cobro = id_cobro;
+    rd.timestamp_cobro = timestamp;
+    rd.procesado_por = id_admin;
+    rd.timestamp_actualizacion = timestamp;
+  }
+  
+  saveToDB();
+  res.json({ success: true, cobro: nuevoCobro });
+});
+
+app.post("/api/pagos/registrar", (req, res) => {
+  const { id_admin, id_vendedor, monto_pago, concepto, id_cobro_relacionado } = req.body;
+  const vendedor = db.usuarios.find((u:any) => u.id === id_vendedor);
+  
+  const nuevoPago = {
+    id: `pago_${Date.now()}`,
+    id_admin,
+    id_vendedor,
+    nombre_vendedor: vendedor ? vendedor.nombre : "Vendedor",
+    monto_pago,
+    concepto,
+    id_cobro_relacionado,
+    timestamp: new Date().toISOString()
+  };
+  
+  db.pagos_comision.push(nuevoPago);
+  saveToDB();
+  res.json({ success: true, pago: nuevoPago });
 });
 
 // Mounting Vite middleware in development

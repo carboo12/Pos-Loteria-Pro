@@ -87,6 +87,7 @@ export interface Venta {
   premio_posible_cs?: number;
   firma_digital: string; // e.g. "A9X-2M"
   anulado: boolean;
+  estado?: 'pendiente' | 'pagado' | 'anulado' | 'perdedor';
 }
 
 export interface CierreCaja {
@@ -106,4 +107,58 @@ export interface CierreCaja {
   descuadre_usd: number;
   timestamp: string; // ISO String
   cobrado?: boolean; // True if supervisor or admin has collected this cash
+}
+
+export interface ResumenDiario {
+  id: string;                    // Formato: "{id_vendedor}_{YYYY-MM-DD}"
+  id_vendedor: string;
+  nombre_vendedor: string;
+  fecha: string;                 // Formato: "YYYY-MM-DD"
+  
+  // Acumulados monetarios del día
+  vendido: number;               // Suma de ventas no anuladas del día en C$
+  pagado: number;                // Suma de premios pagados en el día en C$
+  
+  // Control de Balance y Cobro
+  cierre: 'pendiente' | 'pagado';
+  egreso: number;                // Monto neto retirado (vendido - pagado) tras el cobro. 0 si está pendiente.
+  
+  // Metadatos de auditoría
+  id_cobro?: string;             // ID del documento CobroAdmin que cerró este día
+  timestamp_cobro?: string;      // Timestamp ISO
+  procesado_por?: string;        // ID del Administrador que cobró
+  
+  timestamp_creacion: string;
+  timestamp_actualizacion: string;
+}
+
+export interface CobroAdmin {
+  id: string;                    // Formato: "cobro_{timestamp}"
+  id_admin: string;
+  nombre_admin: string;
+  id_vendedor: string;
+  nombre_vendedor: string;
+  rango_inicio: string;          // "YYYY-MM-DD"
+  rango_fin: string;             // "YYYY-MM-DD"
+  
+  // Totales consolidados del corte
+  total_vendido: number;         // Suma de vendidos de los días cerrados
+  total_pagado: number;          // Suma de premios pagados de los días cerrados
+  total_neto: number;            // total_vendido - total_pagado
+  
+  dias_cerrados: string[];       // Array de IDs de resumen_diario incluidos (para auditoría)
+  estado?: 'activo' | 'anulado';
+  timestamp: string;
+}
+
+export interface PagoComision {
+  id: string;                    // Formato: "pago_{timestamp}"
+  id_admin: string;
+  id_vendedor: string;
+  nombre_vendedor: string;
+  monto_pago: number;            // Comisión entregada al vendedor
+  concepto: string;              // Descripción del pago
+  id_cobro_relacionado?: string; // ID del CobroAdmin asociado
+  estado?: 'activo' | 'anulado';
+  timestamp: string;
 }

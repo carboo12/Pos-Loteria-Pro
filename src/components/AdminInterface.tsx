@@ -38,6 +38,7 @@ import {
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
 import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
+import { motion, AnimatePresence } from "framer-motion";
 import TicketPreviewModal from "./TicketPreviewModal";
 import {
   ResponsiveContainer,
@@ -149,7 +150,7 @@ export default function AdminInterface({
   onDeleteUser,
   simulatedSupervisorId
 }: AdminInterfaceProps) {
-  const [activeSection, setActiveSection] = useState<"dashboard" | "cierres" | "config" | "usuarios" | "resultados" | "limites" | "reportes">("dashboard");
+  const [activeSection, setActiveSection] = useState<"dashboard" | "cierres" | "config" | "usuarios" | "resultados" | "limites" | "reportes" | "finanzas">("dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Local form states
@@ -221,6 +222,23 @@ export default function AdminInterface({
   const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(new Date().toISOString().substring(0, 10));
   const [reportFilterFechaFin, setReportFilterFechaFin] = useState(new Date().toISOString().substring(0, 10));
 
+  // Finanzas / Cobros states
+  const [finanzasVendedor, setFinanzasVendedor] = useState("");
+  const [finanzasFechaInicio, setFinanzasFechaInicio] = useState(new Date().toISOString().substring(0, 10));
+  const [finanzasFechaFin, setFinanzasFechaFin] = useState(new Date().toISOString().substring(0, 10));
+  const [finanzasResumenes, setFinanzasResumenes] = useState<any[]>([]);
+  const [finanzasMensajeInfo, setFinanzasMensajeInfo] = useState("");
+  const [finanzasLoading, setFinanzasLoading] = useState(false);
+  const [showCobroModal, setShowCobroModal] = useState(false);
+  
+  // Finanzas / Pagos Comision states
+  const [comisionVendedor, setComisionVendedor] = useState("");
+  const [comisionMonto, setComisionMonto] = useState("");
+  const [comisionConcepto, setComisionConcepto] = useState("Pago de comisión por ventas");
+  const [comisionLoading, setComisionLoading] = useState(false);
+  const [lastCobroId, setLastCobroId] = useState("");
+  const [historialCobros, setHistorialCobros] = useState<any[]>([]);
+
   // Fetch lists
   const fetchResultsList = async () => {
     try {
@@ -234,6 +252,54 @@ export default function AdminInterface({
     }
   };
 
+
+  const fetchHistorialCobros = async () => {
+    try {
+      const res = await fetch("/api/cobros");
+      if (res.ok) {
+        const data = await res.json();
+        setHistorialCobros(data);
+      }
+    } catch (e) {
+      console.error("Error loading historial", e);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection === "finanzas") {
+      fetchHistorialCobros();
+    }
+  }, [activeSection]);
+
+  const handleAnularCobro = async (id: string) => {
+    if (!window.confirm("ATENCIÓN: ¿Estás completamente seguro de anular este cobro? Esto revertirá los balances y cancelará comisiones pagadas.")) return;
+    try {
+      const res = await fetch(`/api/cobros/${id}/anular`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(`Cobro anulado. Se revirtieron ${data.resumenes_revertidos} días y ${data.comisiones_anuladas} pagos de comisión.`);
+      fetchHistorialCobros();
+    } catch (e: any) {
+      toast.error(e.message || "Error al anular cobro");
+    }
+  };
+
+  const handleBackfill = async () => {
+    if (!window.confirm("¿Ejecutar migración de ventas históricas? (Backfill)")) return;
+    try {
+      const res = await fetch("/api/admin/backfill-resumenes", { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ default_status: "pagado" }) 
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(data.message);
+    } catch (e: any) {
+      toast.error(e.message || "Error al ejecutar migración");
+    }
+  };
+
   const fetchLimitsList = async () => {
     try {
       const res = await fetch("/api/limites-numeros");
@@ -243,6 +309,96 @@ export default function AdminInterface({
       }
     } catch (e) {
       console.error("Error loading limits", e);
+    }
+  };
+
+  // Finanzas Functions
+  const handleConsultarBalance = async () => {
+    if (!finanzasVendedor) {
+      toast.error("Seleccione un vendedor primero");
+      return;
+    }
+    setFinanzasLoading(true);
+    setFinanzasMensajeInfo("");
+    setFinanzasResumenes([]);
+    try {
+      const res = await fetch(`/api/resumen-diario/pendientes?id_vendedor=${finanzasVendedor}&fecha_inicio=${finanzasFechaInicio}&fecha_fin=${finanzasFechaFin}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Error");
+      setFinanzasResumenes(data.resumenes || []);
+      setFinanzasMensajeInfo(data.mensaje || "");
+    } catch (e: any) {
+      toast.error(e.message || "Error al consultar balance");
+    } finally {
+      setFinanzasLoading(false);
+    }
+  };
+
+  const handleAplicarCobro = async () => {
+    setFinanzasLoading(true);
+    try {
+      const totalVendido = finanzasResumenes.reduce((acc, r) => acc + r.vendido, 0);
+      const totalPagado = finanzasResumenes.reduce((acc, r) => acc + r.pagado, 0);
+      const totalNeto = totalVendido - totalPagado;
+
+      const res = await fetch("/api/cobros/procesar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id_admin: user.id,
+          id_vendedor: finanzasVendedor,
+          rango_inicio: finanzasFechaInicio,
+          rango_fin: finanzasFechaFin,
+          dias_cerrados: finanzasResumenes,
+          total_vendido: totalVendido,
+          total_pagado: totalPagado,
+          total_neto: totalNeto
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Cobro aplicado exitosamente");
+      setShowCobroModal(false);
+      setFinanzasResumenes([]); // Reset UI
+      setFinanzasMensajeInfo("Cobro procesado correctamente. Caja saldada.");
+      
+      // Auto-fill commission module with 10%
+      setComisionVendedor(finanzasVendedor);
+      setComisionMonto((totalVendido * 0.10).toFixed(2));
+    } catch (e: any) {
+      toast.error(e.message || "Error al aplicar cobro");
+    } finally {
+      setFinanzasLoading(false);
+    }
+  };
+
+  const handleRegistrarPago = async () => {
+    if (!comisionVendedor || !comisionMonto) {
+      toast.error("Complete los campos de comisión");
+      return;
+    }
+    setComisionLoading(true);
+    try {
+      const res = await fetch("/api/pagos/registrar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id_admin: user.id,
+          id_vendedor: comisionVendedor,
+          monto_pago: parseFloat(comisionMonto),
+          concepto: comisionConcepto,
+          id_cobro_relacionado: lastCobroId
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Pago de comisión registrado");
+      setLastCobroId("");
+      setComisionMonto("");
+    } catch (e: any) {
+      toast.error(e.message || "Error al registrar pago");
+    } finally {
+      setComisionLoading(false);
     }
   };
 
@@ -1231,6 +1387,17 @@ export default function AdminInterface({
               <FileText className="w-4 h-4 stroke-[2]" />
               <span>Reportes de Ventas</span>
             </button>
+
+            <button
+              id="sidebar-finanzas"
+              onClick={() => { setActiveSection("finanzas"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
+              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
+                activeSection === "finanzas" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
+              }`}
+            >
+              <DollarSign className="w-4 h-4 stroke-[2]" />
+              <span>Finanzas y Cobros</span>
+            </button>
           </nav>
         </div>
 
@@ -1279,6 +1446,7 @@ export default function AdminInterface({
                 {activeSection === "resultados" && "Resultados Oficiales Sorteos"}
                 {activeSection === "limites" && "Techos y Límites de Ventas"}
                 {activeSection === "reportes" && "Reportería de Facturación General"}
+                {activeSection === "finanzas" && "Módulo de Finanzas y Cobros"}
               </h2>
               <p className="text-xs text-gray-500 font-sans mt-0.5 line-clamp-1">
                 {activeSection === "dashboard" && "Monitoreo en tiempo real de transacciones, estados de presencia de vendedores y auditoría."}
@@ -1288,6 +1456,7 @@ export default function AdminInterface({
                 {activeSection === "resultados" && "Ingrese los números ganadores oficiales de cada sorteo diario para realizar el escrutinio automático."}
                 {activeSection === "limites" && "Gestione el techo máximo de venta acumulada por número, sorteo y vendedor."}
                 {activeSection === "reportes" && "Estadísticas y reportes de facturación detallada por vendedor, por número de juego, o general."}
+                {activeSection === "finanzas" && "Consultar balances de vendedores, aplicar cobros y registrar pagos de comisiones."}
               </p>
             </div>
           </div>
@@ -3231,6 +3400,210 @@ export default function AdminInterface({
             </div>
           </div>
         )}
+
+
+        {/* TAB FINANZAS */}
+        {activeSection === "finanzas" && (
+          <div className="space-y-6 animate-fade-in">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* Facturación por Usuario */}
+              <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
+                <div className="flex items-center space-x-3 mb-6">
+                  <div className="p-2 bg-blue-50 rounded-xl">
+                    <DollarSign className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <h3 className="font-display font-black text-sm uppercase text-gray-800">Facturación por Usuario</h3>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Vendedor</label>
+                    <select
+                      value={finanzasVendedor}
+                      onChange={(e) => setFinanzasVendedor(e.target.value)}
+                      className="w-full text-sm p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-blue-500 bg-gray-50"
+                    >
+                      <option value="">Seleccione un vendedor</option>
+                      {users.filter(u => u.rol === 'vendedor').map(v => (
+                        <option key={v.id} value={v.id}>{v.nombre} ({v.usuario})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fecha Inicio</label>
+                      <input
+                        type="date"
+                        value={finanzasFechaInicio}
+                        onChange={(e) => setFinanzasFechaInicio(e.target.value)}
+                        className="w-full text-sm p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-blue-500 bg-gray-50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fecha Fin</label>
+                      <input
+                        type="date"
+                        value={finanzasFechaFin}
+                        onChange={(e) => setFinanzasFechaFin(e.target.value)}
+                        className="w-full text-sm p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-blue-500 bg-gray-50"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleConsultarBalance}
+                    disabled={finanzasLoading || !finanzasVendedor}
+                    className="w-full py-3 bg-gray-800 hover:bg-gray-900 text-white font-bold rounded-xl cursor-pointer disabled:opacity-50 transition-colors"
+                  >
+                    Consultar Balance
+                  </button>
+
+                  {/* Resultados Inteligentes */}
+                  {finanzasMensajeInfo && finanzasResumenes.length === 0 && (
+                    <div className="bg-blue-50 text-blue-800 p-4 rounded-xl border border-blue-200 text-sm mt-4 animate-fade-in flex items-start space-x-2">
+                      <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                      <p>{finanzasMensajeInfo}</p>
+                    </div>
+                  )}
+
+                  {finanzasResumenes.length > 0 && (
+                    <div className="mt-6 space-y-4 animate-fade-in">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200">
+                          <span className="text-[10px] uppercase font-bold text-gray-500 block">Vendido</span>
+                          <span className="text-lg font-black text-gray-800">C$ {finanzasResumenes.reduce((a, b) => a + b.vendido, 0).toFixed(2)}</span>
+                        </div>
+                        <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200">
+                          <span className="text-[10px] uppercase font-bold text-gray-500 block">Pagado (Premios)</span>
+                          <span className="text-lg font-black text-gray-800">C$ {finanzasResumenes.reduce((a, b) => a + b.pagado, 0).toFixed(2)}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="bg-green-50 p-5 rounded-2xl border border-green-200 text-center relative overflow-hidden">
+                        <span className="text-xs uppercase font-black tracking-widest text-green-800 block mb-1">Ganancia / Total a Pagar</span>
+                        <span className="text-4xl font-black text-green-700 tracking-tighter">
+                          C$ {(finanzasResumenes.reduce((a, b) => a + b.vendido, 0) - finanzasResumenes.reduce((a, b) => a + b.pagado, 0)).toFixed(2)}
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => setShowCobroModal(true)}
+                        className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-black uppercase tracking-wider rounded-xl cursor-pointer shadow-md transition-all active:translate-y-0.5"
+                      >
+                        Aplicar Cobro
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Pagos de Comisión */}
+              <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
+                <div className="flex items-center space-x-3 mb-6">
+                  <div className="p-2 bg-amber-50 rounded-xl">
+                    <Briefcase className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <h3 className="font-display font-black text-sm uppercase text-gray-800">Pagos de Comisión</h3>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Vendedor</label>
+                    <select
+                      value={comisionVendedor}
+                      onChange={(e) => setComisionVendedor(e.target.value)}
+                      className="w-full text-sm p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-amber-500 bg-gray-50"
+                    >
+                      <option value="">Seleccione un vendedor</option>
+                      {users.filter(u => u.rol === 'vendedor').map(v => (
+                        <option key={v.id} value={v.id}>{v.nombre}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Monto a Pagar (C$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={comisionMonto}
+                      onChange={(e) => setComisionMonto(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full text-lg font-black p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-amber-500 bg-gray-50 text-gray-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Concepto</label>
+                    <input
+                      type="text"
+                      value={comisionConcepto}
+                      onChange={(e) => setComisionConcepto(e.target.value)}
+                      className="w-full text-sm p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-amber-500 bg-gray-50 text-gray-800"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleRegistrarPago}
+                    disabled={comisionLoading || !comisionVendedor || !comisionMonto}
+                    className="w-full mt-4 py-4 bg-amber-500 hover:bg-amber-600 text-white font-black uppercase tracking-wider rounded-xl cursor-pointer shadow-md transition-all active:translate-y-0.5 disabled:opacity-50"
+                  >
+                    Registrar Pago
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+      {/* Modal de Cobro */}
+      <AnimatePresence>
+        {showCobroModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white rounded-3xl p-6 shadow-2xl max-w-md w-full border border-gray-200"
+            >
+              <div className="flex items-center space-x-3 text-green-600 mb-4">
+                <div className="p-3 bg-green-100 rounded-full">
+                  <DollarSign className="w-8 h-8" />
+                </div>
+                <h3 className="font-display font-black text-lg uppercase tracking-wider text-green-900">
+                  Confirmar Cobro
+                </h3>
+              </div>
+              <p className="text-gray-600 font-sans text-sm leading-relaxed mb-6">
+                ¿Confirmas que estás retirando físicamente <strong className="text-gray-900 font-black font-mono">C$ {(finanzasResumenes.reduce((a, b) => a + b.vendido, 0) - finanzasResumenes.reduce((a, b) => a + b.pagado, 0)).toFixed(2)}</strong> a este vendedor por el corte del {finanzasFechaInicio} al {finanzasFechaFin}?
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowCobroModal(false)}
+                  className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold uppercase text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleAplicarCobro}
+                  disabled={finanzasLoading}
+                  className="flex-1 py-3 bg-green-600 hover:bg-green-700 text-white font-black uppercase text-xs rounded-xl shadow-md transition-colors cursor-pointer flex justify-center items-center"
+                >
+                  {finanzasLoading ? "Procesando..." : "SÍ, CONFIRMAR COBRO"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       </main>
 

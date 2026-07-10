@@ -16,8 +16,11 @@ import {
   TrendingUp,
   AlertCircle,
   Search,
-  QrCode
+  QrCode,
+  CheckCircle,
 } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { Html5QrcodeScanner } from "html5-qrcode";
 import { Usuario, Configuracion, Venta, Sorteo } from "../types";
 import TicketPreviewModal from "./TicketPreviewModal";
 
@@ -70,7 +73,7 @@ export default function VendedorInterface({
   serverTime
 }: VendedorInterfaceProps) {
   // Navigation tabs
-  const [activeTab, setActiveTab] = useState<"venta" | "historial" | "cierre">("venta");
+  const [activeTab, setActiveTab] = useState<"venta" | "historial" | "pagos">("venta");
   
   // País state
   const [selectedPais, setSelectedPais] = useState<"Nicaragua" | "Honduras" | "El Salvador" | "La Primera" | "Costa Rica">("Nicaragua");
@@ -134,6 +137,92 @@ export default function VendedorInterface({
   // Ticket QR/ID Search states
   const [qrSearchInput, setQrSearchInput] = useState("");
   const [qrSearchError, setQrSearchError] = useState<string | null>(null);
+
+  // Payment states
+  const [paymentResult, setPaymentResult] = useState<{ganador: boolean, message: string, monto: number} | null>(null);
+
+  // QR Scanner Effect
+  useEffect(() => {
+    if (activeTab !== "pagos") {
+      setPaymentResult(null);
+      return;
+    }
+
+    const html5QrcodeScanner = new Html5QrcodeScanner(
+      "reader",
+      { fps: 10, qrbox: { width: 250, height: 250 } },
+      /* verbose= */ false
+    );
+
+    html5QrcodeScanner.render(
+      (decodedText) => {
+        // Pause scanner after reading
+        html5QrcodeScanner.pause(true);
+        processPayment(decodedText);
+      },
+      (error) => {
+        // keep scanning
+      }
+    );
+
+    return () => {
+      html5QrcodeScanner.clear().catch(error => {
+        console.error("Failed to clear html5QrcodeScanner. ", error);
+      });
+    };
+  }, [activeTab]);
+
+  const processPayment = async (query: string) => {
+    setLoading(true);
+    setPaymentResult(null);
+    try {
+      let targetNum = query.trim();
+      if (query.includes("ticket=")) {
+        const tMatch = query.match(/[?&]ticket=([^&]+)/);
+        if (tMatch) targetNum = tMatch[1];
+      }
+      
+      const cleanNum = targetNum.replace(/^#/, "").trim();
+      const response = await fetch(`/api/ventas/${cleanNum}/pagar`, {
+        method: "POST"
+      });
+      const data = await response.json();
+      
+      if (!response.ok) {
+        setPaymentResult({
+          ganador: false,
+          message: data.error || "Error al validar el ticket.",
+          monto: 0
+        });
+      } else {
+        setPaymentResult({
+          ganador: data.ganador,
+          message: data.message,
+          monto: data.monto_ganado_cs || 0
+        });
+        if (data.ganador) {
+          onRefreshSales();
+        }
+      }
+    } catch (err) {
+      setPaymentResult({
+        ganador: false,
+        message: "Error de conexión con el servidor.",
+        monto: 0
+      });
+    } finally {
+      setLoading(false);
+      setQrSearchInput("");
+      
+      // Try to resume scanner if possible
+      try {
+        const scannerEl = document.getElementById("reader");
+        if (scannerEl) {
+          // If the library supports resuming, we can do it here, but usually it's better to just let the user re-open the tab.
+        }
+      } catch (e) {}
+    }
+  };
 
   const handleTicketQrSearch = async (e: FormEvent) => {
     e.preventDefault();
@@ -1431,207 +1520,90 @@ export default function VendedorInterface({
           </div>
         )}
 
-        {/* TAB 3: CIERRE DE CAJA */}
-        {activeTab === "cierre" && (
+        {/* TAB 3: PAGOS (QR SCANNERS) */}
+        {activeTab === "pagos" && (
           <div className="space-y-4 animate-fade-in">
             <div className="border-b border-gray-200 pb-2">
-              <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider">Arqueo Diario de Caja</h3>
-              <p className="text-[10px] text-gray-400 font-sans mt-0.5">Ingrese la cantidad física de billetes de cada denominación.</p>
+              <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider">Validar y Pagar Premios</h3>
+              <p className="text-[10px] text-gray-400 font-sans mt-0.5">Escanea el código QR del ticket o ingresa el ID manualmente.</p>
             </div>
 
-            {/* Interactive Grid of Denominations */}
-            <div className="space-y-4">
+            {/* QR Scanner Section */}
+            <div className="bg-white rounded-2xl p-4 border border-gray-300 shadow-sm flex flex-col items-center">
+              <div id="reader" className="w-full max-w-sm overflow-hidden rounded-xl border border-gray-200"></div>
               
-              {/* Cordobas C$ Section */}
-              <div className="bg-white rounded-2xl p-3 border border-gray-300">
-                <span className="text-xs font-display font-black text-blue-900 uppercase tracking-wider block mb-2 pb-1 border-b border-gray-100">Cordobas Nicaragüenses (C$)</span>
-                
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.keys(denominacionesCs).map((den) => (
-                    <div key={den} className="flex items-center justify-between p-1.5 bg-gray-50 rounded-xl border border-gray-200">
-                      <span className="font-mono text-xs font-black text-gray-800">C$ {den}</span>
-                      <div className="flex items-center space-x-1 max-w-[80px]">
-                        <input
-                          id={`input-den-cs-${den}`}
-                          type="number"
-                          min="0"
-                          value={denominacionesCs[den] || ""}
-                          onChange={(e) => {
-                            const val = Math.max(0, parseInt(e.target.value) || 0);
-                            setDenominacionesCs(prev => ({ ...prev, [den]: val }));
-                          }}
-                          placeholder="0"
-                          className="w-full text-center p-1 border border-gray-300 rounded font-mono text-xs font-bold text-gray-900 bg-white"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                
-                <div className="mt-3 text-right font-mono text-xs font-black text-gray-700">
-                  Subtotal: <span className="text-blue-900">C$ {calculatedCs.toFixed(2)}</span>
+              <div className="mt-4 w-full">
+                <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">O ingresar ID manualmente</label>
+                <div className="flex space-x-2">
+                  <input
+                    type="text"
+                    placeholder="Ej. A9X-2M o 0001045"
+                    value={qrSearchInput}
+                    onChange={(e) => setQrSearchInput(e.target.value)}
+                    className="flex-1 text-sm p-2.5 border border-gray-300 rounded-lg font-mono font-bold text-gray-800 focus:outline-none focus:border-[#1E3A8A]"
+                  />
+                  <button
+                    onClick={() => {
+                      if(qrSearchInput) processPayment(qrSearchInput);
+                    }}
+                    disabled={loading || !qrSearchInput}
+                    className="px-4 bg-[#1E3A8A] hover:bg-blue-800 text-white rounded-lg font-bold flex items-center justify-center cursor-pointer disabled:opacity-50"
+                  >
+                    Validar
+                  </button>
                 </div>
               </div>
-
-              {/* USD Section */}
-              <div className="bg-white rounded-2xl p-3 border border-gray-300">
-                <span className="text-xs font-display font-black text-emerald-700 uppercase tracking-wider block mb-2 pb-1 border-b border-gray-100 font-bold">Dólares US (USD)</span>
-                
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.keys(denominacionesUsd).map((den) => (
-                    <div key={den} className="flex items-center justify-between p-1.5 bg-gray-50 rounded-xl border border-gray-200">
-                      <span className="font-mono text-xs font-black text-gray-800">$ {den}</span>
-                      <div className="flex items-center space-x-1 max-w-[80px]">
-                        <input
-                          id={`input-den-usd-${den}`}
-                          type="number"
-                          min="0"
-                          value={denominacionesUsd[den] || ""}
-                          onChange={(e) => {
-                            const val = Math.max(0, parseInt(e.target.value) || 0);
-                            setDenominacionesUsd(prev => ({ ...prev, [den]: val }));
-                          }}
-                          placeholder="0"
-                          className="w-full text-center p-1 border border-gray-300 rounded font-mono text-xs font-bold text-gray-900 bg-white"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-3 text-right font-mono text-xs font-black text-gray-700">
-                  Subtotal: <span className="text-emerald-700">$ {calculatedUsd.toFixed(2)}</span>
-                </div>
-              </div>
-
-              {/* Dynamic comparison calculation box */}
-              <div className="bg-slate-900 text-white rounded-2xl p-4 shadow-xl border border-slate-700 space-y-4">
-                <div className="text-center border-b border-slate-700 pb-2">
-                  <span className="text-xs font-display font-black text-gray-300 uppercase tracking-widest block">
-                    Calculador Dinámico de Arqueo
-                  </span>
-                  <p className="text-[9px] text-gray-400 font-sans mt-0.5">Compara el total declarado contra la base de datos en tiempo real.</p>
-                </div>
-                
-                {/* Inputs for Declared Amounts */}
-                <div className="grid grid-cols-2 gap-3.5 bg-slate-800 p-3 rounded-xl border border-slate-700">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-blue-300 uppercase block">Declarado Manual (C$)</label>
-                    <div className="flex space-x-1">
-                      <input
-                        id="declarado-cs-manual-input"
-                        type="number"
-                        placeholder={calculatedCs.toFixed(2)}
-                        value={declaradoCsManual}
-                        onChange={(e) => setDeclaradoCsManual(e.target.value)}
-                        className="w-full text-center p-1.5 border border-slate-600 rounded-lg font-mono text-xs font-bold text-white bg-slate-950 focus:outline-hidden focus:border-blue-500"
-                      />
-                      <button
-                        onClick={() => setDeclaradoCsManual(String(calculatedCs))}
-                        className="p-1 px-1.5 bg-slate-700 hover:bg-slate-600 rounded text-[9px] font-bold uppercase transition-colors cursor-pointer"
-                        title="Usar arqueo físico"
-                      >
-                        Arqueo
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-emerald-400 uppercase block">Declarado Manual (USD)</label>
-                    <div className="flex space-x-1">
-                      <input
-                        id="declarado-usd-manual-input"
-                        type="number"
-                        placeholder={calculatedUsd.toFixed(2)}
-                        value={declaradoUsdManual}
-                        onChange={(e) => setDeclaradoUsdManual(e.target.value)}
-                        className="w-full text-center p-1.5 border border-slate-600 rounded-lg font-mono text-xs font-bold text-white bg-slate-950 focus:outline-hidden focus:border-emerald-500"
-                      />
-                      <button
-                        onClick={() => setDeclaradoUsdManual(String(calculatedUsd))}
-                        className="p-1 px-1.5 bg-slate-700 hover:bg-slate-600 rounded text-[9px] font-bold uppercase transition-colors cursor-pointer"
-                        title="Usar arqueo físico"
-                      >
-                        Arqueo
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 text-xs font-mono">
-                  {/* Cordobas comparative column */}
-                  <div className="space-y-1.5 border-r border-slate-700 pr-2">
-                    <div className="text-blue-300 font-sans font-black flex items-center space-x-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                      <span>CORDOBAS (C$)</span>
-                    </div>
-                    <div className="flex justify-between text-[11px] text-gray-400">
-                      <span>Declarado:</span>
-                      <span className="text-white font-bold">C$ {finalDeclaradoCs.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-[11px] text-gray-400">
-                      <span>Base Datos:</span>
-                      <span className="text-white font-bold">C$ {systemCs.toFixed(2)}</span>
-                    </div>
-                    <div className="border-t border-slate-700 my-1"></div>
-                    <div className="flex justify-between text-xs font-black">
-                      <span>Discrepancia:</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${descuadreCs < 0 ? "bg-red-950 text-[#EF4444] border border-red-800" : descuadreCs === 0 ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-yellow-950 text-yellow-400 border border-yellow-800"}`}>
-                        {descuadreCs > 0 ? "+" : ""}{descuadreCs.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* USD comparative column */}
-                  <div className="space-y-1.5 pl-1">
-                    <div className="text-emerald-400 font-sans font-black flex items-center space-x-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                      <span>DÓLARES (USD)</span>
-                    </div>
-                    <div className="flex justify-between text-[11px] text-gray-400">
-                      <span>Declarado:</span>
-                      <span className="text-white font-bold">$ {finalDeclaradoUsd.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-[11px] text-gray-400">
-                      <span>Base Datos:</span>
-                      <span className="text-white font-bold">$ {systemUsd.toFixed(2)}</span>
-                    </div>
-                    <div className="border-t border-slate-700 my-1"></div>
-                    <div className="flex justify-between text-xs font-black">
-                      <span>Discrepancia:</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${descuadreUsd < 0 ? "bg-red-950 text-[#EF4444] border border-red-800" : descuadreUsd === 0 ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-yellow-950 text-yellow-400 border border-yellow-800"}`}>
-                        {descuadreUsd > 0 ? "+" : ""}{descuadreUsd.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Discrepancy Alert Helper */}
-                {(descuadreCs !== 0 || descuadreUsd !== 0) ? (
-                  <div className="p-2 bg-red-950/40 border border-red-900/60 text-[#EF4444] text-[10px] font-sans font-bold rounded-xl flex items-center space-x-2">
-                    <TrendingDown className="w-4 h-4 text-[#EF4444] shrink-0" />
-                    <span>HAY DISCREPANCIA: El monto declarado no cuadra perfectamente con las ventas registradas en la base de datos.</span>
-                  </div>
-                ) : (systemCs > 0 || systemUsd > 0) ? (
-                  <div className="p-2 bg-emerald-950/40 border border-emerald-900/60 text-emerald-400 text-[10px] font-sans font-bold rounded-xl flex items-center space-x-2">
-                    <TrendingUp className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>CAJA TOTALMENTE CUADRADA: El monto declarado coincide exactamente con el sistema. ¡Felicidades!</span>
-                  </div>
-                ) : null}
-              </div>
-
-              {/* Submit Cierre de Caja */}
-              <button
-                id="cierre-submit-btn"
-                onClick={handleCerrarCaja}
-                disabled={loading || cierreEnviado}
-                className="w-full py-4 bg-[#1E3A8A] hover:bg-blue-800 text-white font-display font-black text-sm tracking-widest uppercase border-b-4 border-blue-950 rounded-2xl shadow-md active:translate-y-0.5 active:border-b-2 transition-all cursor-pointer flex items-center justify-center space-x-2"
-              >
-                <Calculator className="w-4 h-4" />
-                <span>{loading ? "TRANSMITIENDO..." : "ENVIAR CIERRE DE CAJA"}</span>
-              </button>
-
             </div>
+            
+            {/* Payment Animation Modals */}
+            <AnimatePresence>
+              {paymentResult && paymentResult.ganador && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8, y: 50 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.8, y: 50 }}
+                  className="bg-emerald-500 rounded-3xl p-6 text-white text-center shadow-2xl relative overflow-hidden"
+                >
+                  <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white to-transparent mix-blend-overlay"></div>
+                  <CheckCircle className="w-16 h-16 mx-auto mb-2 text-emerald-100" />
+                  <h2 className="text-2xl font-black uppercase tracking-widest mb-1">¡Ganador!</h2>
+                  <p className="text-emerald-100 text-xs mb-4">El ticket ha sido premiado.</p>
+                  
+                  <div className="bg-white/20 rounded-2xl p-4 backdrop-blur-sm border border-white/30">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-100 mb-1">Monto a Entregar</span>
+                    <span className="text-4xl font-black tracking-tighter">
+                      C$ {paymentResult.monto.toFixed(2)}
+                    </span>
+                  </div>
+                  
+                  <button 
+                    onClick={() => setPaymentResult(null)}
+                    className="mt-6 w-full py-3 bg-white text-emerald-600 rounded-xl font-bold uppercase tracking-wider hover:bg-emerald-50 transition-colors cursor-pointer"
+                  >
+                    Aceptar y Cerrar
+                  </button>
+                </motion.div>
+              )}
+
+              {paymentResult && !paymentResult.ganador && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8, y: 50 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.8, y: 50 }}
+                  className="bg-red-500 rounded-3xl p-6 text-white text-center shadow-2xl relative overflow-hidden"
+                >
+                  <X className="w-16 h-16 mx-auto mb-2 text-red-100" />
+                  <h2 className="text-2xl font-black uppercase tracking-widest mb-1">Sin Premio</h2>
+                  <p className="text-red-100 text-sm mb-4">{paymentResult.message}</p>
+                  <button 
+                    onClick={() => setPaymentResult(null)}
+                    className="mt-6 w-full py-3 bg-white text-red-600 rounded-xl font-bold uppercase tracking-wider hover:bg-red-50 transition-colors cursor-pointer"
+                  >
+                    Cerrar
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
 
@@ -1678,23 +1650,23 @@ export default function VendedorInterface({
         </button>
 
         {/* Nav Link 3 */}
+        {/* Nav Link 3 */}
         <button
-          id="nav-cierre"
+          id="nav-pagos"
           onClick={() => {
-            setActiveTab("cierre");
+            setActiveTab("pagos");
             setErrorMessage(null);
             setSuccessMessage(null);
           }}
           className={`flex flex-col items-center flex-1 py-1 px-2 text-center transition-all cursor-pointer ${
-            activeTab === "cierre" 
+            activeTab === "pagos" 
               ? "text-[#1E3A8A] scale-105" 
               : "text-gray-400 hover:text-gray-600"
           }`}
         >
-          <Calculator className={`w-6 h-6 stroke-[2.5] ${activeTab === "cierre" ? "text-[#1E3A8A]" : ""}`} />
-          <span className="text-[10px] font-display font-black uppercase tracking-wider mt-0.5">Caja</span>
+          <CheckCircle className={`w-6 h-6 stroke-[2.5] ${activeTab === "pagos" ? "text-[#1E3A8A]" : ""}`} />
+          <span className="text-[10px] font-display font-black uppercase tracking-wider mt-0.5">Pagos</span>
         </button>
-
       </div>
 
       {/* Ticket Viewer Modal */}
