@@ -597,7 +597,7 @@ app.get("/api/reloj", (req, res) => {
 });
 
 // Autenticación Híbrida (Login Endpoint)
-app.post("/api/login", (req, res) => {
+app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
   
   if (!email || !password) {
@@ -634,8 +634,19 @@ app.post("/api/login", (req, res) => {
 
   // Extraer el usuario seguro para el cliente (sin el campo password)
   const { password: _, ...safeUser } = user;
-  
-  res.json({ success: true, user: safeUser, message: "Autenticación exitosa" });
+
+  // Generate Firebase custom token so the client can obtain an ID token
+  let customToken: string | null = null;
+  try {
+    const isReady = initFirebaseAdmin();
+    if (isReady) {
+      customToken = await getAuth().createCustomToken(user.id);
+    }
+  } catch (err) {
+    console.error("[Login] Error generating custom token:", err);
+  }
+
+  res.json({ success: true, user: safeUser, customToken, message: "Autenticación exitosa" });
 });
 
 // Setup Administrator Account Route (Temporary / Recovery utility)

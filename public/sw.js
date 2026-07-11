@@ -1,4 +1,4 @@
-const CACHE_NAME = "loto-pos-cache-v4";
+const CACHE_NAME = "loto-pos-cache-v5";
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
@@ -38,6 +38,21 @@ self.addEventListener("fetch", (e) => {
         }
         return networkResponse;
       }).catch(() => caches.match("/index.html"))
+    );
+    return;
+  }
+
+  const isImage = e.request.destination === 'image' || e.request.url.match(/\.(png|jpg|jpeg|gif|svg)$/i);
+  
+  if (isImage) {
+    e.respondWith(
+      fetch(e.request).then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200 && networkResponse.type === "basic") {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
+        }
+        return networkResponse;
+      }).catch(() => caches.match(e.request))
     );
     return;
   }

@@ -146,6 +146,23 @@ export default function TicketPreviewModal({ ticket, config, onClose, userRole =
     }
   };
 
+  // Determine jugadas list (fallback to single legacy field)
+  const jugadasList = ticket.jugadas && ticket.jugadas.length > 0
+    ? ticket.jugadas
+    : [{ numero: ticket.numero_jugado, monto: ticket.monto_pago, premio_posible: potentialPrizeCs }];
+
+  const padRight = (s: string, len: number) => s.length >= len ? s.substring(0, len) : s + " ".repeat(len - s.length);
+  const padLeft = (s: string, len: number) => s.length >= len ? s.substring(0, len) : " ".repeat(len - s.length) + s;
+
+  const jugadasLines = jugadasList.map(j => {
+    const num = padRight(j.numero, 10);
+    const monto = padLeft(`${ticket.moneda} ${j.monto.toFixed(2)}`, 12);
+    const premio = padLeft(`C$ ${j.premio_posible.toFixed(0)}`, 12);
+    return `${num}${monto}${premio}`;
+  }).join("\n");
+
+  const totalLine = padLeft(`TOTAL: ${ticket.moneda} ${ticket.monto_pago.toFixed(2)}`, 32);
+
   const ticketText = `
 --------------------------------
 ${config.formato_ticket.titulo}
@@ -157,8 +174,12 @@ ${config.formato_ticket.ruc}
 ${ticket.nombre_cliente ? `  CLIENTE: ${ticket.nombre_cliente}\n` : ""}  --------------------------------
   JUEGO: ${ticket.juego.toUpperCase()}
 SORTEO: ${ticket.sorteo}
-  NÚMERO JUGADO: [ ${ticket.numero_jugado} ]
-  MONTO: ${ticket.moneda} ${ticket.monto_pago.toFixed(2)}
+--------------------------------
+NUM.      MONTO         PREMIO
+----------------------------------
+${jugadasLines}
+----------------------------------
+${totalLine}
   PREMIO POSIBLE: C$ ${potentialPrizeCs.toFixed(2)}
   --------------------------------
 FIRMA DIGITAL: ${ticket.firma_digital}
@@ -245,11 +266,8 @@ ${config.formato_ticket.mensaje_pie}
         </div>
 
         {/* Thermal Ticket Render */}
-        <div className="p-6 overflow-y-auto max-h-[60vh] bg-gray-50 flex justify-center border-b border-gray-200">
-          <div id="thermal-ticket-render" className="bg-white border border-gray-300 shadow-md p-5 rounded-md w-full font-mono text-xs text-gray-800 relative">
-            
-            {/* Ticket jagged edge top */}
-            <div className="absolute top-0 left-0 right-0 h-1 bg-repeat-x" style={{ backgroundImage: "linear-gradient(45deg, transparent 33.333%, #f3f4f6 33.333%, #f3f4f6 66.667%, transparent 66.667%), linear-gradient(-45deg, transparent 33.333%, #f3f4f6 33.333%, #f3f4f6 66.667%, transparent 66.667%)", backgroundSize: "8px 4px" }} />
+        <div className="overflow-y-auto max-h-[60vh] bg-white flex justify-center border-b border-gray-200">
+          <div id="thermal-ticket-render" className="bg-white px-6 py-6 w-full font-mono text-xs text-[#1f2937] relative">
             
             {/* Ticket Brand Header */}
             <div className="flex justify-center mb-1">
@@ -259,60 +277,84 @@ ${config.formato_ticket.mensaje_pie}
                 className="h-12 w-auto object-contain filter drop-shadow-xs"
               />
             </div>
-            <div className="text-center font-bold text-gray-950 text-xs uppercase tracking-wide mb-0.5">
+            <div className="text-center font-bold text-[#030712] text-xs uppercase tracking-wide mb-0.5">
               {config.formato_ticket.titulo}
             </div>
-            <div className="text-center text-[10px] text-gray-500 font-sans tracking-wide mb-3">
+            <div className="text-center text-[10px] text-[#6b7280] font-sans tracking-wide mb-3">
               {config.formato_ticket.ruc}
             </div>
 
-            <div className="border-t border-dashed border-gray-300 my-2" />
+            <div className="border-t border-dashed border-[#d1d5db] my-2" />
 
             {/* Ticket Info */}
             <div className="space-y-1 text-[11px]">
               <div className="flex justify-between">
                 <span>Nº TICKET:</span>
-                <span className="font-bold text-gray-950">#{ticket.numero_ticket}</span>
+                <span className="font-bold text-[#030712]">#{ticket.numero_ticket}</span>
               </div>
               <div className="flex justify-between">
                 <span>FECHA:</span>
-                <span className="text-gray-950">{formatTicketDate(ticket.timestamp_servidor)}</span>
+                <span className="text-[#030712]">{formatTicketDate(ticket.timestamp_servidor)}</span>
               </div>
               <div className="flex justify-between">
                 <span>VENDEDOR:</span>
-                <span className="text-gray-950 uppercase truncate max-w-[150px]">{ticket.nombre_vendedor}</span>
+                <span className="text-[#030712] uppercase truncate max-w-[150px]">{ticket.nombre_vendedor}</span>
               </div>
               {ticket.nombre_cliente && (
                 <div className="flex justify-between">
                   <span>CLIENTE:</span>
-                  <span className="text-gray-950 uppercase truncate max-w-[150px]">{ticket.nombre_cliente}</span>
+                  <span className="text-[#030712] uppercase truncate max-w-[150px]">{ticket.nombre_cliente}</span>
                 </div>
               )}
             </div>
 
-            <div className="border-t border-dashed border-gray-300 my-2" />
+            <div className="border-t border-dashed border-[#d1d5db] my-2" />
 
-            {/* Game & Pick Detail */}
-            <div className="text-center py-2 bg-gray-50/50 rounded-md my-2 border border-gray-100">
-              <div className="font-display font-bold text-xs text-blue-900 uppercase tracking-wider">{ticket.juego}</div>
-              <div className="text-[10px] text-gray-500 mt-0.5">{ticket.sorteo}</div>
+            {/* Game & Pick Detail — Multi-Jugada Table */}
+            <div className="py-2 my-2">
+              <div className="font-display font-bold text-xs text-[#1e3a8a] uppercase tracking-wider text-center">{ticket.juego}</div>
+              <div className="text-[10px] text-[#6b7280] mt-0.5 text-center">{ticket.sorteo}</div>
               
-              <div className="my-2.5 flex flex-col items-center">
-                <span className="text-[9px] text-gray-400 font-sans uppercase">Número Jugado</span>
-                <span className="font-display font-black text-3xl text-gray-950 tracking-tight px-6 py-1 border-2 border-gray-950 rounded-lg bg-white my-1 shadow-sm">
-                  {ticket.numero_jugado}
-                </span>
-              </div>
+              {(() => {
+                const jugadas = ticket.jugadas && ticket.jugadas.length > 0
+                  ? ticket.jugadas
+                  : [{ numero: ticket.numero_jugado, monto: ticket.monto_pago, premio_posible: potentialPrizeCs }];
 
-              <div className="text-sm font-black text-gray-900 mt-1">
-                MONTO: <span className="font-mono">{ticket.moneda} {ticket.monto_pago.toFixed(2)}</span>
-              </div>
-              <div className="text-xs font-black text-blue-900 mt-2 bg-blue-50 py-1 px-3 rounded-lg inline-block border border-blue-200 uppercase">
-                PREMIO POSIBLE: <span className="font-mono">C$ {potentialPrizeCs.toFixed(2)}</span>
-                {ticket.moneda === "USD" && (
-                  <span className="text-[9px] text-blue-600 block font-sans normal-case mt-0.5">(equivalente en C$ al tipo de cambio vigente)</span>
-                )}
-              </div>
+                return (
+                  <div className="mt-2 bg-transparent">
+                    {/* Línea Divisoria Térmica Superior */}
+                    <div className="border-t border-dashed border-gray-300 my-2" />
+                    
+                    {/* Table Header */}
+                    <div className="flex justify-between text-[9px] font-bold text-[#6b7280] uppercase tracking-wider pb-1 mb-1">
+                      <span className="w-12 text-left">NÚM.</span>
+                      <span className="flex-1 text-center">MONTO</span>
+                      <span className="w-24 text-right">PREMIO</span>
+                    </div>
+                    
+                    {/* Dynamic Rows */}
+                    {jugadas.map((j, i) => (
+                      <div key={i} className="flex justify-between text-[11px] font-mono py-0.5">
+                        <span className="w-12 text-left font-bold text-[#030712]">{j.numero}</span>
+                        <span className="flex-1 text-center text-[#374151]">{ticket.moneda} {j.monto.toFixed(2)}</span>
+                        <span className="w-24 text-right font-bold text-emerald-600">C$ {j.premio_posible.toFixed(0)}</span>
+                      </div>
+                    ))}
+                    
+                    {/* Línea Divisoria Térmica Inferior */}
+                    <div className="border-b border-dashed border-gray-300 my-2" />
+                    
+                    {/* Total */}
+                    <div className="flex justify-between text-xs font-black text-[#030712] pt-1 mt-1 uppercase">
+                      <span>Total:</span>
+                      <span>{ticket.moneda} {ticket.monto_pago.toFixed(2)}</span>
+                    </div>
+                    <div className="text-[10px] font-black text-emerald-600 mt-2 text-center">
+                      PREMIO POSIBLE TOTAL: C$ {potentialPrizeCs.toFixed(2)}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Winner Evaluation Result */}
@@ -325,19 +367,19 @@ ${config.formato_ticket.mensaje_pie}
 
               if (ticket.anulado) {
                 return (
-                  <div className="my-3 p-3 bg-gray-100 border border-gray-300 rounded-xl text-center">
-                    <span className="text-[10px] font-sans font-bold text-gray-500 uppercase block">ESTADO DEL TICKET</span>
-                    <span className="text-sm font-display font-black text-gray-400 uppercase tracking-wider block mt-0.5">ANULADO</span>
+                  <div className="my-3 p-3 bg-[#f3f4f6] border border-[#d1d5db] rounded-xl text-center">
+                    <span className="text-[10px] font-sans font-bold text-[#6b7280] uppercase block">ESTADO DEL TICKET</span>
+                    <span className="text-sm font-display font-black text-[#9ca3af] uppercase tracking-wider block mt-0.5">ANULADO</span>
                   </div>
                 );
               }
 
               if (!resultObj) {
                 return (
-                  <div className="my-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-center">
-                    <span className="text-[10px] font-sans font-bold text-amber-700 uppercase block">ESTADO DEL TICKET</span>
-                    <span className="text-sm font-display font-black text-amber-900 uppercase tracking-wider block mt-0.5">⏳ PENDIENTE DE JUGAR</span>
-                    <span className="text-[9px] text-amber-600 block mt-1 leading-normal font-sans font-medium">El número ganador para este sorteo del {ticketDate} aún no ha sido registrado.</span>
+                  <div className="my-3 p-3 bg-[#fffbeb] border border-[#fde68a] rounded-xl text-center">
+                    <span className="text-[10px] font-sans font-bold text-[#b45309] uppercase block">ESTADO DEL TICKET</span>
+                    <span className="text-sm font-display font-black text-[#78350f] uppercase tracking-wider block mt-0.5">⏳ PENDIENTE DE JUGAR</span>
+                    <span className="text-[9px] text-[#d97706] block mt-1 leading-normal font-sans font-medium">El número ganador para este sorteo del {ticketDate} aún no ha sido registrado.</span>
                   </div>
                 );
               }
@@ -348,16 +390,16 @@ ${config.formato_ticket.mensaje_pie}
 
               if (isWinner) {
                 return (
-                  <div className="my-3 p-4 bg-emerald-50 border-2 border-emerald-500 rounded-xl text-center animate-pulse">
-                    <span className="text-[10px] font-sans font-bold text-emerald-700 uppercase block">RESULTADO DEL SORTEO: {cleanGanador}</span>
-                    <span className="text-base font-display font-black text-emerald-900 uppercase tracking-widest block mt-0.5">🎉 ¡BOLETO PREMIADO!</span>
-                    <div className="mt-2.5 pt-2 border-t border-emerald-200/60">
-                      <span className="text-[9px] font-sans font-bold text-emerald-600 uppercase block">CANTIDAD A PAGAR AL CLIENTE (C$)</span>
-                      <span className="text-lg font-mono font-black text-emerald-800">
+                  <div className="my-3 p-4 bg-[#ecfdf5] border-2 border-[#10b981] rounded-xl text-center animate-pulse">
+                    <span className="text-[10px] font-sans font-bold text-[#15803d] uppercase block">RESULTADO DEL SORTEO: {cleanGanador}</span>
+                    <span className="text-base font-display font-black text-[#14532d] uppercase tracking-widest block mt-0.5">🎉 ¡BOLETO PREMIADO!</span>
+                    <div className="mt-2.5 pt-2 border-t border-[#d1fae5]">
+                      <span className="text-[9px] font-sans font-bold text-[#16a34a] uppercase block">CANTIDAD A PAGAR AL CLIENTE (C$)</span>
+                      <span className="text-lg font-mono font-black text-[#166534]">
                         C$ {potentialPrizeCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
                       </span>
                       {ticket.moneda === "USD" && (
-                        <span className="text-[9px] text-emerald-600 block mt-0.5 font-sans">
+                        <span className="text-[9px] text-[#16a34a] block mt-0.5 font-sans">
                           (Apuesta: USD {ticket.monto_pago.toFixed(2)} × tasa C$ {(config.tasa_cambio || 36.50).toFixed(2)})
                         </span>
                       )}
@@ -366,47 +408,47 @@ ${config.formato_ticket.mensaje_pie}
                 );
               } else {
                 return (
-                  <div className="my-3 p-3 bg-red-50 border border-red-200 rounded-xl text-center">
-                    <span className="text-[10px] font-sans font-bold text-red-700 uppercase block">RESULTADO DEL SORTEO: {cleanGanador}</span>
-                    <span className="text-sm font-display font-black text-red-900 uppercase tracking-wider block mt-0.5">❌ NO PREMIADO</span>
-                    <span className="text-[9px] text-red-600 block mt-1 leading-normal font-sans font-medium">Su número jugado no coincide con el número ganador.</span>
+                  <div className="my-3 p-3 bg-[#fef2f2] border border-[#fecaca] rounded-xl text-center">
+                    <span className="text-[10px] font-sans font-bold text-[#b91c1c] uppercase block">RESULTADO DEL SORTEO: {cleanGanador}</span>
+                    <span className="text-sm font-display font-black text-[#7f1d1d] uppercase tracking-wider block mt-0.5">❌ NO PREMIADO</span>
+                    <span className="text-[9px] text-[#dc2626] block mt-1 leading-normal font-sans font-medium">Su número jugado no coincide con el número ganador.</span>
                   </div>
                 );
               }
             })()}
 
-            <div className="border-t border-dashed border-gray-300 my-2" />
+            <div className="border-t border-dashed border-[#d1d5db] my-2" />
 
             {/* Digital Anti-Photoshop Signature */}
-            <div className="text-center py-1 bg-gray-100 border border-gray-200 rounded">
-              <div className="text-[8px] text-gray-500 tracking-wider font-sans uppercase font-bold">Firma Digital (Anti-Photoshop)</div>
-              <div className="font-mono text-sm font-black text-gray-900 tracking-widest mt-0.5 select-all">
+            <div className="text-center py-1">
+              <div className="text-[8px] text-[#6b7280] tracking-wider font-sans uppercase font-bold">Firma Digital (Anti-Photoshop)</div>
+              <div className="font-mono text-sm font-black text-[#111827] tracking-widest mt-0.5 select-all">
                 {ticket.firma_digital}
               </div>
             </div>
 
-            <div className="border-t border-dashed border-gray-300 my-2" />
+            <div className="border-t border-dashed border-[#d1d5db] my-2" />
 
             {/* Footer message */}
-            <div className="text-center text-[10px] text-gray-500 font-sans leading-tight italic">
+            <div className="text-center text-[10px] text-[#6b7280] font-sans leading-tight italic">
               {config.formato_ticket.mensaje_pie}
             </div>
 
             {/* Simulated Barcode & Real scannable QR Code */}
-            <div className="mt-4 flex flex-col items-center border-t border-gray-150 pt-3 space-y-3">
+            <div className="mt-4 flex flex-col items-center border-t border-[#e5e7eb] pt-3 space-y-3">
               <div className="flex flex-col items-center w-full">
                 <div className="h-7 w-4/5 bg-repeat-x bg-contain opacity-75" style={{ backgroundImage: "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"10\"><rect x=\"0\" width=\"2\" height=\"10\" fill=\"black\"/><rect x=\"3\" width=\"1\" height=\"10\" fill=\"black\"/><rect x=\"6\" width=\"3\" height=\"10\" fill=\"black\"/><rect x=\"11\" width=\"2\" height=\"10\" fill=\"black\"/><rect x=\"15\" width=\"1\" height=\"10\" fill=\"black\"/><rect x=\"18\" width=\"2\" height=\"10\" fill=\"black\"/></svg>')" }} />
-                <span className="text-[8px] text-gray-400 mt-1 font-mono">TK-{ticket.id}</span>
+                <span className="text-[8px] text-[#9ca3af] mt-1 font-mono">TK-{ticket.id}</span>
               </div>
               
-              <div className="flex flex-col items-center bg-gray-50 p-2 rounded-xl border border-gray-200">
+              <div className="flex flex-col items-center p-2">
                 <img 
                   src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${window.location.origin}/verificar?ticket=${ticket.numero_ticket}%26firma=${ticket.firma_digital}`}
                   alt="QR Verificación"
-                  className="w-20 h-20 bg-white p-1 rounded-lg border border-gray-200 shadow-xs"
+                  className="w-20 h-20 p-1"
                   referrerPolicy="no-referrer"
                 />
-                <span className="text-[7px] text-gray-500 font-mono mt-1 uppercase tracking-wider">Verificación Digital QR</span>
+                <span className="text-[7px] text-[#6b7280] font-mono mt-1 uppercase tracking-wider">Verificación Digital QR</span>
               </div>
             </div>
             

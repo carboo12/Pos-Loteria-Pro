@@ -20,7 +20,9 @@ import {
   QrCode,
   CheckCircle,
   AlertTriangle,
-  Ticket
+  Ticket,
+  Plus,
+  Printer
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Html5QrcodeScanner } from "html5-qrcode";
@@ -204,6 +206,18 @@ export default function VendedorInterface({
     setMontoPago("");
     setActiveField("numero");
     toast.success("¡Número añadido con éxito!", { position: 'top-center' });
+  };
+
+  const removeJugada = (index: number) => {
+    setJugadas(jugadas.filter((_, i) => i !== index));
+  };
+
+  const clearForm = () => {
+    setNumeroJugado("");
+    setMontoPago("");
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setActiveField("numero");
   };
 
   const handleBoletoSearch = async (query: string) => {
@@ -780,89 +794,45 @@ export default function VendedorInterface({
     setMontoPago(String(amount));
   };
 
-  // Submit sale handler
+  // --- DRAFT STATE COMMIT: Green button commits entire cart ---
   const handleGenerarTicket = async () => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    // Validation
-    if (!numeroJugado) {
-      setErrorMessage("Por favor ingrese un número para jugar.");
+    // 1. Validate cart is not empty
+    if (jugadas.length === 0) {
+      setErrorMessage("El carrito está vacío. Agregue al menos una jugada antes de confirmar.");
       return;
     }
 
-    // Format & validate based on Game
-    if (selectedJuego === "Diaria" || selectedJuego === "La Diaria" || selectedJuego === "Terminación 2" || selectedJuego === "La Primera" || selectedJuego === "Tica") {
-      if (!/^\d{2}$/.test(numeroJugado)) {
-        setErrorMessage(`El juego ${selectedJuego} requiere exactamente un número de 2 dígitos (00-99).`);
-        return;
-      }
-    } else if (selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos") {
-      if (!/^\d{3}$/.test(numeroJugado)) {
-        setErrorMessage(`${selectedJuego} requiere exactamente un número de 3 dígitos (000-999).`);
-        return;
-      }
-    } else if (selectedJuego === "Premia2") {
-      if (!/^\d{4}$/.test(numeroJugado)) {
-        setErrorMessage("Premia2 requiere ingresar exactamente dos números de 2 dígitos (ej: 45 y 88, en total 4 dígitos).");
-        return;
-      }
-    } else if (selectedJuego === "Pega 3") {
-      if (!/^\d{6}$/.test(numeroJugado)) {
-        setErrorMessage("Pega 3 requiere ingresar exactamente tres números de 2 dígitos (en total 6 dígitos).");
-        return;
-      }
-    } else if (selectedJuego === "Súper Premio") {
-      if (!/^\d{12}$/.test(numeroJugado)) {
-        setErrorMessage("Súper Premio requiere ingresar exactamente 6 números de 2 dígitos (en total 12 dígitos).");
-        return;
-      }
-      for (let i = 0; i < 12; i += 2) {
-        const val = Number(numeroJugado.substring(i, i + 2));
-        if (val < 1 || val > 33) {
-          setErrorMessage("Cada número del Súper Premio debe estar entre el rango 01 y 33.");
-          return;
-        }
-      }
-    } else if (selectedJuego === "Fechas") {
-      const parts = numeroJugado.split("-");
-      if (parts.length !== 2 || isNaN(Number(parts[0])) || Number(parts[0]) < 1 || Number(parts[0]) > 31) {
-        setErrorMessage("Selección de fecha no válida. Debe contener un día (1-31) y un mes.");
-        return;
-      }
-    }
-
-    const numericAmount = Number(montoPago);
-    if (!montoPago || isNaN(numericAmount) || numericAmount <= 0) {
-      setErrorMessage("Ingrese un monto de jugada válido mayor a cero.");
-      return;
-    }
-
+    // 2. Validate sorteo is active
     if (!selectedSorteo) {
       setErrorMessage("No hay sorteos activos seleccionados.");
       return;
     }
 
-    if (isLimitBlocked && limitCheckResult) {
-      setErrorMessage(`NÚMERO BLOQUEADO: Límite de C$ ${limitCheckResult.limitMontoCs.toLocaleString("es-ES")} alcanzado para este vendedor en este sorteo. Vendido hoy: C$ ${limitCheckResult.totalPrevSalesCs.toLocaleString("es-ES")}.`);
-      return;
-    }
-
-    // Verify if selected drawing is closed (anti-fraude block)
+    // 3. Validate sorteo is not closed (anti-fraude)
     const matchingSorteo = config.sorteos.find(s => s.nombre === selectedSorteo);
     if (matchingSorteo && isSorteoCerrado(matchingSorteo)) {
       setErrorMessage(`VENTA BLOQUEADA: El sorteo ${selectedSorteo} ya cerró (${formatTo12Hour(matchingSorteo.hora_cierre)}).`);
       return;
     }
 
-    const multiplier = calculatePrizeMultiplier(selectedJuego, selectedSorteo);
-    const montoInCs = moneda === "USD" ? numericAmount * (config.tasa_cambio || 36.50) : numericAmount;
-    const premioPosibleCs = montoInCs * multiplier;
+    // 4. Validate limit not exceeded for this batch
+    if (isLimitBlocked && limitCheckResult) {
+      setErrorMessage(`NÚMERO BLOQUEADO: Límite de C$ ${limitCheckResult.limitMontoCs.toLocaleString("es-ES")} alcanzado para este vendedor en este sorteo. Vendido hoy: C$ ${limitCheckResult.totalPrevSalesCs.toLocaleString("es-ES")}.`);
+      return;
+    }
 
-    // Offline simulation behavior
+    // 5. Compute totals from draft cart
+    const totalMontoCs = jugadas.reduce((sum, j) => {
+      return sum + (moneda === "USD" ? j.monto * (config.tasa_cambio || 36.50) : j.monto);
+    }, 0);
+    const totalPremioCs = jugadas.reduce((sum, j) => sum + j.premio_posible, 0);
+
+    // 6. Offline: queue entire cart to local storage
     if (!isOnline) {
       setErrorMessage("ERROR DE CONEXIÓN: No se puede conectar con el servidor. Ticket guardado en cola local offline.");
-      // Simulated offline ticket
       const tempId = "off_" + Math.random().toString(36).substring(2, 9);
       const offlineTicket: Venta = {
         id: tempId,
@@ -870,45 +840,53 @@ export default function VendedorInterface({
         timestamp_servidor: new Date().toISOString(),
         juego: selectedJuego,
         sorteo: selectedSorteo,
-        numero_jugado: numeroJugado,
-        monto_pago: numericAmount,
+        numero_jugado: jugadas[0].numero,
+        monto_pago: totalMontoCs,
         moneda: moneda,
         id_vendedor: user.id,
         nombre_vendedor: user.nombre,
         nombre_cliente: nombreCliente.trim() || "Genérico",
-        premio_posible_cs: premioPosibleCs,
+        premio_posible_cs: totalPremioCs,
         firma_digital: "OFFLINE-QUEUED",
-        anulado: false
+        anulado: false,
+        jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto, premio_posible: j.premio_posible }))
       };
-      
-      // Delay response to look real
+
       setLoading(true);
       setTimeout(() => {
         setLoading(false);
         onNewSaleCreated(offlineTicket);
         setSuccessMessage("¡Ticket guardado fuera de línea! Se sincronizará al recuperar señal.");
-        // reset forms
+        // Full cleanup: cart + form + nombre
+        setJugadas([]);
         setNumeroJugado("");
         setMontoPago("");
         setNombreCliente("Genérico");
+        setActiveField("numero");
       }, 800);
       return;
     }
 
+    // 7. Online: persist full cart to server
     setLoading(true);
     try {
+      const token = localStorage.getItem('token');
       const response = await fetch("/api/ventas", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
           juego: selectedJuego,
           sorteo: selectedSorteo,
-          numero_jugado: numeroJugado,
-          monto_pago: numericAmount,
+          numero_jugado: jugadas[0].numero,
+          monto_pago: totalMontoCs,
           moneda: moneda,
           id_vendedor: user.id,
           nombre_cliente: nombreCliente.trim() || "Genérico",
-          premio_posible_cs: premioPosibleCs
+          premio_posible_cs: totalPremioCs,
+          jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto, premio_posible: j.premio_posible }))
         })
       });
 
@@ -917,13 +895,15 @@ export default function VendedorInterface({
         throw new Error(data.error || "Error al generar venta");
       }
 
-      // Success
+      // 8. Success — full cleanup
       onNewSaleCreated(data);
       setActiveTicket(data);
-      setSuccessMessage(`Ticket #${data.numero_ticket} emitido con éxito.`);
+      setSuccessMessage(`Ticket #${data.numero_ticket} emitido con éxito. (${jugadas.length} jugada${jugadas.length > 1 ? "s" : ""})`);
+      setJugadas([]);
       setNumeroJugado("");
       setMontoPago("");
       setNombreCliente("Genérico");
+      setActiveField("numero");
       onRefreshSales();
     } catch (err: any) {
       setErrorMessage(err.message || "Ocurrió un error inesperado al emitir el ticket.");
@@ -1032,10 +1012,10 @@ export default function VendedorInterface({
   };
 
   return (
-    <div id="vendedor-container" className="flex flex-col bg-[#F3F4F6] h-full w-full overflow-hidden">
+    <div id="vendedor-container" className="flex flex-col bg-[#F3F4F6] w-full h-full">
       
-      {/* Vendedor Bar */}
-      <div className="bg-[#1E3A8A] text-white px-4 py-3 flex flex-col justify-between border-b border-blue-950">
+      {/* Vendedor Bar — fixed, never shrinks */}
+      <div className="bg-[#1E3A8A] text-white px-4 py-3 flex flex-col justify-between border-b border-blue-950 shrink-0">
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-2">
             <div className="relative">
@@ -1124,7 +1104,7 @@ export default function VendedorInterface({
 
         {/* TAB 1: PANTALLA DE VENTA */}
         {activeTab === "venta" && (
-          <div className="space-y-4 animate-fade-in">
+          <div className="space-y-4 animate-fade-in pb-6">
             
             {/* 0. Country Selector */}
             <div>
@@ -1295,62 +1275,43 @@ export default function VendedorInterface({
               </div>
             </div>
 
-            {/* Play Form Details (Split View) */}
+            {/* Play Form — Number + Amount Input (2-column grid) */}
             <div className="grid grid-cols-12 gap-3 items-end">
               
-              {/* Display of number */}
+              {/* Display of number — native input */}
               <div className="col-span-6">
                 <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">NÚMERO JUGADO</label>
-                <div 
-                  onClick={() => setActiveField('numero')}
-                  className={`h-16 border-2 rounded-2xl flex items-center justify-center relative font-mono shadow-inner px-2 overflow-hidden cursor-pointer transition-colors ${
-                  isLimitBlocked 
-                    ? 'border-[#EF4444] text-[#EF4444] bg-red-50' 
-                    : activeField === 'numero'
-                    ? 'border-blue-500 text-blue-900 bg-blue-50 shadow-md'
-                    : 'border-gray-400 text-gray-900 bg-white'
-                }`}>
-                  {selectedJuego === "Fechas" ? (
-                    <span className="text-blue-900 text-xs font-black tracking-tight">{numeroJugado.replace("-", " de ")}</span>
-                  ) : selectedJuego === "Premia2" ? (
-                    <span className="flex items-center space-x-1.5 text-lg">
-                      <span className="bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-lg text-blue-900 font-black">{numeroJugado.substring(0, 2) || "--"}</span>
-                      <span className="text-gray-300 font-bold">-</span>
-                      <span className="bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-lg text-blue-900 font-black">{numeroJugado.substring(2) || "--"}</span>
-                    </span>
-                  ) : selectedJuego === "Pega 3" ? (
-                    <span className="flex items-center space-x-1 text-xs">
-                      <span className="bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-lg text-blue-900 font-black">{numeroJugado.substring(0, 2) || "--"}</span>
-                      <span className="text-gray-300 font-bold">-</span>
-                      <span className="bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-lg text-blue-900 font-black">{numeroJugado.substring(2, 4) || "--"}</span>
-                      <span className="text-gray-300 font-bold">-</span>
-                      <span className="bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-lg text-blue-900 font-black">{numeroJugado.substring(4) || "--"}</span>
-                    </span>
-                  ) : selectedJuego === "Súper Premio" ? (
-                    <div className="grid grid-cols-6 gap-0.5 text-[9px] w-full text-center">
-                      {Array.from({ length: 6 }).map((_, idx) => {
-                        const val = numeroJugado.substring(idx * 2, idx * 2 + 2);
-                        return (
-                          <span key={idx} className="bg-amber-50 border border-amber-200 py-1.5 rounded text-amber-900 font-black font-mono">
-                            {val || "--"}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <span className="text-3xl font-black tracking-widest">{numeroJugado || <span className="text-gray-300">--</span>}</span>
-                  )}
-                  
-                  {numeroJugado && selectedJuego !== "Fechas" && (
-                    <button 
-                      id="clear-num-btn"
-                      onClick={() => setNumeroJugado("")}
-                      className="absolute right-1.5 top-1.5 p-0.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-500 hover:text-gray-800 cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
+                <input
+                  id="numero-input"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={
+                    selectedJuego === "Premia2" ? 4 :
+                    selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos" ? 3 :
+                    selectedJuego === "Pega 3" ? 6 :
+                    selectedJuego === "Súper Premio" ? 12 : 2
+                  }
+                  value={numeroJugado}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/[^0-9]/g, "");
+                    const maxLen =
+                      selectedJuego === "Premia2" ? 4 :
+                      selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos" ? 3 :
+                      selectedJuego === "Pega 3" ? 6 :
+                      selectedJuego === "Súper Premio" ? 12 : 2;
+                    setNumeroJugado(val.slice(0, maxLen));
+                  }}
+                  onFocus={() => setActiveField("numero")}
+                  placeholder={selectedJuego === "Fechas" ? "DD-MM" : "00"}
+                  className={`w-full h-14 px-4 rounded-xl border-2 font-mono text-xl font-black text-center shadow-inner transition-colors focus:outline-none ${
+                    isLimitBlocked
+                      ? "border-[#EF4444] text-[#EF4444] bg-red-50 focus:border-red-600"
+                      : activeField === "numero"
+                      ? "border-blue-500 text-blue-900 bg-blue-50 shadow-md focus:border-blue-600"
+                      : "border-gray-300 text-gray-900 bg-white focus:border-blue-500"
+                  }`}
+                />
               </div>
 
               {/* Monto de jugada */}
@@ -1390,45 +1351,51 @@ export default function VendedorInterface({
                   <input
                     id="monto-input"
                     type="number"
-                    inputMode="none"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    min="1"
                     value={montoPago}
                     onFocus={() => setActiveField('monto')}
                     onChange={(e) => setMontoPago(e.target.value)}
                     placeholder="0"
-                    className={`w-full h-16 pl-10 pr-2 rounded-2xl font-mono text-2xl font-black shadow-inner focus:outline-none border-2 transition-colors ${
+                    className={`w-full h-14 pl-10 pr-4 rounded-xl font-mono text-xl font-black shadow-inner focus:outline-none border-2 transition-colors ${
                       isLimitBlocked 
                         ? 'border-[#EF4444] text-[#EF4444] bg-red-50 focus:border-red-600' 
                         : activeField === 'monto'
-                        ? 'border-blue-500 text-blue-900 bg-blue-50 shadow-md'
-                        : 'border-gray-400 text-gray-900 bg-white'
+                        ? 'border-blue-500 text-blue-900 bg-blue-50 shadow-md focus:border-blue-600'
+                        : 'border-gray-300 text-gray-900 bg-white focus:border-blue-500'
                     }`}
                   />
                 </div>
               </div>
+            </div>
 
-              {/* Nombre del Cliente */}
-              <div className="col-span-12 mt-2">
-                <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">Nombre del Cliente</label>
-                <input
-                  type="text"
-                  value={nombreCliente}
-                  onChange={(e) => setNombreCliente(e.target.value)}
-                  placeholder="Genérico"
-                  className="w-full p-2.5 rounded-xl border-2 border-gray-300 text-sm font-semibold focus:outline-none focus:border-blue-900 bg-white text-gray-900 shadow-inner"
-                />
-              </div>
+            {/* Nombre del Cliente — standalone row */}
+            <div>
+              <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">Nombre del Cliente</label>
+              <input
+                type="text"
+                value={nombreCliente}
+                onChange={(e) => setNombreCliente(e.target.value)}
+                placeholder="Genérico"
+                className="w-full p-2.5 rounded-xl border-2 border-gray-300 text-sm font-semibold focus:outline-none focus:border-blue-900 bg-white text-gray-900 shadow-inner"
+              />
+            </div>
 
-              {/* Posible Premio Indicator */}
-              <div className="col-span-12 mt-3 bg-blue-50 border border-blue-200 rounded-xl p-3 flex justify-between items-center">
-                <span className="text-xs font-display font-black text-blue-900 uppercase tracking-wider">Premio Posible:</span>
-                <span className="font-mono text-lg font-black text-emerald-600">
-                  C$ {(() => {
+            {/* Posible Premio Indicator — shows current input + accumulated cart */}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex justify-between items-center">
+              <span className="text-xs font-display font-black text-blue-900 uppercase tracking-wider">Premio Posible:</span>
+              <span className="font-mono text-lg font-black text-emerald-600">
+                C$ {(() => {
+                  const currentPremio = (() => {
                     const amt = Number(montoPago) || 0;
                     const amtCs = moneda === "USD" ? amt * (config.tasa_cambio || 36.50) : amt;
-                    return (amtCs * calculatePrizeMultiplier(selectedJuego, selectedSorteo)).toFixed(2);
-                  })()}
-                </span>
-              </div>
+                    return amtCs * calculatePrizeMultiplier(selectedJuego, selectedSorteo);
+                  })();
+                  const total = totalTicketPremio + currentPremio;
+                  return total.toFixed(2);
+                })()}
+              </span>
             </div>
 
             {/* Dynamic Alarm for Granular Risk Control */}
@@ -1460,8 +1427,8 @@ export default function VendedorInterface({
               </div>
             </div>
 
-            {/* If game is "Fechas", display dropdown selects instead of standard keypad */}
-            {selectedJuego === "Fechas" ? (
+            {/* Fechas dropdown — only for Fechas game */}
+            {selectedJuego === "Fechas" && (
               <div className="bg-white p-3.5 rounded-2xl border-2 border-gray-300 shadow-xs space-y-3">
                 <span className="block text-[10px] font-display font-black text-gray-500 uppercase tracking-wider">Selección de Día y Mes para Sorteo Fechas</span>
                 <div className="grid grid-cols-2 gap-3">
@@ -1499,80 +1466,89 @@ export default function VendedorInterface({
                   </div>
                 </div>
               </div>
-            ) : (
-              /* On-screen Large Numeric Keyboard */
-              <div className="bg-gray-800/95 p-3 rounded-2xl border border-gray-700 shadow-md">
-                <div className="grid grid-cols-3 gap-2 text-white">
-                  {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((key) => (
-                    <button
-                      key={key}
-                      id={`numkey-${key}`}
-                      onClick={() => handleKeypadPress(key)}
-                      className="py-3 bg-gray-700 hover:bg-gray-600 active:bg-gray-500 rounded-xl font-display font-black text-2xl border-b-2 border-gray-900 select-none cursor-pointer text-center"
-                    >
-                      {key}
-                    </button>
-                  ))}
-                  
-                  <button
-                    id="numkey-borrar"
-                    onClick={() => handleKeypadPress("BORRAR")}
-                    className="py-3 bg-red-800/90 hover:bg-red-700 active:bg-red-600 text-white rounded-xl font-display font-bold text-xs uppercase tracking-wider border-b-2 border-red-950 select-none cursor-pointer flex items-center justify-center"
-                  >
-                    <Trash2 className="w-4 h-4 mr-1" /> Borrar
-                  </button>
-                  
-                  <button
-                    id="numkey-0"
-                    onClick={() => handleKeypadPress("0")}
-                    className="py-3 bg-gray-700 hover:bg-gray-600 active:bg-gray-500 rounded-xl font-display font-black text-2xl border-b-2 border-gray-900 select-none cursor-pointer text-center"
-                  >
-                    0
-                  </button>
-                  
-                  <button
-                    id="numkey-back"
-                    onClick={() => handleKeypadPress("BACKSPACE")}
-                    className="py-3 bg-gray-600 hover:bg-gray-500 active:bg-gray-400 text-white rounded-xl font-display font-black text-lg border-b-2 border-gray-900 select-none cursor-pointer flex items-center justify-center"
-                  >
-                    ←
-                  </button>
-                  
-                  <button
-                    id="numkey-enter"
-                    onClick={() => handleKeypadPress("ENTER")}
-                    className="col-span-3 py-3 mt-1 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white rounded-xl font-display font-black text-sm uppercase tracking-widest border-b-4 border-blue-800 select-none cursor-pointer flex items-center justify-center shadow-md transition-all"
-                  >
-                    {activeField === 'numero' ? 'Siguiente ➡' : 'Agregar Jugada ➕'}
-                  </button>
-                </div>
-              </div>
             )}
 
-            {/* Action Buttons */}
-            <div className="flex flex-row gap-4 w-full mt-2">
+            {/* Action Buttons — Stitch 3-Button Control Bar */}
+            <div className="flex flex-row gap-3 w-full mt-4">
+              {/* BORRAR — Stitch Red */}
+              <button
+                onClick={clearForm}
+                disabled={loading}
+                className="h-14 px-4 rounded-xl bg-red-500 hover:bg-red-600 active:bg-red-700 text-white font-display font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="w-4 h-4 stroke-[2.5]" />
+                <span>Borrar</span>
+              </button>
+
+              {/* AÑADIR JUGADA — Stitch Blue */}
               <button
                 onClick={addJugadaAlCarrito}
                 disabled={loading || isLimitBlocked}
-                className={`flex-1 py-4.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-display font-black text-sm tracking-widest uppercase border-b-4 border-blue-800 shadow-md flex items-center justify-center space-x-1 select-none active:translate-y-0.5 active:border-b-2 transition-all cursor-pointer ${
-                  loading ? "opacity-70 cursor-not-allowed" : ""
+                className={`flex-1 h-14 rounded-xl flex items-center justify-center font-bold text-white shadow-sm transition-all duration-200 active:scale-95 cursor-pointer ${
+                  loading || isLimitBlocked
+                    ? "bg-blue-300 cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-500 active:bg-blue-700"
                 }`}
               >
-                <span>Añadir</span>
+                <Plus className="w-6 h-6 stroke-[2.5]" />
               </button>
 
+              {/* GENERAR TICKET — Stitch Green */}
               <button
                 id="vender-submit-btn"
                 onClick={handleGenerarTicket}
-                disabled={loading || isLimitBlocked}
-                className={`flex-1 py-4.5 rounded-2xl bg-[#10B981] hover:bg-[#0E9F6E] text-white font-display font-black text-sm tracking-widest uppercase border-b-4 border-emerald-950 shadow-md flex items-center justify-center space-x-1 select-none active:translate-y-0.5 active:border-b-2 transition-all cursor-pointer ${
-                  loading ? "opacity-70 cursor-not-allowed" : ""
+                disabled={loading || isLimitBlocked || jugadas.length === 0}
+                className={`flex-1 h-14 rounded-xl flex items-center justify-center font-bold text-white shadow-sm transition-all duration-200 active:scale-95 cursor-pointer ${
+                  loading || isLimitBlocked || jugadas.length === 0
+                    ? "bg-emerald-300 cursor-not-allowed"
+                    : "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700"
                 }`}
               >
-                <span>{loading ? "PROCESANDO..." : "IMPRIMIR"}</span>
-                <ArrowRight className="w-5 h-5 stroke-[3]" />
+                {loading ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Printer className="w-6 h-6 stroke-[2.5]" />
+                )}
               </button>
             </div>
+
+            {/* Cart de Jugadas Acumuladas — DRAFT STATE, scrollable */}
+            {jugadas.length > 0 && (
+              <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
+                <div className="px-3 py-2 bg-amber-50 border-b border-amber-200 flex justify-between items-center shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-display font-black text-gray-600 uppercase tracking-wider">
+                      Carrito ({jugadas.length} jugada{jugadas.length > 1 ? "s" : ""})
+                    </span>
+                    <span className="text-[9px] font-mono font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full uppercase">
+                      Preparación
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono font-black text-blue-900">
+                    Total: {moneda} {totalTicketMonto.toFixed(2)}
+                  </span>
+                </div>
+                <div className="max-h-[300px] overflow-y-auto divide-y divide-gray-100">
+                  {jugadas.map((j, i) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+                      <span className="font-mono font-black text-blue-900 w-12">{j.numero}</span>
+                      <span className="font-mono text-gray-700 flex-1 text-right">
+                        {moneda} {j.monto.toFixed(2)}
+                      </span>
+                      <span className="font-mono text-emerald-600 w-24 text-right text-[10px]">
+                        C$ {j.premio_posible.toFixed(0)}
+                      </span>
+                      <button
+                        onClick={() => removeJugada(i)}
+                        className="ml-2 p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
           </div>
         )}
@@ -1984,8 +1960,8 @@ export default function VendedorInterface({
           </div>
         )}
 
-      {/* Bottom Navigation Bar */}
-      <div className="bg-white border-t border-gray-300 py-1 px-2 flex justify-between items-center z-10">
+      {/* Bottom Navigation Bar — fixed, never shrinks */}
+      <div className="bg-white border-t border-gray-300 py-1 px-2 flex justify-between items-center z-10 shrink-0">
         <button id="nav-venta" onClick={() => { setActiveTab("venta"); setErrorMessage(null); setSuccessMessage(null); }} className={`flex flex-col items-center flex-1 py-1 px-1 text-center transition-all cursor-pointer ${activeTab === "venta" ? "text-[#1E3A8A] scale-105" : "text-gray-400 hover:text-gray-600"}`}>
           <Gamepad2 className={`w-5 h-5 stroke-[2.5] ${activeTab === "venta" ? "text-[#1E3A8A]" : ""}`} />
           <span className="text-[9px] font-display font-black uppercase tracking-wider mt-0.5">Venta</span>

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 
 import { auth } from "../lib/firebase";
+import { signInWithCustomToken } from "firebase/auth";
 import { Usuario } from "../types";
 import toast from "react-hot-toast";
 import { 
@@ -96,6 +97,16 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
 
       // 2. Si la respuesta es OK, procesar el JSON con seguridad
       const data = await res.json();
+
+      // 2. Sign in through Firebase Auth using the custom token so the
+      //    global fetch interceptor can inject a valid Bearer token.
+      if (data.customToken) {
+        try {
+          await signInWithCustomToken(auth, data.customToken);
+        } catch (fbErr) {
+          console.warn("Firebase Auth sign-in failed (non-blocking):", fbErr);
+        }
+      }
 
       // 2. Extraer el perfil seguro y redirigir
       const matchedUser = data.user;
