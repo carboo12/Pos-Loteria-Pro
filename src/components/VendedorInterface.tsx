@@ -1,4 +1,5 @@
 import { useState, useEffect, FormEvent, useRef } from "react";
+import toast from "react-hot-toast";
 import { 
   Gamepad2, 
   History, 
@@ -201,7 +202,8 @@ export default function VendedorInterface({
     setJugadas([...jugadas, nuevaJugada]);
     setNumeroJugado("");
     setMontoPago("");
-    if (montoInputRef.current) montoInputRef.current.focus();
+    setActiveField("numero");
+    toast.success("¡Número añadido con éxito!", { position: 'top-center' });
   };
 
   const handleBoletoSearch = async (query: string) => {
@@ -1547,18 +1549,30 @@ export default function VendedorInterface({
               </div>
             )}
 
-            {/* Giant Emerald Action Button */}
-            <button
-              id="vender-submit-btn"
-              onClick={handleGenerarTicket}
-              disabled={loading || isLimitBlocked}
-              className={`w-full py-4.5 rounded-2xl bg-[#10B981] hover:bg-[#0E9F6E] text-white font-display font-black text-lg tracking-widest uppercase border-b-4 border-emerald-950 shadow-md flex items-center justify-center space-x-2 select-none active:translate-y-0.5 active:border-b-2 transition-all cursor-pointer ${
-                loading ? "opacity-70 cursor-not-allowed" : ""
-              }`}
-            >
-              <span>{loading ? "GENERANDO..." : "GENERAR TICKET"}</span>
-              <ArrowRight className="w-6 h-6 stroke-[3]" />
-            </button>
+            {/* Action Buttons */}
+            <div className="flex flex-row gap-4 w-full mt-2">
+              <button
+                onClick={addJugadaAlCarrito}
+                disabled={loading || isLimitBlocked}
+                className={`flex-1 py-4.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-display font-black text-sm tracking-widest uppercase border-b-4 border-blue-800 shadow-md flex items-center justify-center space-x-1 select-none active:translate-y-0.5 active:border-b-2 transition-all cursor-pointer ${
+                  loading ? "opacity-70 cursor-not-allowed" : ""
+                }`}
+              >
+                <span>Añadir</span>
+              </button>
+
+              <button
+                id="vender-submit-btn"
+                onClick={handleGenerarTicket}
+                disabled={loading || isLimitBlocked}
+                className={`flex-1 py-4.5 rounded-2xl bg-[#10B981] hover:bg-[#0E9F6E] text-white font-display font-black text-sm tracking-widest uppercase border-b-4 border-emerald-950 shadow-md flex items-center justify-center space-x-1 select-none active:translate-y-0.5 active:border-b-2 transition-all cursor-pointer ${
+                  loading ? "opacity-70 cursor-not-allowed" : ""
+                }`}
+              >
+                <span>{loading ? "PROCESANDO..." : "IMPRIMIR"}</span>
+                <ArrowRight className="w-5 h-5 stroke-[3]" />
+              </button>
+            </div>
 
           </div>
         )}

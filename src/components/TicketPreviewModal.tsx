@@ -1,5 +1,6 @@
 import { X, Share2, Printer, CheckCircle, Smartphone, Lock } from "lucide-react";
 import { useState } from "react";
+import html2canvas from "html2canvas";
 import { Venta, Configuracion } from "../types";
 
 /**
@@ -166,139 +167,53 @@ ${config.formato_ticket.mensaje_pie}
 --------------------------------
   `.trim();
 
-  const handlePrint = () => {
-    // Print window or trigger simulated thermal printing effect
-    const printWindow = window.open("", "_blank");
-    if (printWindow) {
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>Imprimir Ticket #${ticket.numero_ticket}</title>
-            <style>
-              body {
-                font-family: 'Courier New', Courier, monospace;
-                width: 280px;
-                margin: 10px auto;
-                padding: 10px;
-                border: 1px dashed #000;
-                text-align: center;
-                font-size: 14px;
-                line-height: 1.2;
-                color: #000;
-              }
-              h2 { margin: 5px 0; font-size: 16px; font-weight: bold; }
-              hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
-              .number { font-size: 24px; font-weight: bold; margin: 5px 0; border: 1px solid #000; display: inline-block; padding: 2px 15px; }
-              .signature { font-size: 16px; font-weight: bold; background: #eee; padding: 4px; display: inline-block; margin: 5px 0; }
-              @media print {
-                body { border: none; margin: 0; padding: 0; }
-              }
-            </style>
-          </head>
-          <body>
-            <div style="display: flex; justify-content: center; margin-bottom: 8px;">
-              <img src="${window.location.origin}/logo.png" alt="${config?.formato_ticket?.titulo || 'Logo'}" style="height: 55px; width: auto; object-fit: contain;" />
-            </div>
-            <h2>${config.formato_ticket.titulo}</h2>
-            <div>${config.formato_ticket.ruc}</div>
-            <hr />
-              <div style="text-align: left;">
-                <div><strong>TICKET:</strong> #${ticket.numero_ticket}</div>
-                <div><strong>FECHA:</strong> ${formatTicketDate(ticket.timestamp_servidor)}</div>
-                <div><strong>VENDEDOR:</strong> ${ticket.nombre_vendedor}</div>
-${ticket.nombre_cliente ? `                <div><strong>CLIENTE:</strong> ${ticket.nombre_cliente}</div>\n` : ""}              </div>
-              <hr />
-            <div style="font-weight: bold;">${ticket.juego.toUpperCase()}</div>
-            <div>Sorteo: ${ticket.sorteo}</div>
-            <div style="margin: 8px 0;">
-              <div>NÚMERO JUGADO</div>
-              <div class="number">${ticket.numero_jugado}</div>
-            </div>
-            <div><strong>MONTO:</strong> ${ticket.moneda} ${ticket.monto_pago.toFixed(2)}</div>
-            ${(() => {
-              const sObj = config.sorteos?.find(s => s.nombre === ticket.sorteo);
-              const tDate = ticket.timestamp_servidor.substring(0, 10);
-              const rObj = sObj 
-                ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
-                : null;
-
-              if (ticket.anulado) {
-                return `<div style="margin: 8px 0; padding: 6px; border: 1px solid #ccc; background: #f3f4f6; font-weight: bold; font-size: 12px;">ESTADO: ANULADO</div>`;
-              }
-              if (!rObj) {
-                return `
-                  <div style="margin: 8px 0; padding: 6px; border: 1px dashed #d97706; background: #fffbeb; color: #b45309; text-align: center;">
-                    <div style="font-size: 10px; font-weight: bold;">SORTEO PENDIENTE</div>
-                    <div style="font-size: 12px; font-weight: bold; margin-top: 2px;">⏳ PENDIENTE DE JUGAR</div>
-                  </div>
-                `;
-              }
-              const isWin = ticket.numero_jugado.trim().toLowerCase() === rObj.numero_ganador.trim().toLowerCase();
-              if (isWin) {
-                return `
-                  <div style="margin: 8px 0; padding: 8px; border: 2px solid #059669; background: #ecfdf5; color: #065f46; text-align: center; border-radius: 4px;">
-                    <div style="font-size: 10px; font-weight: bold;">GANADOR: ${rObj.numero_ganador}</div>
-                    <div style="font-size: 14px; font-weight: bold; margin-top: 2px;">🎉 ¡BOLETO PREMIADO!</div>
-                    <div style="font-size: 9px; margin-top: 4px; font-weight: bold;">CANTIDAD A PAGAR:</div>
-                    <div style="font-size: 18px; font-weight: bold; font-family: monospace;">C$ ${potentialPrizeCs.toFixed(2)}</div>
-                  </div>
-                `;
-              } else {
-                return `
-                  <div style="margin: 8px 0; padding: 6px; border: 1px solid #f87171; background: #fef2f2; color: #991b1b; text-align: center; border-radius: 4px;">
-                    <div style="font-size: 10px;">SORTEO RES: ${rObj.numero_ganador}</div>
-                    <div style="font-size: 12px; font-weight: bold; margin-top: 2px;">❌ NO PREMIADO</div>
-                  </div>
-                `;
-              }
-            })()}
-            <hr />
-            <div>FIRMA DIGITAL DE SEGURIDAD</div>
-            <div class="signature">${ticket.firma_digital}</div>
-            <hr />
-            <div style="font-size: 11px;">${config.formato_ticket.mensaje_pie}</div>
-            <hr />
-            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 10px;">
-              <img 
-                src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${window.location.origin}/verificar?ticket=${ticket.numero_ticket}%26firma=${ticket.firma_digital}"
-                alt="Código QR de Verificación"
-                style="width: 100px; height: 100px; border: 1px solid #ccc; padding: 4px; background: #fff;"
-              />
-              <span style="font-size: 8px; color: #555; font-family: monospace; margin-top: 4px; text-transform: uppercase;">Verificación Rápida QR • ${config?.formato_ticket?.titulo || 'SISTEMA'}</span>
-            </div>
-            <script>
-              window.onload = function() {
-                window.print();
-                setTimeout(function() { window.close(); }, 500);
-              }
-            </script>
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-    } else {
-      // Fallback
-      alert("Por favor habilite las ventanas emergentes para imprimir.");
+  const shareTicketImage = async () => {
+    setSharing(true);
+    try {
+      const ticketElement = document.getElementById("thermal-ticket-render");
+      if (!ticketElement) {
+        fallbackCopy();
+        return;
+      }
+      
+      // Use html2canvas to capture the ticket UI
+      const canvas = await html2canvas(ticketElement, { scale: 2, useCORS: true });
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          fallbackCopy();
+          setSharing(false);
+          return;
+        }
+        
+        if (navigator.share) {
+          try {
+            const file = new File([blob], `ticket_${ticket.numero_ticket}.png`, { type: 'image/png' });
+            await navigator.share({
+              files: [file],
+              title: 'Ticket de Lotería'
+            });
+          } catch (err) {
+            console.log("Error sharing natively:", err);
+            fallbackCopy();
+          }
+        } else {
+          fallbackCopy();
+        }
+        setSharing(false);
+      }, "image/png");
+    } catch (err) {
+      console.error("Error generating ticket image:", err);
+      fallbackCopy();
+      setSharing(false);
     }
   };
 
-  const handleShare = async () => {
-    setSharing(true);
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `Ticket #${ticket.numero_ticket}`,
-          text: `Lotería: Juego ${ticket.juego}, Número ${ticket.numero_jugado}, Monto ${ticket.moneda} ${ticket.monto_pago}. Firma: ${ticket.firma_digital}`,
-        });
-      } catch (err) {
-        console.log("Error sharing:", err);
-        fallbackCopy();
-      } finally {
-        setSharing(false);
-      }
-    } else {
-      fallbackCopy();
-    }
+  const handlePrint = () => {
+    shareTicketImage();
+  };
+
+  const handleShare = () => {
+    shareTicketImage();
   };
 
   const fallbackCopy = () => {
@@ -331,7 +246,7 @@ ${ticket.nombre_cliente ? `                <div><strong>CLIENTE:</strong> ${tick
 
         {/* Thermal Ticket Render */}
         <div className="p-6 overflow-y-auto max-h-[60vh] bg-gray-50 flex justify-center border-b border-gray-200">
-          <div className="bg-white border border-gray-300 shadow-md p-5 rounded-md w-full font-mono text-xs text-gray-800 relative">
+          <div id="thermal-ticket-render" className="bg-white border border-gray-300 shadow-md p-5 rounded-md w-full font-mono text-xs text-gray-800 relative">
             
             {/* Ticket jagged edge top */}
             <div className="absolute top-0 left-0 right-0 h-1 bg-repeat-x" style={{ backgroundImage: "linear-gradient(45deg, transparent 33.333%, #f3f4f6 33.333%, #f3f4f6 66.667%, transparent 66.667%), linear-gradient(-45deg, transparent 33.333%, #f3f4f6 33.333%, #f3f4f6 66.667%, transparent 66.667%)", backgroundSize: "8px 4px" }} />
