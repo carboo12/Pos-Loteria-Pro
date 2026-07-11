@@ -874,12 +874,10 @@ export default function VendedorInterface({
     // 7. Online: persist full cart to server
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch("http://localhost:3000/api/ventas", {
+      const response = await fetch("/api/ventas", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           juego: selectedJuego,

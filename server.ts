@@ -10,6 +10,7 @@ const firebaseAdmin = ((adminNamespace as any).default || adminNamespace) as any
 
 const app = express();
 const activePaymentLocks = new Set<string>();
+const localSessions = new Map<string, any>(); // Fallback session storage para cuando falla Firebase Auth (adblockers/offline)
 
 const checkAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const authHeader = req.headers.authorization;
@@ -18,6 +19,14 @@ const checkAuth = async (req: express.Request, res: express.Response, next: expr
   }
   try {
     const token = authHeader.split(" ")[1];
+    
+    // 1. Fallback local: Si el token existe en sesiones locales, permitir acceso
+    if (localSessions.has(token)) {
+      (req as any).user = localSessions.get(token);
+      return next();
+    }
+    
+    // 2. Firebase ID Token original
     const decoded = await getAuth().verifyIdToken(token);
     (req as any).user = decoded;
     next();
@@ -646,7 +655,11 @@ app.post("/api/login", async (req, res) => {
     console.error("[Login] Error generating custom token:", err);
   }
 
-  res.json({ success: true, user: safeUser, customToken, message: "Autenticación exitosa" });
+  // Generar token local de respaldo para escenarios offline o de adblock
+  const localToken = "loc_" + Math.random().toString(36).substring(2) + Date.now().toString(36);
+  localSessions.set(localToken, safeUser);
+
+  res.json({ success: true, user: safeUser, customToken, localToken, message: "Autenticación exitosa" });
 });
 
 // Setup Administrator Account Route (Temporary / Recovery utility)
@@ -1845,10 +1858,16 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     
-    // Asegurar que Express sirva los assets estáticos con el tipo MIME correcto antes del catch-all
+    // Asegurar que Express sirva los assets estáticos con el tipo MIME correcto
     app.use(express.static(distPath));
     app.use('/assets', express.static(path.join(distPath, "assets")));
     
+    // IMPORTANTE: Si un asset no existe, devolver 404, NO el index.html
+    app.use('/assets', (req, res) => {
+      res.status(404).send('Asset no encontrado');
+    });
+    
+    // Ruta comodín al final para el enrutamiento de la SPA
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });

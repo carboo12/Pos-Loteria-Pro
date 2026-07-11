@@ -7,23 +7,33 @@ import { auth } from './lib/firebase';
 const originalFetch = window.fetch;
 window.fetch = async (input, init) => {
   const url = typeof input === 'string' ? input : (input instanceof Request ? input.url : '');
-  if (url.startsWith('/api/') && !url.includes('/api/ping') && !url.includes('/api/reloj') && !url.includes('/api/setup-admin')) {
+  
+  if (url.includes('/api/') && !url.includes('/api/ping') && !url.includes('/api/reloj') && !url.includes('/api/setup-admin')) {
+    let tokenStr = null;
+    
     if (auth.currentUser) {
       try {
-        const token = await auth.currentUser.getIdToken();
-        init = init || {};
-        init.headers = {
-          ...init.headers,
-          "Authorization": `Bearer ${token}`
-        };
+        tokenStr = await auth.currentUser.getIdToken();
       } catch (e) {
-        console.error("Failed to inject token", e);
+        console.warn("Firebase token injection bypassed (offline/blocked).");
       }
+    }
+    
+    // Si Firebase falló (ERR_CONNECTION_CLOSED), usamos el token local de respaldo
+    if (!tokenStr) {
+      tokenStr = localStorage.getItem("localToken");
+    }
+
+    if (tokenStr) {
+      init = init || {};
+      init.headers = {
+        ...init.headers,
+        "Authorization": `Bearer ${tokenStr}`
+      };
     }
   }
   return originalFetch(input, init);
 };
-;
 import './index.css';
 
 // Register Service Worker + capture install prompt for Android

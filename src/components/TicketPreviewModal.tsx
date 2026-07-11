@@ -1,6 +1,6 @@
 import { X, Share2, Printer, CheckCircle, Smartphone, Lock } from "lucide-react";
 import { useState } from "react";
-import html2canvas from "html2canvas";
+import { toBlob } from "html-to-image";
 import { Venta, Configuracion } from "../types";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -206,15 +206,15 @@ ${config.formato_ticket.mensaje_pie}
       const ticketElement = document.getElementById("thermal-ticket-render");
       if (!ticketElement) throw new Error("Elemento no encontrado");
 
-      // Ejecutar el render con carrera de tiempo
-      const canvas = await Promise.race([
-        html2canvas(ticketElement, { scale: 2, useCORS: false, logging: false }),
-        timeoutPromise
-      ]) as HTMLCanvasElement;
-
-      // Convertir a blob usando una Promesa para controlar el flujo asíncrono con seguridad
+      // Ejecutar el render a Blob directamente con html-to-image (soporta OKLCH, Tailwind v4, y modern CSS)
       const blob = await Promise.race([
-        new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png")),
+        toBlob(ticketElement, { 
+          pixelRatio: 2, 
+          cacheBust: true,
+          style: {
+            backgroundColor: '#ffffff' // Forzar fondo blanco de ticket térmico
+          }
+        }),
         timeoutPromise
       ]) as Blob | null;
 

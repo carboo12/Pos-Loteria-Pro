@@ -111,6 +111,10 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
       // 2. Extraer el perfil seguro y redirigir
       const matchedUser = data.user;
       
+      if (data.localToken) {
+        localStorage.setItem("localToken", data.localToken);
+      }
+      
       toast.success(`¡Bienvenido de nuevo, ${matchedUser.nombre}!`, { position: 'top-center' });
       
       // onLoginSuccess gestiona el guardado de sesión y la redirección según el rol

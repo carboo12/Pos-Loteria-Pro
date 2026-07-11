@@ -44,7 +44,7 @@
   ],
   "configuracion": {
     "tasa_cambio": 36.5,
-    "contador_global_tickets": 1051,
+    "contador_global_tickets": 1053,
     "formato_ticket": {
       "titulo": "LA NUEVA ERA",
       "ruc": "pida su ticke",
@@ -498,6 +498,64 @@
         },
         {
           "numero": "88",
+          "monto": 10,
+          "premio_posible": 800
+        }
+      ]
+    },
+    {
+      "id": "ticket_ny1dakr",
+      "numero_ticket": "0001052",
+      "timestamp_servidor": "2026-07-11T23:46:30.049Z",
+      "juego": "Diaria",
+      "sorteo": "Diaria 9:00 PM (NI)",
+      "numero_jugado": "02",
+      "monto_pago": 20,
+      "moneda": "C$",
+      "id_vendedor": "U-001",
+      "nombre_vendedor": "jose",
+      "nombre_cliente": "Genérico",
+      "premio_posible_cs": 1600,
+      "firma_digital": "1KY-PH",
+      "anulado": false,
+      "estado": "pendiente",
+      "jugadas": [
+        {
+          "numero": "02",
+          "monto": 10,
+          "premio_posible": 800
+        },
+        {
+          "numero": "55",
+          "monto": 10,
+          "premio_posible": 800
+        }
+      ]
+    },
+    {
+      "id": "ticket_4fuxa0g",
+      "numero_ticket": "0001053",
+      "timestamp_servidor": "2026-07-11T23:50:38.725Z",
+      "juego": "Diaria",
+      "sorteo": "Diaria 9:00 PM (NI)",
+      "numero_jugado": "33",
+      "monto_pago": 20,
+      "moneda": "C$",
+      "id_vendedor": "U-001",
+      "nombre_vendedor": "jose",
+      "nombre_cliente": "Genérico",
+      "premio_posible_cs": 1600,
+      "firma_digital": "SW6-SW",
+      "anulado": false,
+      "estado": "pendiente",
+      "jugadas": [
+        {
+          "numero": "33",
+          "monto": 10,
+          "premio_posible": 800
+        },
+        {
+          "numero": "11",
           "monto": 10,
           "premio_posible": 800
         }
