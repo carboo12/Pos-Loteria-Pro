@@ -875,11 +875,11 @@ export default function VendedorInterface({
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch("/api/ventas", {
+      const response = await fetch("http://localhost:3000/api/ventas", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { "Authorization": `Bearer ${token}` } : {})
+          "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify({
           juego: selectedJuego,
@@ -894,10 +894,19 @@ export default function VendedorInterface({
         })
       });
 
-      const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || "Error al generar venta");
+        const errorText = await response.text();
+        let errorMessage = "Error al generar venta";
+        try {
+          const errData = JSON.parse(errorText);
+          errorMessage = errData.error || errorMessage;
+        } catch (e) {
+          errorMessage = errorText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
+
+      const data = await response.json();
 
       // 8. Success — full cleanup
       onNewSaleCreated(data);
