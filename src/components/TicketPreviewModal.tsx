@@ -2,6 +2,7 @@ import { X, Share2, Printer, CheckCircle, Smartphone, Lock } from "lucide-react"
 import { useState } from "react";
 import html2canvas from "html2canvas";
 import { Venta, Configuracion } from "../types";
+import { QRCodeSVG } from "qrcode.react";
 
 /**
  * Safe helper to parse a time string (can be "11:00 AM", "3:00 PM", "15:00", "11:00")
@@ -195,45 +196,46 @@ ${config.formato_ticket.mensaje_pie}
 
   const shareTicketImage = async () => {
     setSharing(true);
+    
+    // Crear una promesa que se rechace automáticamente a los 4 segundos
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("Timeout generando imagen")), 4000)
+    );
+
     try {
       const ticketElement = document.getElementById("thermal-ticket-render");
-      if (!ticketElement) {
-        ejecutarFallbackWhatsApp();
-        setSharing(false);
-        return;
-      }
-      
-      // Use html2canvas to capture the ticket UI
-      const canvas = await html2canvas(ticketElement, { scale: 2, useCORS: true, logging: false });
-      canvas.toBlob(async (blob) => {
-        if (!blob) {
-          ejecutarFallbackWhatsApp();
-          setSharing(false);
-          return;
-        }
-        
-        const file = new File([blob], `ticket_${ticket.numero_ticket}.png`, { type: 'image/png' });
+      if (!ticketElement) throw new Error("Elemento no encontrado");
 
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: 'Ticket de Lotería',
-              text: 'Aquí está su ticket de juego.'
-            });
-          } catch (error) {
-            console.error("Error al usar Share API nativo, activando fallback:", error);
-            ejecutarFallbackWhatsApp();
-          }
-        } else {
-          // Si el navegador de Android no soporta compartir imágenes, usar el plan B de texto
-          ejecutarFallbackWhatsApp();
-        }
-        setSharing(false);
-      }, "image/png");
+      // Ejecutar el render con carrera de tiempo
+      const canvas = await Promise.race([
+        html2canvas(ticketElement, { scale: 2, useCORS: false, logging: false }),
+        timeoutPromise
+      ]) as HTMLCanvasElement;
+
+      // Convertir a blob usando una Promesa para controlar el flujo asíncrono con seguridad
+      const blob = await Promise.race([
+        new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png")),
+        timeoutPromise
+      ]) as Blob | null;
+
+      if (!blob) throw new Error("Blob corrupto o vacío");
+
+      const file = new File([blob], `ticket_${ticket.numero_ticket}.png`, { type: 'image/png' });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: 'Ticket de Lotería',
+          text: 'Aquí está su ticket de juego.'
+        });
+      } else {
+        ejecutarFallbackWhatsApp();
+      }
     } catch (err) {
-      console.error("Error generating ticket image:", err);
+      console.error("Flujo de compartir interrumpido de forma segura:", err);
       ejecutarFallbackWhatsApp();
+    } finally {
+      // Regla de oro de Stitch UI: El botón SIEMPRE recupera su estado activo
       setSharing(false);
     }
   };
@@ -451,12 +453,13 @@ ${config.formato_ticket.mensaje_pie}
               </div>
               
               <div className="flex flex-col items-center p-2">
-                <img 
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${window.location.origin}/verificar?ticket=${ticket.numero_ticket}%26firma=${ticket.firma_digital}`}
-                  alt="QR Verificación"
-                  className="w-20 h-20 p-1"
-                  referrerPolicy="no-referrer"
-                />
+                <div className="p-1 bg-white">
+                  <QRCodeSVG 
+                    value={`${window.location.origin}/verificar?ticket=${ticket.numero_ticket}&firma=${ticket.firma_digital}`}
+                    size={80}
+                    level="L"
+                  />
+                </div>
                 <span className="text-[7px] text-[#6b7280] font-mono mt-1 uppercase tracking-wider">Verificación Digital QR</span>
               </div>
             </div>
@@ -506,7 +509,7 @@ ${config.formato_ticket.mensaje_pie}
             ) : (
               <Share2 className="w-4 h-4" />
             )}
-            <span>{sharing ? "Cargando..." : "WhatsApp"}</span>
+            <span>{sharing ? "Procesando..." : "WhatsApp"}</span>
           </button>
         </div>
 
