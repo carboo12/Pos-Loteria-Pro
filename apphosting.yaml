@@ -1,0 +1,21 @@
+﻿# Firebase App Hosting configuration
+# https://firebase.google.com/docs/app-hosting/configure
+
+runConfig:
+  # Number of concurrent requests each instance can handle
+  concurrency: 80
+  # CPU assigned to each instance
+  cpu: 1
+  # Memory assigned to each instance
+  memoryMiB: 512
+  # Min/max instances
+  minInstances: 0
+  maxInstances: 2
+
+env:
+  # Explicitly set production mode so express serves static files (not Vite)
+  - variable: NODE_ENV
+    value: production
+    availability:
+      - BUILD
+      - RUNTIME

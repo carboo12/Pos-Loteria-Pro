@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import * as adminNamespace from "firebase-admin";
 import { getAuth } from "firebase-admin/auth";
 import bcrypt from "bcryptjs";
@@ -353,8 +352,8 @@ function initFirebaseAdmin() {
     return true;
   }
 
+  // 1. Try explicit service account file (local dev)
   const serviceAccountPath = findServiceAccountPath();
-  
   if (serviceAccountPath) {
     try {
       const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8"));
@@ -367,17 +366,18 @@ function initFirebaseAdmin() {
     } catch (e) {
       console.error("[Firebase Admin] Error al inicializar con Cuenta de Servicio:", e);
     }
-  } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    try {
-      firebaseAdmin.initializeApp({
-        credential: firebaseAdmin.applicationDefault()
-      });
-      isFirebaseAdminInitialized = true;
-      console.log("[Firebase Admin] Inicializado mediante credenciales por defecto de Google.");
-      return true;
-    } catch (e) {
-      console.error("[Firebase Admin] Error al inicializar con credenciales por defecto:", e);
-    }
+  }
+
+  // 2. Always try Application Default Credentials (works on Cloud Run / App Hosting automatically)
+  try {
+    firebaseAdmin.initializeApp({
+      credential: firebaseAdmin.applicationDefault()
+    });
+    isFirebaseAdminInitialized = true;
+    console.log("[Firebase Admin] Inicializado mediante Application Default Credentials (Cloud Run/ADC).");
+    return true;
+  } catch (e) {
+    console.error("[Firebase Admin] Error al inicializar con Application Default Credentials:", e);
   }
 
   return false;
@@ -1752,6 +1752,8 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== "production") {
+    // Dynamic import so Vite is NOT bundled into the production build
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
