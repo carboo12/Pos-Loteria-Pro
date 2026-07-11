@@ -26,14 +26,31 @@ window.fetch = async (input, init) => {
 ;
 import './index.css';
 
-// Register Service Worker for PWA capabilities
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then(reg => console.log('Service Worker registrado con éxito:', reg.scope))
-      .catch(err => console.error('Fallo al registrar el Service Worker:', err));
+// Register Service Worker + capture install prompt for Android
+let deferredPrompt: any = null;
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js")
+      .then((reg) => {
+        console.log("Service Worker registrado:", reg.scope);
+      })
+      .catch((err) => console.error("Error al registrar SW:", err));
   });
 }
+
+window.addEventListener("beforeinstallprompt", (e: Event) => {
+  e.preventDefault();
+  deferredPrompt = (e as any).prompt;
+  (window as any).__installPrompt = e;
+  console.log("beforeinstallprompt capturado - instalación disponible");
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredPrompt = null;
+  (window as any).__installPrompt = null;
+  console.log("App instalada exitosamente");
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

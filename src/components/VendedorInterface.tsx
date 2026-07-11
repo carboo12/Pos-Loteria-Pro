@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, FormEvent, useRef } from "react";
 import { 
   Gamepad2, 
   History, 
@@ -19,10 +19,11 @@ import {
   QrCode,
   CheckCircle,
   AlertTriangle,
+  Ticket
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Html5QrcodeScanner } from "html5-qrcode";
-import { Usuario, Configuracion, Venta, Sorteo } from "../types";
+import { Usuario, Configuracion, Venta, Sorteo, Jugada } from "../types";
 import TicketPreviewModal from "./TicketPreviewModal";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
@@ -84,6 +85,7 @@ export default function VendedorInterface({
   const [selectedSorteo, setSelectedSorteo] = useState("");
   const [numeroJugado, setNumeroJugado] = useState("");
   const [montoPago, setMontoPago] = useState("");
+  const [activeField, setActiveField] = useState<'numero' | 'monto'>('numero');
   const [moneda, setMoneda] = useState<"C$" | "USD">("C$");
   const [nombreCliente, setNombreCliente] = useState("Genérico");
   
@@ -147,6 +149,7 @@ export default function VendedorInterface({
 
   // --- NEW MULTI-NUMBER CART STATE ---
   const [jugadas, setJugadas] = useState<Jugada[]>([]);
+  const montoInputRef = useRef<HTMLInputElement>(null);
   const totalTicketMonto = jugadas.reduce((acc, j) => acc + j.monto, 0);
   const totalTicketPremio = jugadas.reduce((acc, j) => acc + j.premio_posible, 0);
 
@@ -726,20 +729,43 @@ export default function VendedorInterface({
     setErrorMessage(null);
     setSuccessMessage(null);
     
-    // Determine maximum digits based on the game
-    let maxDigits = 2;
-    if (selectedJuego === "Premia2") maxDigits = 4;
-    else if (selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos") maxDigits = 3;
-    else if (selectedJuego === "Pega 3") maxDigits = 6;
-    else if (selectedJuego === "Súper Premio") maxDigits = 12;
+    if (val === "ENTER") {
+      if (activeField === "numero") {
+        setActiveField("monto");
+      } else {
+        addJugadaAlCarrito();
+      }
+      return;
+    }
 
-    if (val === "BORRAR") {
-      setNumeroJugado("");
-    } else if (val === "BACKSPACE") {
-      setNumeroJugado(prev => prev.slice(0, -1));
+    if (activeField === "numero") {
+      // Determine maximum digits based on the game
+      let maxDigits = 2;
+      if (selectedJuego === "Premia2") maxDigits = 4;
+      else if (selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos") maxDigits = 3;
+      else if (selectedJuego === "Pega 3") maxDigits = 6;
+      else if (selectedJuego === "Súper Premio") maxDigits = 12;
+
+      if (val === "BORRAR") {
+        setNumeroJugado("");
+      } else if (val === "BACKSPACE") {
+        setNumeroJugado(prev => prev.slice(0, -1));
+      } else {
+        if (numeroJugado.length < maxDigits) {
+          setNumeroJugado(prev => prev + val);
+        }
+      }
     } else {
-      if (numeroJugado.length < maxDigits) {
-        setNumeroJugado(prev => prev + val);
+      // activeField === 'monto'
+      if (val === "BORRAR") {
+        setMontoPago("");
+      } else if (val === "BACKSPACE") {
+        setMontoPago(prev => prev.slice(0, -1));
+      } else {
+        setMontoPago(prev => {
+          if (prev === "0") return val;
+          return prev + val;
+        });
       }
     }
   };
@@ -1273,9 +1299,13 @@ export default function VendedorInterface({
               {/* Display of number */}
               <div className="col-span-6">
                 <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">NÚMERO JUGADO</label>
-                <div className={`h-16 border-2 rounded-2xl flex items-center justify-center relative font-mono shadow-inner px-2 overflow-hidden ${
+                <div 
+                  onClick={() => setActiveField('numero')}
+                  className={`h-16 border-2 rounded-2xl flex items-center justify-center relative font-mono shadow-inner px-2 overflow-hidden cursor-pointer transition-colors ${
                   isLimitBlocked 
                     ? 'border-[#EF4444] text-[#EF4444] bg-red-50' 
+                    : activeField === 'numero'
+                    ? 'border-blue-500 text-blue-900 bg-blue-50 shadow-md'
                     : 'border-gray-400 text-gray-900 bg-white'
                 }`}>
                   {selectedJuego === "Fechas" ? (
@@ -1358,13 +1388,17 @@ export default function VendedorInterface({
                   <input
                     id="monto-input"
                     type="number"
+                    inputMode="none"
                     value={montoPago}
+                    onFocus={() => setActiveField('monto')}
                     onChange={(e) => setMontoPago(e.target.value)}
                     placeholder="0"
                     className={`w-full h-16 pl-10 pr-2 rounded-2xl font-mono text-2xl font-black shadow-inner focus:outline-none border-2 transition-colors ${
                       isLimitBlocked 
                         ? 'border-[#EF4444] text-[#EF4444] bg-red-50 focus:border-red-600' 
-                        : 'border-gray-400 text-gray-900 bg-white focus:border-blue-900'
+                        : activeField === 'monto'
+                        ? 'border-blue-500 text-blue-900 bg-blue-50 shadow-md'
+                        : 'border-gray-400 text-gray-900 bg-white'
                     }`}
                   />
                 </div>
@@ -1500,6 +1534,14 @@ export default function VendedorInterface({
                     className="py-3 bg-gray-600 hover:bg-gray-500 active:bg-gray-400 text-white rounded-xl font-display font-black text-lg border-b-2 border-gray-900 select-none cursor-pointer flex items-center justify-center"
                   >
                     ←
+                  </button>
+                  
+                  <button
+                    id="numkey-enter"
+                    onClick={() => handleKeypadPress("ENTER")}
+                    className="col-span-3 py-3 mt-1 bg-blue-600 hover:bg-blue-500 active:bg-blue-400 text-white rounded-xl font-display font-black text-sm uppercase tracking-widest border-b-4 border-blue-800 select-none cursor-pointer flex items-center justify-center shadow-md transition-all"
+                  >
+                    {activeField === 'numero' ? 'Siguiente ➡' : 'Agregar Jugada ➕'}
                   </button>
                 </div>
               </div>

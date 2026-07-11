@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { signInWithEmailAndPassword } from "firebase/auth";
+
 import { auth } from "../lib/firebase";
 import { Usuario } from "../types";
 import toast from "react-hot-toast";
@@ -72,45 +72,42 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
     setError(null);
 
     try {
-      // 1. Sign in with Firebase Auth Client SDK
-      const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
-      const fbUser = userCredential.user;
+      // 1. Autenticar contra el backend (Estrategia Híbrida: Plaintext + Bcrypt)
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ email: email.trim(), password })
+      });
 
-      // 2. Find the user in our local server's database list
-      const matchedUser = users.find(
-        (u) => u.email.toLowerCase() === fbUser.email?.toLowerCase() || u.id === fbUser.uid
-      );
-
-      if (matchedUser) {
-        if (!matchedUser.activo) {
-          setError("Acceso denegado. Su cuenta se encuentra suspendida temporalmente.");
-          setLoading(false);
-          return;
+      // 1. Validar primero si la respuesta es correcta de manera segura
+      if (!res.ok) {
+        const textError = await res.text();
+        let errorMessage = "Ocurrió un error en la autenticación.";
+        try {
+          const jsonError = JSON.parse(textError);
+          errorMessage = jsonError.error || errorMessage;
+        } catch {
+          errorMessage = textError || errorMessage;
         }
-        toast.success(`¡Bienvenido de nuevo, ${matchedUser.nombre}!`, { position: 'top-center' });
-        onLoginSuccess(matchedUser);
-      } else {
-        setError("Usuario autenticado pero no registrado en la base de datos de lotería.");
+        throw new Error(errorMessage);
       }
+
+      // 2. Si la respuesta es OK, procesar el JSON con seguridad
+      const data = await res.json();
+
+      // 2. Extraer el perfil seguro y redirigir
+      const matchedUser = data.user;
+      
+      toast.success(`¡Bienvenido de nuevo, ${matchedUser.nombre}!`, { position: 'top-center' });
+      
+      // onLoginSuccess gestiona el guardado de sesión y la redirección según el rol
+      onLoginSuccess(matchedUser);
+      
     } catch (err: any) {
       console.error("Login error:", err);
-      let errorMsg = "Ocurrió un error al iniciar sesión. Intente nuevamente.";
-      
-      if (err.code === "auth/invalid-email") {
-        errorMsg = "El correo electrónico ingresado no tiene un formato válido.";
-      } else if (err.code === "auth/user-disabled") {
-        errorMsg = "Este usuario ha sido suspendido en Firebase Authentication.";
-      } else if (err.code === "auth/user-not-found") {
-        errorMsg = "No se encontró ninguna cuenta asociada a este correo.";
-      } else if (err.code === "auth/wrong-password") {
-        errorMsg = "La contraseña ingresada es incorrecta.";
-      } else if (err.code === "auth/invalid-credential" || err.code === "auth/invalid-login-credentials") {
-        errorMsg = "Credenciales incorrectas. Verifique su correo y contraseña.";
-      } else if (err.code === "auth/network-request-failed") {
-        errorMsg = "Error de red. Verifique su conexión de internet.";
-      }
-      
-      setError(errorMsg);
+      setError(err.message || "Ocurrió un error al iniciar sesión. Intente nuevamente.");
     } finally {
       setLoading(false);
     }

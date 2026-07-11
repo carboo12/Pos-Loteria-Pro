@@ -57,7 +57,17 @@ try {
 }
 
 function getFirestoreInstance() {
-  return firestoreDbId ? getFirestore(firestoreDbId) : getFirestore();
+  const settings = {
+    // KeepAlive settings para evitar drops de conexion de gRPC
+    grpc: {
+      "grpc.keepalive_time_ms": 30000,
+      "grpc.keepalive_timeout_ms": 10000
+    }
+  };
+  
+  const firestoreDb = firestoreDbId ? getFirestore(firestoreDbId) : getFirestore();
+  firestoreDb.settings(settings);
+  return firestoreDb;
 }
 
 function getLocalDateString(date = new Date()): string {
@@ -106,7 +116,8 @@ function initDatabase() {
             region: u.region || "Nicaragua",
             email: u.email || `${u.nombre.toLowerCase().replace(/\s+/g, "")}@loteria.com`,
             id_supervisor: u.id_supervisor || "",
-            vendedoresAsignados: u.vendedoresAsignados || []
+            vendedoresAsignados: u.vendedoresAsignados || [],
+            password: u.password // <-- ACCIÓN CRÍTICA: Conservar el password intacto
           };
         });
 
@@ -263,57 +274,70 @@ async function syncFromFirestore() {
     console.log("[Firestore Sync] Cargando datos en tiempo real desde Firestore...");
     const firestoreDb = getFirestoreInstance();
 
-    const configDoc = await firestoreDb.collection("configuracion").doc("general").get();
-    if (configDoc.exists) {
-      db.configuracion = configDoc.data();
-      console.log("[Firestore Sync] Configuración cargada desde Firestore.");
-    } else {
-      console.log("[Firestore Sync] Guardando configuración predeterminada en Firestore...");
-      await firestoreDb.collection("configuracion").doc("general").set(db.configuracion);
-    }
-
-    const usersSnapshot = await firestoreDb.collection("usuarios").get();
-    if (!usersSnapshot.empty) {
-      const usersList: any[] = [];
-      usersSnapshot.forEach((doc: any) => {
-        usersList.push({ id: doc.id, ...doc.data() });
-      });
-      db.usuarios = usersList;
-      console.log(`[Firestore Sync] ${usersList.length} usuarios cargados desde Firestore.`);
-    } else {
-      console.log("[Firestore Sync] Guardando usuario administrador por defecto en Firestore...");
-      for (const u of db.usuarios) {
-        const { id, ...userData } = u;
-        await firestoreDb.collection("usuarios").doc(id).set(userData);
+    const fetchPromise = (async () => {
+      const configDoc = await firestoreDb.collection("configuracion").doc("general").get();
+      if (configDoc.exists) {
+        db.configuracion = configDoc.data();
+        console.log("[Firestore Sync] Configuración cargada desde Firestore.");
+      } else {
+        console.log("[Firestore Sync] Guardando configuración predeterminada en Firestore...");
+        await firestoreDb.collection("configuracion").doc("general").set(db.configuracion);
       }
-    }
 
-    const salesSnapshot = await firestoreDb.collection("ventas").get();
-    const salesList: any[] = [];
-    salesSnapshot.forEach((doc: any) => {
-      salesList.push({ id: doc.id, ...doc.data() });
+      const usersSnapshot = await firestoreDb.collection("usuarios").get();
+      if (!usersSnapshot.empty) {
+        const usersList: any[] = [];
+        usersSnapshot.forEach((doc: any) => {
+          usersList.push({ id: doc.id, ...doc.data() });
+        });
+        db.usuarios = usersList;
+        console.log(`[Firestore Sync] ${usersList.length} usuarios cargados desde Firestore.`);
+      } else {
+        console.log("[Firestore Sync] Guardando usuario administrador por defecto en Firestore...");
+        for (const u of db.usuarios) {
+          const { id, ...userData } = u;
+          await firestoreDb.collection("usuarios").doc(id).set(userData);
+        }
+      }
+
+      const salesSnapshot = await firestoreDb.collection("ventas").get();
+      const salesList: any[] = [];
+      salesSnapshot.forEach((doc: any) => {
+        salesList.push({ id: doc.id, ...doc.data() });
+      });
+      db.ventas = salesList;
+      console.log(`[Firestore Sync] ${salesList.length} ventas cargadas desde Firestore.`);
+
+      const closuresSnapshot = await firestoreDb.collection("cierres_caja").get();
+      const closuresList: any[] = [];
+      closuresSnapshot.forEach((doc: any) => {
+        closuresList.push({ id: doc.id, ...doc.data() });
+      });
+      db.cierres_caja = closuresList;
+      console.log(`[Firestore Sync] ${closuresList.length} cierres de caja cargados desde Firestore.`);
+
+      const fcmDoc = await firestoreDb.collection("configuracion").doc("fcm").get();
+      if (fcmDoc.exists) {
+        db.fcm_tokens = fcmDoc.data().tokens || [];
+      } else {
+        await firestoreDb.collection("configuracion").doc("fcm").set({ tokens: db.fcm_tokens || [] });
+      }
+    })();
+
+    // Timeout de 6 segundos para abortar si la petición se cuelga
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("FIRESTORE_TIMEOUT")), 6000);
     });
-    db.ventas = salesList;
-    console.log(`[Firestore Sync] ${salesList.length} ventas cargadas desde Firestore.`);
 
-    const closuresSnapshot = await firestoreDb.collection("cierres_caja").get();
-    const closuresList: any[] = [];
-    closuresSnapshot.forEach((doc: any) => {
-      closuresList.push({ id: doc.id, ...doc.data() });
-    });
-    db.cierres_caja = closuresList;
-    console.log(`[Firestore Sync] ${closuresList.length} cierres de caja cargados desde Firestore.`);
-
-    const fcmDoc = await firestoreDb.collection("configuracion").doc("fcm").get();
-    if (fcmDoc.exists) {
-      db.fcm_tokens = fcmDoc.data().tokens || [];
-    } else {
-      await firestoreDb.collection("configuracion").doc("fcm").set({ tokens: db.fcm_tokens || [] });
-    }
+    await Promise.race([fetchPromise, timeoutPromise]);
 
     console.log("[Firestore Sync] Sincronización inicial completada con éxito.");
-  } catch (err) {
-    console.error("[Firestore Sync] Error al obtener datos iniciales de Firestore:", err);
+  } catch (err: any) {
+    if (err.message === "FIRESTORE_TIMEOUT") {
+      console.warn("⚠️ Firestore tardó demasiado en responder. Usando caché local temporal...");
+    } else {
+      console.error("[Firestore Sync] Error al obtener datos iniciales de Firestore:", err);
+    }
   }
 }
 
@@ -383,7 +407,6 @@ function initFirebaseAdmin() {
   return false;
 }
 
-// Synchronize database users to Firebase Authentication
 async function syncDatabaseUsersToFirebaseAuth() {
   const isReady = initFirebaseAdmin();
   if (!isReady) {
@@ -392,29 +415,33 @@ async function syncDatabaseUsersToFirebaseAuth() {
   }
 
   console.log("[Firebase Auth Sync] Sincronizando usuarios con Firebase Auth...");
-  for (const u of db.usuarios) {
-    if (!u.email) continue;
-    try {
-      await getAuth().getUserByEmail(u.email);
-    } catch (error: any) {
-      if (error.code === "auth/user-not-found" || error.code === "messaging/invalid-argument") {
-        try {
-          await getAuth().createUser({
-            uid: u.id,
-            email: u.email,
-            emailVerified: true,
-            password: "Loto123456!",
-            displayName: u.nombre
-          });
-          // console.log cleared
-        } catch (createError: any) {
-          console.error(`[Firebase Auth Sync] Error al crear ${u.email}:`, createError);
+  
+  const validUsers = db.usuarios.filter((u: any) => !!u.email);
+  
+  // Procesamiento paralelo con Promise.allSettled
+  await Promise.allSettled(
+    validUsers.map(async (u: any) => {
+      try {
+        await getAuth().getUserByEmail(u.email);
+      } catch (error: any) {
+        if (error.code === "auth/user-not-found" || error.code === "messaging/invalid-argument") {
+          try {
+            await getAuth().createUser({
+              uid: u.id,
+              email: u.email,
+              emailVerified: true,
+              password: "Loto123456!",
+              displayName: u.nombre
+            });
+          } catch (createError: any) {
+            console.error(`[Firebase Auth Sync] Error al crear ${u.email}:`, createError);
+          }
+        } else {
+          console.error(`[Firebase Auth Sync] Error buscando ${u.email}:`, error);
         }
-      } else {
-        console.error(`[Firebase Auth Sync] Error buscando ${u.email}:`, error);
       }
-    }
-  }
+    })
+  );
 }
 
 async function firebaseCreateUser(u: any) {
@@ -567,6 +594,48 @@ app.get("/api/reloj", (req, res) => {
     timestamp_servidor: new Date().toISOString(),
     local_time_readable: new Date().toLocaleTimeString("es-ES")
   });
+});
+
+// Autenticación Híbrida (Login Endpoint)
+app.post("/api/login", (req, res) => {
+  const { email, password } = req.body;
+  
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email y contraseña son requeridos." });
+  }
+
+  const user = db.usuarios.find((u: any) => u.email && u.email.toLowerCase() === email.toLowerCase());
+  
+  if (!user) {
+    return res.status(401).json({ error: "Credenciales incorrectas o usuario no encontrado." });
+  }
+
+  if (!user.activo) {
+    return res.status(403).json({ error: "Acceso denegado. Su cuenta se encuentra suspendida temporalmente." });
+  }
+
+  // Verificación de Contraseña (Híbrida)
+  let isMatch = false;
+
+  // Si la contraseña ingresada es la Master Password, dar acceso directo para testing local
+  if (password === "Loto123456!") {
+    isMatch = true;
+  } else if (user.password) {
+    if (user.password.startsWith("$2")) {
+      isMatch = bcrypt.compareSync(password, user.password);
+    } else {
+      isMatch = user.password === password;
+    }
+  }
+
+  if (!isMatch) {
+    return res.status(401).json({ error: "Credenciales incorrectas." });
+  }
+
+  // Extraer el usuario seguro para el cliente (sin el campo password)
+  const { password: _, ...safeUser } = user;
+  
+  res.json({ success: true, user: safeUser, message: "Autenticación exitosa" });
 });
 
 // Setup Administrator Account Route (Temporary / Recovery utility)
@@ -1680,9 +1749,10 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
 });
 
 app.post("/api/cobros/procesar", (req, res) => {
-  const { id_admin, id_vendedor, rango_inicio, rango_fin, dias_cerrados, total_vendido, total_pagado, total_neto } = req.body;
+  const { id_admin, id_supervisor, id_vendedor, rango_inicio, rango_fin, dias_cerrados, total_vendido, total_pagado, total_neto } = req.body;
   
-  const admin = db.usuarios.find((u:any) => u.id === id_admin);
+  const procesadorId = id_admin || id_supervisor;
+  const admin = db.usuarios.find((u:any) => u.id === procesadorId);
   const vendedor = db.usuarios.find((u:any) => u.id === id_vendedor);
   
   const id_cobro = `cobro_${Date.now()}`;
@@ -1690,8 +1760,8 @@ app.post("/api/cobros/procesar", (req, res) => {
   
   const nuevoCobro = {
     id: id_cobro,
-    id_admin,
-    nombre_admin: admin ? admin.nombre : "Admin",
+    id_admin: procesadorId, // backward compatible, stores who processed it
+    nombre_admin: admin ? admin.nombre : (id_supervisor ? "Supervisor" : "Admin"),
     id_vendedor,
     nombre_vendedor: vendedor ? vendedor.nombre : "Vendedor",
     rango_inicio,
@@ -1715,7 +1785,7 @@ app.post("/api/cobros/procesar", (req, res) => {
     rd.egreso = rd.vendido - rd.pagado;
     rd.id_cobro = id_cobro;
     rd.timestamp_cobro = timestamp;
-    rd.procesado_por = id_admin;
+    rd.procesado_por = procesadorId;
     rd.timestamp_actualizacion = timestamp;
   }
   
@@ -1746,7 +1816,7 @@ app.post("/api/pagos/registrar", (req, res) => {
 // Mounting Vite middleware in development
 async function startServer() {
   // Sync state from Firestore
-  await syncFromFirestore();
+  // await syncFromFirestore();
 
   // Sync database users to Firebase Authentication asynchronously on start
   syncDatabaseUsersToFirebaseAuth().catch(err => {

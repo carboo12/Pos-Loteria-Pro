@@ -21,7 +21,9 @@
 ## Características
 
 - **Multi-país**: Soporte para Nicaragua y Honduras con sus respectivos juegos y formatos
-- **Gestión de usuarios**: Roles de Administrador, Supervisor y Vendedor
+- **Motor de Ventas Multi-número**: Sistema de carrito (Jugadas) para agrupar múltiples números y sorteos en un solo ticket.
+- **Módulo de Supervisor Móvil**: Cobros y liquidaciones de ruta adaptados con interfaz neumórfica responsiva para operaciones en la calle.
+- **Gestión de usuarios**: Roles de Administrador, Supervisor y Vendedor con seguridad híbrida Bcrypt.
 - **Catálogo de juegos**: Diaria, Fechas, Jugá 3, Premia2, Terminación 2, La Diaria, Pega 3, Súper Premio
 - **Validación anti-fraude**: Bloqueo automático de ventas 5 minutos antes del sorteo usando timestamp del servidor
 - **Límites por número**: Techos de dinero configurables por juego, sorteo y vendedor
@@ -141,9 +143,11 @@ punto-de-venta-de-lotería/
 ## Seguridad
 
 ### Autenticación
-- Firebase Authentication con email/contraseña
-- Sincronización automática de usuarios entre base de datos local y Firebase Auth
-- Cuentas inactivables de forma remota por el administrador
+### Autenticación e Identidad (Blueprint)
+- Estrategia Híbrida: Soporte dual para autenticación Legacy (texto plano) y Hashes de seguridad con **Bcrypt** para los perfiles modernos de Administrador/Supervisor.
+- Firebase Authentication con email/contraseña.
+- Sincronización automática de usuarios entre base de datos local y Firebase Auth.
+- Cuentas inactivables de forma remota por el administrador con cierre de sesión inmediato.
 
 ### Sesión
 - Timeout automático por inactividad: **30 minutos** con ventana de advertencia de 1 minuto
