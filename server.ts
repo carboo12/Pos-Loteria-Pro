@@ -1057,7 +1057,7 @@ app.get("/api/ventas", (req, res) => {
 });
 
 app.post("/api/ventas", checkAuth, (req, res) => {
-  const { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente, premio_posible_cs } = req.body;
+  const { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente, premio_posible_cs, jugadas } = req.body;
 
   if (!juego || !sorteo || !numero_jugado || !monto_pago || !moneda || !id_vendedor) {
     return res.status(400).json({ error: "Faltan datos obligatorios para registrar la venta." });
@@ -1234,7 +1234,7 @@ app.post("/api/ventas", checkAuth, (req, res) => {
     moneda
   );
 
-  const newSale = {
+  const newSale: any = {
     id: ticketId,
     numero_ticket: nextTicketNum,
     timestamp_servidor: serverTimeStr,
@@ -1249,7 +1249,9 @@ app.post("/api/ventas", checkAuth, (req, res) => {
     premio_posible_cs: Number(premio_posible_cs) || 0,
     firma_digital: signature,
     anulado: false,
-    estado: "pendiente"
+    estado: "pendiente",
+    // Multi-número: persistir jugadas si vienen
+    ...(Array.isArray(jugadas) && jugadas.length > 0 ? { jugadas } : {})
   };
 
   db.ventas.push(newSale);

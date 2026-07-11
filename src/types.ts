@@ -12,6 +12,13 @@ export interface Usuario {
   vendedoresAsignados?: string[]; // Array of IDs of vendedores under their charge (for supervisor)
 }
 
+// Una jugada individual dentro de un ticket multi-número
+export interface Jugada {
+  numero: string;          // El número apostado
+  monto: number;           // Monto apostado en la moneda del ticket
+  premio_posible: number;  // Premio posible en C$ (ya convertido)
+}
+
 export interface FormatoTicket {
   titulo: string;
   ruc: string;
@@ -78,16 +85,17 @@ export interface Venta {
   timestamp_servidor: string; // ISO String
   juego: string; // "Diaria", "Premia2", etc.
   sorteo: string; // Name of the draw
-  numero_jugado: string;
-  monto_pago: number;
+  numero_jugado: string; // Primera jugada (backward compat) o resumen
+  monto_pago: number;    // Monto total del ticket
   moneda: "C$" | "USD";
   id_vendedor: string;
   nombre_vendedor: string;
   nombre_cliente?: string;
-  premio_posible_cs?: number;
+  premio_posible_cs?: number; // Premio total del ticket en C$
   firma_digital: string; // e.g. "A9X-2M"
   anulado: boolean;
   estado?: 'pendiente' | 'pagado' | 'anulado' | 'perdedor';
+  jugadas?: Jugada[]; // Lista de jugadas individuales (multi-número)
 }
 
 export interface CierreCaja {

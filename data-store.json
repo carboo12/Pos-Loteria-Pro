@@ -17,7 +17,7 @@
         "contador_global_tickets": 1045,
         "formato_ticket": {
           "titulo": "LA NUEVA ERA",
-          "ruc": "pida su ticke 23",
+          "ruc": "pida su ticke",
           "mensaje_pie": "¡Gracias por su compra! Verifique su ticket en línea."
         },
         "sorteos": [
@@ -293,6 +293,20 @@
       "rol": "vendedor",
       "email": "jose01@gmail.com",
       "password": "123456",
+      "estado": "activo",
+      "conexion": "offline",
+      "activo": true,
+      "region": "Nicaragua",
+      "id_supervisor": "",
+      "vendedoresAsignados": []
+    },
+    {
+      "id": "U-002",
+      "nombre": "Herling",
+      "usuario": "herling",
+      "rol": "supervisor",
+      "email": "carboo1216@gmail.com",
+      "password": "$2b$10$wBj5je2dfXOeElD.IY2Si.vY9s96sw3qMqBO.P6ypNowsWo02ZGdy",
       "estado": "activo",
       "conexion": "offline",
       "activo": true,
