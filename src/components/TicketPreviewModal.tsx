@@ -188,43 +188,52 @@ ${config.formato_ticket.mensaje_pie}
 --------------------------------
   `.trim();
 
+  const ejecutarFallbackWhatsApp = () => {
+    const textoCodificado = encodeURIComponent(ticketText);
+    window.open(`https://api.whatsapp.com/send?text=${textoCodificado}`, '_blank');
+  };
+
   const shareTicketImage = async () => {
     setSharing(true);
     try {
       const ticketElement = document.getElementById("thermal-ticket-render");
       if (!ticketElement) {
-        fallbackCopy();
+        ejecutarFallbackWhatsApp();
+        setSharing(false);
         return;
       }
       
       // Use html2canvas to capture the ticket UI
-      const canvas = await html2canvas(ticketElement, { scale: 2, useCORS: true });
+      const canvas = await html2canvas(ticketElement, { scale: 2, useCORS: true, logging: false });
       canvas.toBlob(async (blob) => {
         if (!blob) {
-          fallbackCopy();
+          ejecutarFallbackWhatsApp();
           setSharing(false);
           return;
         }
         
-        if (navigator.share) {
+        const file = new File([blob], `ticket_${ticket.numero_ticket}.png`, { type: 'image/png' });
+
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
           try {
-            const file = new File([blob], `ticket_${ticket.numero_ticket}.png`, { type: 'image/png' });
             await navigator.share({
               files: [file],
-              title: 'Ticket de Lotería'
+              title: 'Ticket de Lotería',
+              text: 'Aquí está su ticket de juego.'
             });
-          } catch (err) {
-            console.log("Error sharing natively:", err);
-            fallbackCopy();
+          } catch (error) {
+            console.error("Error al usar Share API nativo, activando fallback:", error);
+            ejecutarFallbackWhatsApp();
           }
         } else {
-          fallbackCopy();
+          // Si el navegador de Android no soporta compartir imágenes, usar el plan B de texto
+          ejecutarFallbackWhatsApp();
         }
         setSharing(false);
       }, "image/png");
     } catch (err) {
       console.error("Error generating ticket image:", err);
-      fallbackCopy();
+      ejecutarFallbackWhatsApp();
       setSharing(false);
     }
   };
@@ -485,15 +494,19 @@ ${config.formato_ticket.mensaje_pie}
           <button
             id="share-ticket-btn"
             onClick={handleShare}
-            disabled={isBlocked}
-            className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center cursor-pointer shadow-sm border-b-2 ${
-              isBlocked 
+            disabled={isBlocked || sharing}
+            className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center shadow-sm border-b-2 ${
+              isBlocked || sharing
                 ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed border-b-0" 
-                : "bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95 border-emerald-700"
+                : "bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95 border-emerald-700 cursor-pointer"
             }`}
           >
-            <Share2 className="w-4 h-4" />
-            <span>{copied ? "¡Copiado!" : "WhatsApp"}</span>
+            {sharing ? (
+              <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Share2 className="w-4 h-4" />
+            )}
+            <span>{sharing ? "Cargando..." : "WhatsApp"}</span>
           </button>
         </div>
 
