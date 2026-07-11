@@ -801,7 +801,11 @@ export default function VendedorInterface({
 
     // 1. Validate cart is not empty
     if (jugadas.length === 0) {
-      setErrorMessage("El carrito está vacío. Agregue al menos una jugada antes de confirmar.");
+      if (numeroJugado && montoPago) {
+        setErrorMessage("Primero presione el botón azul (+) para añadir la jugada al carrito antes de generar el ticket.");
+      } else {
+        setErrorMessage("El carrito está vacío. Ingrese un número y monto, luego agréguelo con el botón azul (+).");
+      }
       return;
     }
 
@@ -1472,6 +1476,7 @@ export default function VendedorInterface({
             <div className="flex flex-row gap-3 w-full mt-4">
               {/* BORRAR — Stitch Red */}
               <button
+                type="button"
                 onClick={clearForm}
                 disabled={loading}
                 className="h-14 px-4 rounded-xl bg-red-500 hover:bg-red-600 active:bg-red-700 text-white font-display font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1482,10 +1487,11 @@ export default function VendedorInterface({
 
               {/* AÑADIR JUGADA — Stitch Blue */}
               <button
+                type="button"
                 onClick={addJugadaAlCarrito}
-                disabled={loading || isLimitBlocked}
+                disabled={loading}
                 className={`flex-1 h-14 rounded-xl flex items-center justify-center font-bold text-white shadow-sm transition-all duration-200 active:scale-95 cursor-pointer ${
-                  loading || isLimitBlocked
+                  loading
                     ? "bg-blue-300 cursor-not-allowed"
                     : "bg-blue-600 hover:bg-blue-500 active:bg-blue-700"
                 }`}
@@ -1495,11 +1501,12 @@ export default function VendedorInterface({
 
               {/* GENERAR TICKET — Stitch Green */}
               <button
+                type="button"
                 id="vender-submit-btn"
                 onClick={handleGenerarTicket}
-                disabled={loading || isLimitBlocked || jugadas.length === 0}
+                disabled={loading}
                 className={`flex-1 h-14 rounded-xl flex items-center justify-center font-bold text-white shadow-sm transition-all duration-200 active:scale-95 cursor-pointer ${
-                  loading || isLimitBlocked || jugadas.length === 0
+                  loading
                     ? "bg-emerald-300 cursor-not-allowed"
                     : "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700"
                 }`}
