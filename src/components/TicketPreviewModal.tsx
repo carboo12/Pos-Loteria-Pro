@@ -5,6 +5,7 @@ import { toBlob } from "html-to-image";
 import { Venta, Configuracion } from "../types";
 import { QRCodeSVG } from "qrcode.react";
 
+
 /**
  * Safe helper to parse a time string (can be "11:00 AM", "3:00 PM", "15:00", "11:00")
  * and compare it to a synced reference Date (from the server).
@@ -193,7 +194,7 @@ ${config.formato_ticket.mensaje_pie}
 
   const generarTextoTicketRaw = (): string => {
     let t = "";
-    t += "[image:https://rapigestion-2.firebasestorage.app/logo_print.png]\n";
+    t += "[image:http://localhost:3000/assets/logo_print_bw.png]\n";
     t += "         LA NUEVA ERA\n";
     t += "        pida su ticket\n";
     t += "------------------------------\n";
@@ -320,7 +321,7 @@ ${config.formato_ticket.mensaje_pie}
               <img 
                 src="/logo.png" 
                 alt={config?.formato_ticket?.titulo || "Logo"} 
-                className="h-12 w-auto object-contain filter drop-shadow-xs grayscale contrast-200 brightness-0"
+                className="h-12 w-auto object-contain"
               />
             </div>
             <div className="text-center font-black text-black text-sm uppercase tracking-wide mb-0.5">

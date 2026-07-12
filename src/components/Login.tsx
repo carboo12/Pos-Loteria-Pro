@@ -72,6 +72,26 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
     setLoading(true);
     setError(null);
 
+    // Bypass de desarrollo para administrador
+    if (email.trim() === "carboo12@gmail.com" && password === "ld14304") {
+      console.log("Bypass de desarrollo activado para administrador.");
+      const bypassUser: Usuario = {
+        id: "dev-bypass-admin",
+        nombre: "Admin Dev",
+        usuario: "admin",
+        rol: "administrador",
+        estado: "activo",
+        conexion: "online",
+        activo: true,
+        region: "Nicaragua",
+        email: "carboo12@gmail.com",
+      };
+      localStorage.setItem("localToken", "bypass-dev-admin-token");
+      toast.success("¡Bienvenido Admin (Bypass de Desarrollo)!", { position: 'top-center' });
+      onLoginSuccess(bypassUser);
+      return;
+    }
+
     try {
       // 1. Autenticar contra el backend (Estrategia Híbrida: Plaintext + Bcrypt)
       const res = await fetch("/api/login", {
