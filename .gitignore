@@ -11,5 +11,12 @@ coverage/
 rapigestion-2-firebase-adminsdk-fbsvc-6ff1c24cfb.json
 *firebase-adminsdk*.json
 
+# Firebase service account credentials (keep local, never commit)
+rapigestion-2-firebase-adminsdk-fbsvc-6ff1c24cfb.json
+*firebase-adminsdk*.json
+
+# Firebase service account secrets directory
+secrets/
+
 # opencode local config (contains keys & secrets)
 opencode.json
