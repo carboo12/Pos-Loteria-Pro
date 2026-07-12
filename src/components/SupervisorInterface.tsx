@@ -8,6 +8,8 @@ import {
   Check, 
   X, 
   ArrowRight,
+  ArrowLeft,
+  SlidersHorizontal,
   TrendingUp,
   AlertCircle,
   UserCheck,
@@ -47,6 +49,15 @@ const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: b
     return String(dateInput);
   }
 };
+function calculatePrizeMultiplier(juego: string, sorteo: string): number {
+  const cleanJuego = juego.trim();
+  if (cleanJuego === "Premia2" && sorteo.includes("(NI)")) return 4000;
+  if (cleanJuego === "Jugá 3") return 600;
+  if (cleanJuego === "Fechas") return 210;
+  if (cleanJuego === "3 Monazos") return 650;
+  return 80;
+}
+
 
 interface SupervisorInterfaceProps {
   user: Usuario;
@@ -77,6 +88,18 @@ export default function SupervisorInterface({
   const [subTab, setSubTab] = useState<"equipo" | "disponibles">("equipo");
   const [arqueosFilter, setArqueosFilter] = useState<"todos" | "pendientes" | "cobrados">("todos");
   const [monitoreoFilter, setMonitoreoFilter] = useState<"todos" | "validos" | "anulados">("todos");
+
+  // Filtros de Arqueo (Facturación por Usuario)
+  const [showFilters, setShowFilters] = useState(false);
+  const [selectedVendedorFilter, setSelectedVendedorFilter] = useState("TODOS");
+  const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7); // Últimos 7 días por defecto
+    return d.toISOString().split("T")[0];
+  });
+  const [reportFilterFechaFin, setReportFilterFechaFin] = useState(() => {
+    return new Date().toISOString().split("T")[0];
+  });
 
   // Form values for register cobro
   const [montoCobroCs, setMontoCobroCs] = useState("");
@@ -547,303 +570,276 @@ export default function SupervisorInterface({
         </div>
       )}
 
-      {/* TAB 1: VENDEDORES (VINCULACIÓN) */}
+      {/* TAB 1: VENDEDORES (VINCULACIÓN AUTOMÁTICA) */}
       {activeTab === "vendedores" && (
         <div className="space-y-4 animate-fade-in">
-          {/* Segmented controls for SubTabs - 44px touch height */}
-          <div className="flex bg-gray-200/60 p-1 rounded-xl mb-4">
-            <button
-              onClick={() => { setSubTab("equipo"); setSearchQuery(""); }}
-              className={`flex-1 py-2.5 text-center rounded-lg text-xs font-bold transition-all min-h-[44px] cursor-pointer ${
-                subTab === "equipo" ? "bg-indigo-950 text-white shadow-xs font-black" : "text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              Mi Equipo ({linkedSellers.length})
-            </button>
-            <button
-              onClick={() => { setSubTab("disponibles"); setSearchQuery(""); }}
-              className={`flex-1 py-2.5 text-center rounded-lg text-xs font-bold transition-all min-h-[44px] cursor-pointer ${
-                subTab === "disponibles" ? "bg-indigo-950 text-white shadow-xs font-black" : "text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              Vincular Vendedores ({otherSellers.length})
-            </button>
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredLinkedSellers.length === 0 ? (
+              <div className="col-span-full bg-white border border-gray-200 p-8 rounded-2xl text-center text-gray-500 text-xs">
+                {searchQuery ? "No se encontraron vendedores con ese nombre." : "No tienes vendedores asignados bajo tu supervisión."}
+              </div>
+            ) : (
+              filteredLinkedSellers.map(seller => {
+                const summary = getSellerSummary(seller.id);
+                const isOnline = seller.conexion === "online";
+                
+                // Calculate today's sales for this seller
+                const sellerSalesCs = sales.filter(s => s.id_vendedor === seller.id && !s.anulado && s.moneda === "C$").reduce((sum, s) => sum + s.monto_pago, 0);
+                const sellerSalesUsd = sales.filter(s => s.id_vendedor === seller.id && !s.anulado && s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0);
 
-          {subTab === "equipo" ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredLinkedSellers.length === 0 ? (
-                <div className="col-span-full bg-white border border-gray-200 p-8 rounded-2xl text-center text-gray-500 text-xs">
-                  {searchQuery ? "No se encontraron vendedores con ese nombre." : "No tienes vendedores vinculados actualmente. Cambia a 'Vincular Vendedores' para asociar."}
-                </div>
-              ) : (
-                filteredLinkedSellers.map(seller => {
-                  const summary = getSellerSummary(seller.id);
-                  const isOnline = seller.conexion === "online";
-                  
-                  // Calculate today's sales for this seller
-                  const sellerSalesCs = sales.filter(s => s.id_vendedor === seller.id && !s.anulado && s.moneda === "C$").reduce((sum, s) => sum + s.monto_pago, 0);
-                  const sellerSalesUsd = sales.filter(s => s.id_vendedor === seller.id && !s.anulado && s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0);
+                return (
+                  <div key={seller.id} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs hover:border-gray-300 transition-all space-y-3">
+                    {/* Header row */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        {/* Initials Avatar */}
+                        <div className="relative">
+                          <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center font-display font-black text-sm text-gray-800 uppercase border border-gray-200 shadow-2xs">
+                            {seller.nombre.split(" ").map(n => n[0]).join("").substring(0,2).toUpperCase()}
+                          </div>
+                          {/* Live connection dot with pulse */}
+                          <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5">
+                            {isOnline && (
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            )}
+                            <span className={`relative inline-flex rounded-full h-3.5 w-3.5 border-2 border-white ${isOnline ? "bg-emerald-500" : "bg-gray-400"}`}></span>
+                          </span>
+                        </div>
 
-                  return (
-                    <div key={seller.id} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs hover:border-gray-300 transition-all space-y-3">
-                      {/* Header row */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          {/* Initials Avatar */}
-                          <div className="relative">
-                            <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center font-display font-black text-sm text-gray-800 uppercase border border-gray-200 shadow-2xs">
-                              {seller.nombre.split(" ").map(n => n[0]).join("").substring(0,2).toUpperCase()}
-                            </div>
-                            {/* Live connection dot with pulse */}
-                            <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5">
-                              {isOnline && (
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              )}
-                              <span className={`relative inline-flex rounded-full h-3.5 w-3.5 border-2 border-white ${isOnline ? "bg-emerald-500" : "bg-gray-400"}`}></span>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <h3 className="font-display font-black text-gray-900 uppercase text-xs tracking-tight">{seller.nombre}</h3>
+                            <span className="text-[10px] bg-slate-100 text-gray-700 px-1.5 py-0.5 rounded-md font-bold font-mono">
+                              {getFlag(seller.region)} {seller.region || "Nicaragua"}
                             </span>
                           </div>
-
-                          <div>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <h3 className="font-display font-black text-gray-900 uppercase text-xs tracking-tight">{seller.nombre}</h3>
-                              <span className="text-[10px] bg-slate-100 text-gray-700 px-1.5 py-0.5 rounded-md font-bold font-mono">
-                                {getFlag(seller.region)} {seller.region || "Nicaragua"}
-                              </span>
-                            </div>
-                            <span className="text-[10px] text-gray-400 font-mono block mt-0.5">@{seller.usuario || seller.email.split("@")[0]}</span>
-                          </div>
-                        </div>
-
-                        <span className={`text-[9px] font-sans font-black uppercase px-2 py-0.5 rounded-md ${isOnline ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-gray-100 text-gray-400"}`}>
-                          {isOnline ? "CONECTADO" : "OFFLINE"}
-                        </span>
-                      </div>
-
-                      {/* Cumulative Sales Highlighted in Bold */}
-                      <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                        <div className="bg-slate-50 p-2.5 rounded-xl border border-gray-100">
-                          <span className="text-[9px] text-gray-400 font-bold uppercase block">Venta acumulada</span>
-                          <span className="font-mono font-black text-gray-900 text-sm block mt-0.5">C$ {sellerSalesCs.toLocaleString("es-ES")}</span>
-                          {sellerSalesUsd > 0 && (
-                            <span className="font-mono text-gray-500 block text-[10px]">USD {sellerSalesUsd.toLocaleString("es-ES")}</span>
-                          )}
-                        </div>
-                        <div className="bg-slate-50 p-2.5 rounded-xl border border-gray-100">
-                          <span className="text-[9px] text-gray-400 font-bold uppercase block">Caja por Liquidar</span>
-                          {summary.count > 0 ? (
-                            <div>
-                              <span className="font-mono font-black text-amber-700 text-sm block mt-0.5">C$ {summary.pendingCs.toLocaleString("es-ES")}</span>
-                              <span className="text-[9px] text-amber-600 block font-bold font-sans">{summary.count} cierres pendientes</span>
-                            </div>
-                          ) : (
-                            <span className="text-emerald-700 font-black text-[10px] block mt-2.5 uppercase tracking-wider">✓ CAJA AL DÍA</span>
-                          )}
+                          <span className="text-[10px] text-gray-400 font-mono block mt-0.5">@{seller.usuario || seller.email.split("@")[0]}</span>
                         </div>
                       </div>
 
-                      {/* Compact Touch Targets optimized for thumb reach */}
-                      <div className="grid grid-cols-2 gap-2 pt-1">
-                        <button
-                          onClick={() => {
-                            setSelectedSellerForCobro(seller);
-                            if (summary.count > 0) {
-                              setMontoCobroCs(String(summary.pendingCs));
-                              setMontoCobroUsd(String(summary.pendingUsd));
-                            } else {
-                              setMontoCobroCs("");
-                              setMontoCobroUsd("");
-                            }
-                          }}
-                          className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-display font-black text-[11px] uppercase tracking-wider rounded-xl cursor-pointer shadow-xs flex items-center justify-center space-x-1 transition-all"
-                        >
-                          <DollarSign className="w-4 h-4 stroke-[2.5]" />
-                          <span>Arqueo / Cobro</span>
-                        </button>
-                        <button
-                          onClick={() => handleToggleAssociation(seller.id, true)}
-                          className="w-full h-12 bg-white hover:bg-red-50 border border-gray-200 hover:border-red-100 text-red-600 font-sans font-bold text-[11px] uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-1"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                          <span>Desvincular</span>
-                        </button>
-                      </div>
+                      <span className={`text-[9px] font-sans font-black uppercase px-2 py-0.5 rounded-md ${isOnline ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-gray-100 text-gray-400"}`}>
+                        {isOnline ? "CONECTADO" : "OFFLINE"}
+                      </span>
                     </div>
-                  );
-                })
-              )}
-            </div>
-          ) : (
-            /* pool of other sellers */
-            <div className="space-y-3">
-              {filteredOtherSellers.length === 0 ? (
-                <div className="bg-white border border-gray-200 p-8 rounded-2xl text-center text-gray-500 text-xs">
-                  {searchQuery ? "No se encontraron vendedores adicionales." : "No hay más vendedores disponibles para asociar."}
-                </div>
-              ) : (
-                filteredOtherSellers.map(seller => (
-                  <div key={seller.id} className="bg-white border border-gray-200 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-xs">
-                    <div>
-                      <span className="font-bold text-sm text-gray-900 block">{seller.nombre}</span>
-                      <span className="text-[10px] text-gray-500 font-mono block mt-0.5">@{seller.usuario || seller.email.split("@")[0]}</span>
-                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                        <span className="text-[9px] bg-slate-100 text-gray-700 px-1.5 py-0.5 rounded font-bold font-mono">
-                          {getFlag(seller.region)} {seller.region || "Nicaragua"}
-                        </span>
-                        {seller.id_supervisor && (
-                          <span className="text-[9px] text-amber-800 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 font-bold font-sans">
-                            Supervisado por: {seller.id_supervisor}
-                          </span>
+
+                    {/* Cumulative Sales Highlighted in Bold */}
+                    <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                      <div className="bg-slate-50 p-2.5 rounded-xl border border-gray-100">
+                        <span className="text-[9px] text-gray-400 font-bold uppercase block">Venta acumulada</span>
+                        <span className="font-mono font-black text-gray-900 text-sm block mt-0.5">C$ {sellerSalesCs.toLocaleString("es-ES")}</span>
+                        {sellerSalesUsd > 0 && (
+                          <span className="font-mono text-gray-500 block text-[10px]">USD {sellerSalesUsd.toLocaleString("es-ES")}</span>
+                        )}
+                      </div>
+                      <div className="bg-slate-50 p-2.5 rounded-xl border border-gray-100">
+                        <span className="text-[9px] text-gray-400 font-bold uppercase block">Caja por Liquidar</span>
+                        {summary.count > 0 ? (
+                          <div>
+                            <span className="font-mono font-black text-amber-700 text-sm block mt-0.5">C$ {summary.pendingCs.toLocaleString("es-ES")}</span>
+                            <span className="text-[9px] text-amber-600 block font-bold font-sans">{summary.count} cierres pendientes</span>
+                          </div>
+                        ) : (
+                          <span className="text-emerald-700 font-black text-[10px] block mt-2.5 uppercase tracking-wider">✓ CAJA AL DÍA</span>
                         )}
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => handleToggleAssociation(seller.id, false)}
-                      className="w-full sm:w-auto h-12 px-5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 text-xs font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center space-x-1.5 active:scale-95 shrink-0"
-                    >
-                      <Plus className="w-4 h-4 stroke-[2.5]" />
-                      <span>Asociar a mi Red</span>
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 2: ARQUEOS (CIERRES DE CAJA) */}
-      {activeTab === "arqueos" && (
-        <div className="space-y-4 animate-fade-in">
-          {/* Segmented status selector - 44px touch height */}
-          <div className="flex bg-gray-200/60 p-1 rounded-xl mb-4">
-            <button
-              onClick={() => setArqueosFilter("todos")}
-              className={`flex-1 py-2 text-center rounded-lg text-xs font-bold transition-all min-h-[44px] cursor-pointer ${
-                arqueosFilter === "todos" ? "bg-indigo-950 text-white shadow-xs font-black" : "text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              Todos ({linkedClosures.length})
-            </button>
-            <button
-              onClick={() => setArqueosFilter("pendientes")}
-              className={`flex-1 py-2 text-center rounded-lg text-xs font-bold transition-all min-h-[44px] cursor-pointer ${
-                arqueosFilter === "pendientes" ? "bg-indigo-950 text-white shadow-xs font-black" : "text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              Pendientes ({linkedClosures.filter(c => !c.cobrado).length})
-            </button>
-            <button
-              onClick={() => setArqueosFilter("cobrados")}
-              className={`flex-1 py-2 text-center rounded-lg text-xs font-bold transition-all min-h-[44px] cursor-pointer ${
-                arqueosFilter === "cobrados" ? "bg-indigo-950 text-white shadow-xs font-black" : "text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              Cobrados ({linkedClosures.filter(c => c.cobrado).length})
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {searchedClosures.length === 0 ? (
-              <div className="col-span-full bg-white border border-gray-200 p-8 rounded-2xl text-center text-gray-500 text-xs">
-                {searchQuery ? "No se encontraron arqueos con ese criterio." : "No hay cierres de caja registrados en esta categoría."}
-              </div>
-            ) : (
-              searchedClosures.map(c => {
-                const hasDiscrepancy = c.descuadre_cs !== 0 || c.descuadre_usd !== 0;
-                return (
-                  <div key={c.id} className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-xs relative border-b-4 border-b-indigo-950 flex flex-col justify-between">
-                    {/* Top colored status stripe */}
-                    <div className={`h-1.5 ${c.cobrado ? "bg-emerald-500" : "bg-amber-500"}`} />
-                    
-                    <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
-                      <div>
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h4 className="font-display font-black text-gray-900 uppercase text-xs tracking-tight">{c.nombre_vendedor}</h4>
-                            <span className="text-[9px] text-gray-400 font-mono block mt-0.5">ID Vendedor: {c.id_vendedor}</span>
-                          </div>
-                          
-                          <span className={`text-[9px] font-sans font-black uppercase px-2.5 py-1 rounded-md border ${
-                            c.cobrado 
-                              ? "bg-emerald-50 text-emerald-800 border-emerald-200" 
-                              : "bg-amber-50 text-amber-800 border-amber-200"
-                          }`}>
-                            {c.cobrado ? "COBRADO" : "PENDIENTE"}
-                          </span>
-                        </div>
-
-                        {/* Comparative grid - Receipt Style */}
-                        <div className="border-t border-dashed border-gray-200 pt-3 grid grid-cols-2 gap-3 text-xs">
-                          <div>
-                            <span className="text-[9px] text-gray-400 font-bold uppercase block">Declarado en Caja</span>
-                            <span className="font-mono font-black text-indigo-950 text-sm block mt-0.5">C$ {c.monto_entregado_cs.toFixed(2)}</span>
-                            {c.monto_entregado_usd > 0 && (
-                              <span className="font-mono text-gray-500 text-[10px] block">USD {c.monto_entregado_usd.toFixed(2)}</span>
-                            )}
-                          </div>
-                          <div>
-                            <span className="text-[9px] text-gray-400 font-bold uppercase block">Saldos de Sistema</span>
-                            <span className="font-mono font-bold text-gray-700 text-sm block mt-0.5">C$ {c.monto_sistema_cs.toFixed(2)}</span>
-                            {c.monto_sistema_usd > 0 && (
-                              <span className="font-mono text-gray-400 text-[10px] block">USD {c.monto_sistema_usd.toFixed(2)}</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Balance Results */}
-                        <div className="border-t border-gray-100 pt-3 mt-2">
-                          {hasDiscrepancy ? (
-                            <div className="bg-red-50 border border-red-100 rounded-xl p-2.5 text-xs">
-                              <span className="text-[9px] text-[#EF4444] font-black uppercase tracking-wider block mb-1">DISCREPANCIA / DESFASE ⚠️</span>
-                              <div className="flex justify-between font-mono font-black text-[#EF4444]">
-                                <span>Diferencia C$:</span>
-                                <span>{c.descuadre_cs > 0 ? "+" : ""}{c.descuadre_cs.toFixed(2)}</span>
-                              </div>
-                              {c.descuadre_usd !== 0 && (
-                                <div className="flex justify-between font-mono font-black text-[#EF4444] mt-0.5">
-                                  <span>Diferencia USD:</span>
-                                  <span>{c.descuadre_usd > 0 ? "+" : ""}{c.descuadre_usd.toFixed(2)}</span>
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-2.5 text-center text-emerald-800 text-[10px] font-black uppercase tracking-wider">
-                              ✓ Caja Cuadrada Perfectamente
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Footer Info */}
-                      <div className="flex justify-between items-center text-[9px] text-gray-400 font-mono pt-3 border-t border-gray-100 mt-2 shrink-0">
-                        <span>{c.fecha}</span>
-                        <span>{formatTo12HourTime(c.timestamp)}</span>
-                      </div>
-
-                      {/* thumb-friendly primary collect action */}
-                      {!c.cobrado && (
-                        <button
-                          onClick={() => {
-                            const matchedV = users.find(u => u.id === c.id_vendedor);
-                            if (matchedV) {
-                              setSelectedSellerForCobro(matchedV);
-                              setMontoCobroCs(String(c.monto_entregado_cs));
-                              setMontoCobroUsd(String(c.monto_entregado_usd));
-                            }
-                          }}
-                          className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-display font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center justify-center space-x-1.5 shadow-sm mt-3"
-                        >
-                          <DollarSign className="w-4.5 h-4.5 stroke-[2.5]" />
-                          <span>Cobrar este Arqueo</span>
-                        </button>
-                      )}
+                    {/* Compact Touch Targets optimized for thumb reach */}
+                    <div className="pt-1">
+                      <button
+                        onClick={() => {
+                          setSelectedSellerForCobro(seller);
+                          if (summary.count > 0) {
+                            setMontoCobroCs(String(summary.pendingCs));
+                            setMontoCobroUsd(String(summary.pendingUsd));
+                          } else {
+                            setMontoCobroCs("");
+                            setMontoCobroUsd("");
+                          }
+                        }}
+                        className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-display font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer shadow-xs flex items-center justify-center space-x-1.5 transition-all"
+                      >
+                        <DollarSign className="w-4.5 h-4.5 stroke-[2.5]" />
+                        <span>Arqueo / Cobro</span>
+                      </button>
                     </div>
                   </div>
                 );
               })
             )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: ARQUEOS (FACTURACIÓN POR USUARIO) */}
+      {activeTab === "arqueos" && (
+        <div className="flex flex-col flex-1 animate-fade-in -mx-4 -mt-4">
+          {/* Header Superior Fijo de Facturación */}
+          <div className="bg-blue-800 text-white p-4 flex justify-between items-center shadow-md">
+            <div className="flex items-center space-x-3">
+              <button 
+                onClick={() => setActiveTab("vendedores")}
+                className="p-1 hover:bg-blue-700 rounded-lg transition-colors cursor-pointer"
+              >
+                <ArrowLeft className="w-5 h-5 text-white" />
+              </button>
+              <h2 className="text-base font-bold truncate">Facturación por usuar...</h2>
+            </div>
+            <button 
+              onClick={() => setShowFilters(!showFilters)}
+              className="p-2 hover:bg-blue-700 rounded-lg transition-colors cursor-pointer flex items-center justify-center"
+            >
+              <SlidersHorizontal className="w-5 h-5 text-white" />
+            </button>
+          </div>
+
+          {/* Menú de Filtros Desplegable */}
+          <AnimatePresence>
+            {showFilters && (
+              <motion.div 
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="bg-white border-b border-gray-200 shadow-sm overflow-hidden z-10 w-full"
+              >
+                <div className="p-4 space-y-3 text-left">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Vendedor</label>
+                    <select 
+                      value={selectedVendedorFilter}
+                      onChange={(e) => setSelectedVendedorFilter(e.target.value)}
+                      className="w-full bg-slate-50 border border-gray-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-900"
+                    >
+                      <option value="TODOS">Todos los vendedores</option>
+                      {linkedSellers.map(s => (
+                        <option key={s.id} value={s.id}>{s.nombre}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Fecha Inicio</label>
+                      <input 
+                        type="date"
+                        value={reportFilterFechaInicio}
+                        onChange={(e) => setReportFilterFechaInicio(e.target.value)}
+                        className="w-full bg-slate-50 border border-gray-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Fecha Fin</label>
+                      <input 
+                        type="date"
+                        value={reportFilterFechaFin}
+                        onChange={(e) => setReportFilterFechaFin(e.target.value)}
+                        className="w-full bg-slate-50 border border-gray-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowFilters(false)}
+                    className="w-full py-2.5 px-4 bg-blue-900 hover:bg-blue-800 text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer text-center"
+                  >
+                    Aplicar Filtros
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Contenido / Tarjetas */}
+          <div className="p-4 space-y-4 overflow-y-auto flex-1">
+            {linkedSellers
+              .filter(seller => selectedVendedorFilter === "TODOS" || seller.id === selectedVendedorFilter)
+              .map(seller => {
+                // Filtrar ventas del vendedor en el rango
+                const sellerSales = sales.filter(s => {
+                  const saleDateStr = s.timestamp_servidor.substring(0, 10);
+                  const dateMatch = saleDateStr >= reportFilterFechaInicio && saleDateStr <= reportFilterFechaFin;
+                  const activeMatch = !s.anulado;
+                  const sellerMatch = s.id_vendedor === seller.id;
+                  return dateMatch && activeMatch && sellerMatch;
+                });
+
+                // Vendido
+                const sumCs = sellerSales.filter(s => s.moneda === "C$").reduce((sum, s) => sum + s.monto_pago, 0);
+                const sumUsd = sellerSales.filter(s => s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0);
+                const vendido = sumCs + (sumUsd * config.tasa_cambio);
+
+                // Total a Pagar (premios teóricos de tickets vendidos en el rango)
+                let totalAPagar = 0;
+                sellerSales.forEach(s => {
+                  const tDate = s.timestamp_servidor.substring(0, 10);
+                  const sObj = config.sorteos?.find(draw => draw.nombre === s.sorteo);
+                  const rObj = sObj
+                    ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
+                    : null;
+                  
+                  if (rObj && s.numero_jugado.trim().toLowerCase() === rObj.numero_ganador.trim().toLowerCase()) {
+                    const multiplier = calculatePrizeMultiplier(s.juego, s.sorteo);
+                    const prizeCs = s.moneda === "C$" 
+                      ? (s.monto_pago * multiplier)
+                      : (s.monto_pago * multiplier * config.tasa_cambio);
+                    totalAPagar += prizeCs;
+                  }
+                });
+
+                // Pagado Real (premios efectivamente pagados por este vendedor en el rango)
+                const pagado = sellerSales
+                  .filter(s => s.estado === 'pagado')
+                  .reduce((sum, s) => sum + (s.premio_posible_cs || 0), 0);
+
+                // Ingresos (inyecciones de caja)
+                const ingresos = 0;
+
+                // Cobrado (dinero retirado por el supervisor)
+                const sellerCobros = (allCobros || []).filter((c: any) => {
+                  const isSeller = c.id_vendedor === seller.id;
+                  const inRange = c.fecha >= reportFilterFechaInicio && c.fecha <= reportFilterFechaFin;
+                  return isSeller && inRange;
+                });
+                const cobrado = sellerCobros.reduce((sum: number, c: any) => sum + c.monto_cs + (c.monto_usd * config.tasa_cambio), 0);
+
+                // Fórmulas financieras estrictas
+                const ganancia = (vendido - totalAPagar) + ingresos;
+                const total = (vendido - pagado) + ingresos - cobrado;
+
+                // Formato simple y limpio
+                const formatVal = (val: number) => {
+                  return val.toLocaleString("es-ES", { maximumFractionDigits: 0 });
+                };
+
+                return (
+                  <div key={seller.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-200 mb-4 text-left">
+                    <div className="flex justify-between items-start mb-3">
+                      <span className="text-lg font-bold text-gray-800">{seller.nombre}</span>
+                      <div className="text-right">
+                        <span className="text-xs text-gray-500 block">Vendido: {formatVal(vendido)}</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      {/* Columna Izquierda (Flujo de Caja) */}
+                      <div className="text-gray-700 space-y-1 text-xs">
+                        <div>Pagado: {formatVal(pagado)}</div>
+                        <div>Ingresos: {formatVal(ingresos)}</div>
+                        <div>Total a pagar: {formatVal(totalAPagar)}</div>
+                        <div>Cobrado: {formatVal(cobrado)}</div>
+                      </div>
+
+                      {/* Columna Derecha (Métricas Clave) */}
+                      <div className="text-right text-xs space-y-1.5 flex flex-col justify-end">
+                        <div className="text-blue-700 font-bold">
+                          Ganancia: {formatVal(ganancia)}
+                        </div>
+                        <div className="text-blue-700 font-bold">
+                          Total: {formatVal(total)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
           </div>
         </div>
       )}
