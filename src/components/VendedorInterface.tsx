@@ -630,58 +630,52 @@ export default function VendedorInterface({
     }
   }, [activeTab]);
 
-  // 🔍 FUNCIÓN DE EMERGENCIA: Re-sincronizar sesión de Firebase Auth
-  const resyncFirebaseAuth = async (): Promise<boolean> => {
-    console.log("🔄 Intentando re-sincronizar Firebase Auth...");
-    
-    // Si ya hay un usuario autenticado, no hacer nada
+  // 🔌 AUTENTICACIÓN DE EMERGENCIA: Fallback anónimo cuando Firebase Admin falla
+  const ensureFirebaseAuth = async (): Promise<boolean> => {
+    // Paso 1: Ya autenticado
     if (auth.currentUser) {
-      console.log("✅ Firebase Auth ya está sincronizado:", auth.currentUser.uid);
+      console.log("✅ Firebase Auth ya sincronizado:", auth.currentUser.uid);
       return true;
     }
-    
-    // Intentar obtener un custom token del backend
+
+    // Paso 2: Intentar custom token desde backend
+    console.log("🔄 Intentando re-sincronizar con custom token...");
     try {
-      console.log("📡 Solicitando custom token al backend...");
       const res = await fetch("/api/resync-auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          userId: user.id,
-          email: user.email 
-        })
+        body: JSON.stringify({ userId: user.id, email: user.email })
       });
-      
-      if (!res.ok) {
-        console.error("❌ Backend rechazó la solicitud de resync:", res.status);
-        return false;
-      }
-      
-      const data = await res.json();
-      
-      if (!data.customToken) {
-        console.error("❌ Backend no devolvió customToken");
-        return false;
-      }
-      
-      // Importar dinámicamente signInWithCustomToken si no está disponible
-      const { signInWithCustomToken } = await import("firebase/auth");
-      
-      console.log("🔑 Intentando signInWithCustomToken...");
-      await signInWithCustomToken(auth, data.customToken);
-      
-      if (auth.currentUser) {
-        console.log("✅ Firebase Auth re-sincronizado exitosamente:", auth.currentUser.uid);
-        return true;
-      } else {
-        console.error("❌ signInWithCustomToken no estableció currentUser");
-        return false;
+      if (res.ok) {
+        const data = await res.json();
+        if (data.customToken) {
+          const { signInWithCustomToken } = await import("firebase/auth");
+          await signInWithCustomToken(auth, data.customToken);
+          if (auth.currentUser) {
+            console.log("✅ Firebase Auth con custom token exitoso:", auth.currentUser.uid);
+            return true;
+          }
+        }
       }
     } catch (err: any) {
-      console.error("❌ Error al re-sincronizar Firebase Auth:", err.message);
+      console.warn("⚠️ Custom token falló:", err.message);
+    }
+
+    // Paso 3: Fallback a autenticación anónima (Firebase Admin no disponible)
+    console.log("🔄 Intentando signInAnonymously como fallback...");
+    try {
+      const { signInAnonymously } = await import("firebase/auth");
+      const cred = await signInAnonymously(auth);
+      console.log("✅ Firebase Auth anónimo exitoso. UID:", cred.user?.uid);
+      toast.success("Conectado a Firebase en modo de respaldo", { position: 'top-center', duration: 2000 });
+      return true;
+    } catch (err: any) {
+      console.error("❌ signInAnonymously también falló:", err.message);
       return false;
     }
   };
+
+  const resyncFirebaseAuth = ensureFirebaseAuth;
 
   // 🔍 FUNCIÓN DE DIAGNÓSTICO: Verificar estado de conexión Firebase
   const checkFirebaseConnection = async () => {
@@ -711,16 +705,16 @@ export default function VendedorInterface({
   useEffect(() => {
     // Exponer funciones de debug en window para acceso desde consola
     (window as any).checkFirebase = checkFirebaseConnection;
-    (window as any).resyncFirebase = resyncFirebaseAuth;
+    (window as any).resyncFirebase = ensureFirebaseAuth;
     
     console.log("💡 Funciones de debug disponibles en consola:");
     console.log("  - window.checkFirebase() - Diagnóstico completo");
     console.log("  - window.resyncFirebase() - Re-sincronizar sesión");
     
-    // Verificar estado inicial
+    // Autenticación automática al montar el componente
     if (!auth.currentUser) {
-      console.warn("⚠️ auth.currentUser es NULL al montar VendedorInterface");
-      console.warn("💡 Ejecuta window.resyncFirebase() en la consola para re-sincronizar");
+      console.warn("⚠️ auth.currentUser es NULL. Iniciando autenticación automática...");
+      ensureFirebaseAuth();
     }
   }, []);
 
@@ -1249,8 +1243,8 @@ export default function VendedorInterface({
       }
       
       if (!auth.currentUser) {
-        console.error("🚨 CRÍTICO: auth.currentUser es NULL. Firestore rechazará la operación.");
-        console.error("💡 SOLUCIÓN: El usuario debe re-iniciar sesión para sincronizar Firebase Auth.");
+        console.warn("🚨 auth.currentUser es NULL. Intentando autenticación automática...");
+        await ensureFirebaseAuth();
       }
       
       // Test de lectura previa a colección pública
