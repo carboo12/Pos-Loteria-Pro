@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, Suspense, lazy } from "react";
+import { useState, useEffect, Suspense, lazy } from "react";
 import { Usuario, Configuracion, Venta, CierreCaja } from "./types";
 import RoleSelector from "./components/RoleSelector";
 import Login from "./components/Login";
@@ -18,12 +18,8 @@ const SuspenseLoader = () => (
 
 import { auth } from "./lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { AlertTriangle, Clock, Lock, ShieldCheck, Sun } from "lucide-react";
+import { AlertTriangle, Lock, Sun } from "lucide-react";
 import { Toaster } from "react-hot-toast";
-
-// Session inactivity timeout configuration
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-const SESSION_WARNING_MS = 60 * 1000; // Show warning 1 minute before timeout
 
 export default function App() {
   const [users, setUsers] = useState<Usuario[]>([]);
@@ -35,9 +31,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [simulatedSupervisorId, setSimulatedSupervisorId] = useState<string>("");
-  const [showSessionWarning, setShowSessionWarning] = useState(false);
-  const inactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const warningRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 1. Initial State Loaders
   const safeFetchJson = async (url: string) => {
@@ -168,51 +161,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // 2. Action Handlers (Passed down to components)
-
-  const handleAutoLogout = useCallback(async () => {
-    await signOut(auth);
-    setCurrentUser(null);
-    setShowSessionWarning(false);
-    localStorage.removeItem("localToken");
-    localStorage.removeItem("currentUser");
-    // Prevent back button from restoring the app after logout
-    window.history.pushState(null, "", window.location.href);
-  }, []);
-
-  const resetInactivityTimer = useCallback(() => {
-    if (inactivityRef.current) clearTimeout(inactivityRef.current);
-    if (warningRef.current) clearTimeout(warningRef.current);
-    setShowSessionWarning(false);
-
-    if (!currentUser) return;
-
-    warningRef.current = setTimeout(() => {
-      setShowSessionWarning(true);
-    }, SESSION_TIMEOUT_MS - SESSION_WARNING_MS);
-
-    inactivityRef.current = setTimeout(() => {
-      handleAutoLogout();
-    }, SESSION_TIMEOUT_MS);
-  }, [currentUser, handleAutoLogout]);
-
-  // Session inactivity timeout: auto-logout after period of no user activity
-  useEffect(() => {
-    if (!currentUser) return;
-
-    const events = ["mousemove", "keydown", "click", "touchstart", "scroll"] as const;
-    const handleActivity = () => { resetInactivityTimer(); };
-
-    events.forEach((event) => window.addEventListener(event, handleActivity));
-    resetInactivityTimer();
-
-    return () => {
-      events.forEach((event) => window.removeEventListener(event, handleActivity));
-      if (inactivityRef.current) clearTimeout(inactivityRef.current);
-      if (warningRef.current) clearTimeout(warningRef.current);
-    };
-  }, [currentUser, resetInactivityTimer]);
-
   // Prevent browser back button from restoring app state after logout (bfcache)
   useEffect(() => {
     const handlePageShow = (e: PageTransitionEvent) => {
@@ -332,30 +280,14 @@ export default function App() {
           onLogout={async () => {
             await signOut(auth);
             setCurrentUser(null);
+            localStorage.removeItem("localToken");
+            localStorage.removeItem("currentUser");
             // Prevent back button from restoring the app
             window.history.pushState(null, "", window.location.href);
           }}
         />
       )}
 
-      {/* Session inactivity warning modal */}
-      {showSessionWarning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center animate-fade-in">
-            <Clock className="w-14 h-14 text-amber-500 mx-auto mb-3" />
-            <h3 className="text-lg font-bold text-gray-900 uppercase tracking-wide">Sesión por expirar</h3>
-            <p className="text-sm text-gray-600 mt-2 leading-relaxed">
-              Su sesión se cerrará automáticamente por <strong>inactividad</strong>. Presione el botón para continuar.
-            </p>
-            <button
-              onClick={() => resetInactivityTimer()}
-              className="mt-5 w-full py-3 min-h-[44px] bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm uppercase tracking-wider transition-all cursor-pointer border-b-2 border-blue-900 active:translate-y-[1px] active:border-b-0"
-            >
-              Continuar Sesión
-            </button>
-          </div>
-        </div>
-      )}
       <Toaster position="top-right" />
 
       {/* Main viewport with strict layout checks */}
