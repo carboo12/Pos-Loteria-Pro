@@ -102,6 +102,20 @@ export default function App() {
     }
   };
 
+  // Attempt session rehydration from localStorage on mount
+  useEffect(() => {
+    const token = localStorage.getItem("localToken");
+    const storedUser = localStorage.getItem("currentUser");
+    if (token && storedUser) {
+      try {
+        const parsed = JSON.parse(storedUser) as Usuario;
+        setCurrentUser(parsed);
+      } catch {
+        localStorage.removeItem("currentUser");
+      }
+    }
+  }, []);
+
   // Initial Boot loader
   useEffect(() => {
     const bootApp = async () => {
@@ -135,7 +149,10 @@ export default function App() {
           setCurrentUser(matched);
         }
       } else {
-        setCurrentUser(null);
+        // Only clear if no rehydrated session exists
+        if (!localStorage.getItem("localToken")) {
+          setCurrentUser(null);
+        }
       }
     });
     return () => unsubscribe();
@@ -157,6 +174,8 @@ export default function App() {
     await signOut(auth);
     setCurrentUser(null);
     setShowSessionWarning(false);
+    localStorage.removeItem("localToken");
+    localStorage.removeItem("currentUser");
     // Prevent back button from restoring the app after logout
     window.history.pushState(null, "", window.location.href);
   }, []);

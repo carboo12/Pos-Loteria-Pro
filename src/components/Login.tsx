@@ -87,6 +87,7 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
         email: "carboo12@gmail.com",
       };
       localStorage.setItem("localToken", "bypass-dev-admin-token");
+      localStorage.setItem("currentUser", JSON.stringify(bypassUser));
       toast.success("¡Bienvenido Admin (Bypass de Desarrollo)!", { position: 'top-center' });
       onLoginSuccess(bypassUser);
       return;
@@ -134,6 +135,7 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
       if (data.localToken) {
         localStorage.setItem("localToken", data.localToken);
       }
+      localStorage.setItem("currentUser", JSON.stringify(matchedUser));
       
       toast.success(`¡Bienvenido de nuevo, ${matchedUser.nombre}!`, { position: 'top-center' });
       
