@@ -674,6 +674,46 @@ app.post("/api/login", async (req, res) => {
   res.json({ success: true, user: safeUser, customToken, localToken, message: "Autenticación exitosa" });
 });
 
+// 🔧 ENDPOINT DE EMERGENCIA: Re-sincronizar Firebase Auth
+app.post("/api/resync-auth", async (req, res) => {
+  const { userId, email } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: "userId es requerido." });
+  }
+
+  // Verificar que el usuario existe en la base de datos
+  const user = db.usuarios.find((u: any) => u.id === userId);
+  if (!user) {
+    return res.status(404).json({ error: "Usuario no encontrado." });
+  }
+
+  if (!user.activo) {
+    return res.status(403).json({ error: "Usuario inactivo. No se puede re-sincronizar." });
+  }
+
+  // Generar un nuevo custom token
+  let customToken: string | null = null;
+  try {
+    const isReady = initFirebaseAdmin();
+    if (isReady) {
+      customToken = await getAuth().createCustomToken(user.id);
+      console.log(`[Resync Auth] Custom token generado para usuario: ${user.id} (${user.email})`);
+    } else {
+      return res.status(500).json({ error: "Firebase Admin no está inicializado." });
+    }
+  } catch (err: any) {
+    console.error("[Resync Auth] Error generando custom token:", err);
+    return res.status(500).json({ error: "Error generando custom token: " + err.message });
+  }
+
+  if (!customToken) {
+    return res.status(500).json({ error: "No se pudo generar el custom token." });
+  }
+
+  res.json({ success: true, customToken, userId: user.id });
+});
+
 // Setup Administrator Account Route (Temporary / Recovery utility)
 app.post("/api/setup-admin", async (req, res) => {
   const hasAdmin = db.usuarios.some((u: any) => u.rol === "administrador");

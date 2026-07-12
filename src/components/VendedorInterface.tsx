@@ -34,7 +34,7 @@ import { QrScannerModal } from "./QrScannerModal";
 import ResumenFacturacionCard from "./ResumenFacturacionCard";
 import FacturacionVendedorCard from "./FacturacionVendedorCard";
 import { collection, addDoc, serverTimestamp, query, where, getDocs, doc, updateDoc, getDoc } from "firebase/firestore";
-import { firestore } from "../lib/firebase";
+import { firestore, auth } from "../lib/firebase";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -630,6 +630,100 @@ export default function VendedorInterface({
     }
   }, [activeTab]);
 
+  // 🔍 FUNCIÓN DE EMERGENCIA: Re-sincronizar sesión de Firebase Auth
+  const resyncFirebaseAuth = async (): Promise<boolean> => {
+    console.log("🔄 Intentando re-sincronizar Firebase Auth...");
+    
+    // Si ya hay un usuario autenticado, no hacer nada
+    if (auth.currentUser) {
+      console.log("✅ Firebase Auth ya está sincronizado:", auth.currentUser.uid);
+      return true;
+    }
+    
+    // Intentar obtener un custom token del backend
+    try {
+      console.log("📡 Solicitando custom token al backend...");
+      const res = await fetch("/api/resync-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          userId: user.id,
+          email: user.email 
+        })
+      });
+      
+      if (!res.ok) {
+        console.error("❌ Backend rechazó la solicitud de resync:", res.status);
+        return false;
+      }
+      
+      const data = await res.json();
+      
+      if (!data.customToken) {
+        console.error("❌ Backend no devolvió customToken");
+        return false;
+      }
+      
+      // Importar dinámicamente signInWithCustomToken si no está disponible
+      const { signInWithCustomToken } = await import("firebase/auth");
+      
+      console.log("🔑 Intentando signInWithCustomToken...");
+      await signInWithCustomToken(auth, data.customToken);
+      
+      if (auth.currentUser) {
+        console.log("✅ Firebase Auth re-sincronizado exitosamente:", auth.currentUser.uid);
+        return true;
+      } else {
+        console.error("❌ signInWithCustomToken no estableció currentUser");
+        return false;
+      }
+    } catch (err: any) {
+      console.error("❌ Error al re-sincronizar Firebase Auth:", err.message);
+      return false;
+    }
+  };
+
+  // 🔍 FUNCIÓN DE DIAGNÓSTICO: Verificar estado de conexión Firebase
+  const checkFirebaseConnection = async () => {
+    console.group("🔍 DIAGNÓSTICO FIREBASE");
+    console.log("1. ProjectId:", (firestore as any).app?.options?.projectId);
+    console.log("2. auth.currentUser:", auth.currentUser ? {
+      uid: auth.currentUser.uid,
+      email: auth.currentUser.email,
+      isAnonymous: auth.currentUser.isAnonymous
+    } : "NULL");
+    console.log("3. user.id (local):", user.id);
+    console.log("4. localStorage.localToken:", localStorage.getItem("localToken") ? "EXISTS" : "MISSING");
+    console.log("5. localStorage.currentUser:", localStorage.getItem("currentUser") ? "EXISTS" : "MISSING");
+    
+    // Test de lectura
+    try {
+      const testSnap = await getDocs(query(collection(firestore, "configuracion")));
+      console.log("6. Test lectura /configuracion:", testSnap.empty ? "EMPTY" : `${testSnap.size} docs`);
+    } catch (err: any) {
+      console.error("6. Test lectura FALLÓ:", err.message);
+    }
+    
+    console.groupEnd();
+  };
+
+  // Sincronizar al montar el componente
+  useEffect(() => {
+    // Exponer funciones de debug en window para acceso desde consola
+    (window as any).checkFirebase = checkFirebaseConnection;
+    (window as any).resyncFirebase = resyncFirebaseAuth;
+    
+    console.log("💡 Funciones de debug disponibles en consola:");
+    console.log("  - window.checkFirebase() - Diagnóstico completo");
+    console.log("  - window.resyncFirebase() - Re-sincronizar sesión");
+    
+    // Verificar estado inicial
+    if (!auth.currentUser) {
+      console.warn("⚠️ auth.currentUser es NULL al montar VendedorInterface");
+      console.warn("💡 Ejecuta window.resyncFirebase() en la consola para re-sincronizar");
+    }
+  }, []);
+
   // Verificar premio de un ticket contra resultados oficiales
   const verificarPremioTicket = async (ticket: Venta) => {
     // 1. Verificar si ya fue pagado
@@ -1135,6 +1229,43 @@ export default function VendedorInterface({
     // 6. Online/Offline Firestore document creation
     setIsSubmittingTicket(true);
     try {
+      // 🔍 DEBUGGING BLOCK - AUDITORÍA DE CONEXIÓN FIREBASE
+      console.group("🔥 AUDITORÍA FIREBASE - handleGenerarTicket");
+      console.log("📦 ProjectId:", (firestore as any).app?.options?.projectId || "NO DISPONIBLE");
+      console.log("👤 auth.currentUser:", auth.currentUser ? {
+        uid: auth.currentUser.uid,
+        email: auth.currentUser.email,
+        isAnonymous: auth.currentUser.isAnonymous,
+        emailVerified: auth.currentUser.emailVerified
+      } : "⚠️ NULL - USUARIO NO AUTENTICADO EN FIREBASE");
+      console.log("🆔 user.id (local):", user.id);
+      console.log("📋 ticketData.id_vendedor:", user.id);
+      
+      // Verificar si auth.currentUser coincide con user.id
+      if (auth.currentUser && auth.currentUser.uid !== user.id) {
+        console.warn("⚠️ DISCREPANCIA: auth.currentUser.uid NO coincide con user.id");
+        console.warn("  auth.currentUser.uid:", auth.currentUser.uid);
+        console.warn("  user.id:", user.id);
+      }
+      
+      if (!auth.currentUser) {
+        console.error("🚨 CRÍTICO: auth.currentUser es NULL. Firestore rechazará la operación.");
+        console.error("💡 SOLUCIÓN: El usuario debe re-iniciar sesión para sincronizar Firebase Auth.");
+      }
+      
+      // Test de lectura previa a colección pública
+      try {
+        console.log("🧪 Test: Leyendo colección 'configuracion'...");
+        const testQuery = query(collection(firestore, "configuracion"), where("__name__", "==", "test-nonexistent"));
+        await getDocs(testQuery);
+        console.log("✅ Test de lectura EXITOSO - Conexión a Firestore funciona");
+      } catch (testErr: any) {
+        console.error("❌ Test de lectura FALLÓ:", testErr.message);
+        console.error("💡 Esto confirma que hay un problema de permisos o conexión");
+      }
+      console.groupEnd();
+      // 🔍 FIN DEBUGGING BLOCK
+
       const ticketData = {
         id_vendedor: user.id,
         fecha_emision: serverTimestamp(),
@@ -1146,11 +1277,15 @@ export default function VendedorInterface({
         total_apostado: totalMontoCs
       };
 
+      console.log("📝 Intentando addDoc en /tickets con data:", ticketData);
       const docRef = await addDoc(collection(firestore, "tickets"), ticketData);
       const id_ticket = docRef.id;
+      console.log("✅ addDoc exitoso. ID generado:", id_ticket);
 
       // Update the document to include the generated id_ticket
+      console.log("📝 Intentando updateDoc en /tickets/" + id_ticket);
       await updateDoc(docRef, { id_ticket });
+      console.log("✅ updateDoc exitoso");
 
       // Create a compatible Venta object for preview and printing
       const syncedTicket: Venta = {
