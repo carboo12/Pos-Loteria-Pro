@@ -151,6 +151,7 @@ export default function VendedorInterface({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [activeTicket, setActiveTicket] = useState<Venta | null>(null);
 
   // Ticket QR/ID Search states
@@ -1099,29 +1100,29 @@ export default function VendedorInterface({
     // 1. Validate cart is not empty
     if (jugadas.length === 0) {
       if (numeroJugado && montoPago) {
-        setErrorMessage("Primero presione el botón azul (+) para añadir la jugada al carrito antes de generar el ticket.");
+        toast.error("Primero presione el botón azul (+) para añadir la jugada al carrito antes de generar el ticket.", { duration: 3000, position: 'top-center' });
       } else {
-        setErrorMessage("El carrito está vacío. Ingrese un número y monto, luego agréguelo con el botón azul (+).");
+        toast.error("El carrito está vacío. Ingrese un número y monto, luego agréguelo con el botón azul (+).", { duration: 3000, position: 'top-center' });
       }
       return;
     }
 
     // 2. Validate sorteo is active
     if (!selectedSorteo) {
-      setErrorMessage("No hay sorteos activos seleccionados.");
+      toast.error("No hay sorteos activos seleccionados.", { duration: 3000, position: 'top-center' });
       return;
     }
 
     // 3. Validate sorteo is not closed (anti-fraude)
     const matchingSorteo = config.sorteos.find(s => s.nombre === selectedSorteo);
     if (matchingSorteo && isSorteoCerrado(matchingSorteo)) {
-      setErrorMessage(`VENTA BLOQUEADA: El sorteo ${selectedSorteo} ya cerró (${formatTo12Hour(matchingSorteo.hora_cierre)}).`);
+      toast.error(`VENTA BLOQUEADA: El sorteo ${selectedSorteo} ya cerró (${formatTo12Hour(matchingSorteo.hora_cierre)}).`, { duration: 4000, position: 'top-center' });
       return;
     }
 
     // 4. Validate limit not exceeded for this batch
     if (isLimitBlocked && limitCheckResult) {
-      setErrorMessage(`NÚMERO BLOQUEADO: Límite de C$ ${limitCheckResult.limitMontoCs.toLocaleString("es-ES")} alcanzado para este vendedor en este sorteo. Vendido hoy: C$ ${limitCheckResult.totalPrevSalesCs.toLocaleString("es-ES")}.`);
+      toast.error(`NÚMERO BLOQUEADO: Límite de C$ ${limitCheckResult.limitMontoCs.toLocaleString("es-ES")} alcanzado para este vendedor en este sorteo. Vendido hoy: C$ ${limitCheckResult.totalPrevSalesCs.toLocaleString("es-ES")}.`, { duration: 5000, position: 'top-center' });
       return;
     }
 
@@ -1132,7 +1133,7 @@ export default function VendedorInterface({
     const totalPremioCs = jugadas.reduce((sum, j) => sum + j.premio_posible, 0);
 
     // 6. Online/Offline Firestore document creation
-    setLoading(true);
+    setIsSubmittingTicket(true);
     try {
       const ticketData = {
         id_vendedor: user.id,
@@ -1185,6 +1186,7 @@ export default function VendedorInterface({
       onNewSaleCreated(syncedTicket);
       setActiveTicket(syncedTicket);
       setSuccessMessage(`Ticket #${syncedTicket.numero_ticket} emitido con éxito en Firestore.`);
+      toast.success(`Ticket #${syncedTicket.numero_ticket} emitido con éxito`, { position: 'top-center' });
 
       // Full cleanup: cart + form + nombre
       setJugadas([]);
@@ -1194,9 +1196,11 @@ export default function VendedorInterface({
       setActiveField("numero");
       onRefreshSales();
     } catch (err: any) {
+      console.error("Error crítico al guardar ticket en Firestore:", err);
+      toast.error(err.message || "Error al guardar el ticket en la nube", { duration: 5000, position: 'top-center' });
       setErrorMessage(err.message || "Ocurrió un error al guardar el ticket en Firestore.");
     } finally {
-      setLoading(false);
+      setIsSubmittingTicket(false);
     }
   };
 
@@ -1799,14 +1803,14 @@ export default function VendedorInterface({
                 type="button"
                 id="vender-submit-btn"
                 onClick={handleGenerarTicket}
-                disabled={loading}
+                disabled={isSubmittingTicket}
                 className={`flex-1 h-14 rounded-xl flex items-center justify-center font-bold text-white shadow-sm transition-all duration-200 active:scale-95 cursor-pointer ${
-                  loading
+                  isSubmittingTicket
                     ? "bg-emerald-300 cursor-not-allowed"
                     : "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700"
                 }`}
               >
-                {loading ? (
+                {isSubmittingTicket ? (
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : (
                   <Printer className="w-6 h-6 stroke-[2.5]" />
