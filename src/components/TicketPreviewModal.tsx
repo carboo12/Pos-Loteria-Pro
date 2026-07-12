@@ -1,5 +1,5 @@
 import { X, Share2, Printer, CheckCircle, Smartphone, Lock } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toBlob } from "html-to-image";
 import { Venta, Configuracion } from "../types";
 import { QRCodeSVG } from "qrcode.react";
@@ -87,6 +87,41 @@ function calculatePrizeMultiplier(juego: string, sorteo: string): number {
 export default function TicketPreviewModal({ ticket, config, onClose, userRole = "vendedor", serverTime }: TicketPreviewModalProps) {
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [imageReady, setImageReady] = useState(false);
+
+  useEffect(() => {
+    const preGenerateImage = async () => {
+      try {
+        // Esperar 400ms para garantizar que la fuente mono, el logo y el DOM estén completamente renderizados
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const ticketElement = document.getElementById("thermal-ticket-render");
+        if (!ticketElement) return;
+
+        // Capturar usando html-to-image a 3x pixelRatio para HD absoluto en la ticketera física
+        const blob = await toBlob(ticketElement, { 
+          pixelRatio: 3, 
+          cacheBust: true,
+          style: {
+            backgroundColor: '#ffffff'
+          }
+        });
+
+        if (blob) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            (ticket as any).imagenCompletaUrlOrBase64 = reader.result as string;
+            setImageReady(true);
+            console.log("Imagen de alta definición pre-generada y almacenada en ticket.imagenCompletaUrlOrBase64");
+          };
+          reader.readAsDataURL(blob);
+        }
+      } catch (err) {
+        console.error("Error pre-generando la imagen nativa:", err);
+      }
+    };
+
+    preGenerateImage();
+  }, [ticket]);
 
   // Compute server-synced reference time for draw close check
   const syncedNow = (() => {
@@ -194,73 +229,41 @@ ${config.formato_ticket.mensaje_pie}
     window.open(`https://api.whatsapp.com/send?text=${textoCodificado}`, '_blank');
   };
 
-  const shareTicketImage = async (isThermal: boolean = false) => {
+  const shareTicketImage = async () => {
     setSharing(true);
-    
-    // Crear una promesa que se rechace automáticamente a los 4 segundos
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error("Timeout generando imagen")), 4000)
-    );
-
     try {
-      const ticketElement = document.getElementById("thermal-ticket-render");
-      if (!ticketElement) throw new Error("Elemento no encontrado");
-
-      // Activar modo térmico si es requerido (B&W alto contraste y ancho 384px)
-      if (isThermal) {
-        ticketElement.classList.add("thermal-print-mode");
+      // Extraer directamente la imagen en alta definición que ya existe en el ticket
+      const base64Data = (ticket as any).imagenCompletaUrlOrBase64;
+      if (!base64Data) {
+        throw new Error("Imagen de alta definición del ticket no encontrada o no cargada todavía.");
       }
-
-      // Ejecutar el render a Blob directamente con html-to-image (soporta OKLCH, Tailwind v4, y modern CSS)
-      const blob = await Promise.race([
-        toBlob(ticketElement, { 
-          pixelRatio: 2, 
-          cacheBust: true,
-          style: {
-            backgroundColor: '#ffffff' // Forzar fondo blanco de ticket térmico
-          }
-        }),
-        timeoutPromise
-      ]) as Blob | null;
-
-      // Desactivar modo térmico INMEDIATAMENTE
-      if (isThermal) {
-        ticketElement.classList.remove("thermal-print-mode");
-      }
-
-      if (!blob) throw new Error("Blob corrupto o vacío");
-
+      
+      const response = await fetch(base64Data);
+      const blob = await response.blob();
       const file = new File([blob], `ticket_${ticket.numero_ticket}.png`, { type: 'image/png' });
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
-          title: 'Ticket de Lotería',
-          text: 'Aquí está su ticket de juego.'
+          title: `Ticket #${ticket.numero_ticket}`,
         });
       } else {
-        alert("Su navegador no soporta el menú nativo de impresión. Asegúrese de estar usando HTTPS.");
+        ejecutarFallbackWhatsApp();
       }
-    } catch (err) {
-      console.error("Flujo de compartir interrumpido de forma segura:", err);
-      // Fallback de seguridad vital: Si algo falla generar la imagen, intentar al menos WhatsApp texto
-      if (!isThermal) ejecutarFallbackWhatsApp();
+    } catch (error) {
+      console.error("Error al despachar imagen nativa:", error);
+      ejecutarFallbackWhatsApp();
     } finally {
-      // Regla de oro de Stitch UI: El botón SIEMPRE recupera su estado activo
       setSharing(false);
-      const ticketEl = document.getElementById("thermal-ticket-render");
-      if (ticketEl) ticketEl.classList.remove("thermal-print-mode"); // Seguro final
     }
   };
 
   const handlePrint = () => {
-    // Botón Azul (Imprimir): Llama a shareTicketImage en modo Térmico (B&W)
-    shareTicketImage(true);
+    shareTicketImage();
   };
 
   const handleShare = () => {
-    // Botón Verde (WhatsApp): Llama a shareTicketImage en modo Normal (A Colores!)
-    shareTicketImage(false);
+    shareTicketImage();
   };
 
   const fallbackCopy = () => {
@@ -293,53 +296,53 @@ ${config.formato_ticket.mensaje_pie}
 
         {/* Thermal Ticket Render */}
         <div className="overflow-y-auto max-h-[60vh] bg-white flex justify-center border-b border-gray-200">
-          <div id="thermal-ticket-render" className="bg-white px-6 py-6 w-full font-mono text-xs text-[#1f2937] relative">
+          <div id="thermal-ticket-render" className="bg-white px-6 py-6 w-full font-mono text-sm text-black relative">
             
             {/* Ticket Brand Header */}
             <div className="flex justify-center mb-1">
               <img 
                 src="/logo.png" 
                 alt={config?.formato_ticket?.titulo || "Logo"} 
-                className="h-12 w-auto object-contain filter drop-shadow-xs"
+                className="h-12 w-auto object-contain filter drop-shadow-xs grayscale contrast-200 brightness-0"
               />
             </div>
-            <div className="text-center font-bold text-[#030712] text-xs uppercase tracking-wide mb-0.5">
+            <div className="text-center font-black text-black text-sm uppercase tracking-wide mb-0.5">
               {config.formato_ticket.titulo}
             </div>
-            <div className="text-center text-[10px] text-[#6b7280] font-sans tracking-wide mb-3">
+            <div className="text-center text-xs text-black font-bold tracking-wide mb-3">
               {config.formato_ticket.ruc}
             </div>
 
-            <div className="border-t border-dashed border-[#d1d5db] my-2" />
+            <div className="border-t-2 border-black border-dotted my-2" />
 
             {/* Ticket Info */}
-            <div className="space-y-1 text-[11px]">
+            <div className="space-y-1 text-xs font-bold text-black">
               <div className="flex justify-between">
                 <span>Nº TICKET:</span>
-                <span className="font-bold text-[#030712]">#{ticket.numero_ticket}</span>
+                <span className="font-black text-black">#{ticket.numero_ticket}</span>
               </div>
               <div className="flex justify-between">
                 <span>FECHA:</span>
-                <span className="text-[#030712]">{formatTicketDate(ticket.timestamp_servidor)}</span>
+                <span className="text-black">{formatTicketDate(ticket.timestamp_servidor)}</span>
               </div>
               <div className="flex justify-between">
                 <span>VENDEDOR:</span>
-                <span className="text-[#030712] uppercase truncate max-w-[150px]">{ticket.nombre_vendedor}</span>
+                <span className="text-black uppercase truncate max-w-[150px]">{ticket.nombre_vendedor}</span>
               </div>
               {ticket.nombre_cliente && (
                 <div className="flex justify-between">
                   <span>CLIENTE:</span>
-                  <span className="text-[#030712] uppercase truncate max-w-[150px]">{ticket.nombre_cliente}</span>
+                  <span className="text-black uppercase truncate max-w-[150px]">{ticket.nombre_cliente}</span>
                 </div>
               )}
             </div>
 
-            <div className="border-t border-dashed border-[#d1d5db] my-2" />
+            <div className="border-t-2 border-black border-dotted my-2" />
 
             {/* Game & Pick Detail — Multi-Jugada Table */}
-            <div className="py-2 my-2">
-              <div className="font-display font-bold text-xs text-[#1e3a8a] uppercase tracking-wider text-center">{ticket.juego}</div>
-              <div className="text-[10px] text-[#6b7280] mt-0.5 text-center">{ticket.sorteo}</div>
+            <div className="py-2 my-2 text-black">
+              <div className="font-display font-black text-sm text-black uppercase tracking-wider text-center">{ticket.juego}</div>
+              <div className="text-xs text-black font-bold mt-0.5 text-center">{ticket.sorteo}</div>
               
               {(() => {
                 const jugadas = ticket.jugadas && ticket.jugadas.length > 0
@@ -349,29 +352,29 @@ ${config.formato_ticket.mensaje_pie}
                 return (
                   <div className="mt-2 bg-transparent">
                     {/* Línea Divisoria Térmica Superior */}
-                    <div className="border-t border-dashed border-gray-300 my-2" />
+                    <div className="border-t-2 border-black border-dotted my-2" />
                     
                     {/* Table Header */}
-                    <div className="flex justify-between text-[9px] font-bold text-[#6b7280] uppercase tracking-wider pb-1 mb-1">
+                    <div className="flex justify-between text-xs font-black text-black uppercase tracking-wider pb-1 mb-1">
                       <span className="w-12 text-left">NÚM.</span>
-                      <span className="flex-1 text-center">MONTO</span>
-                      <span className="w-24 text-right">PREMIO</span>
+                      <span className="flex-1 text-center font-black">MONTO</span>
+                      <span className="w-24 text-right font-black">PREMIO</span>
                     </div>
                     
                     {/* Dynamic Rows */}
                     {jugadas.map((j, i) => (
-                      <div key={i} className="flex justify-between text-[11px] font-mono py-0.5">
-                        <span className="w-12 text-left font-bold text-[#030712]">{j.numero}</span>
-                        <span className="flex-1 text-center text-[#374151]">{ticket.moneda} {j.monto.toFixed(2)}</span>
-                        <span className="w-24 text-right font-bold text-emerald-600">C$ {j.premio_posible.toFixed(0)}</span>
+                      <div key={i} className="flex justify-between text-xs font-mono py-0.5 text-black">
+                        <span className="w-12 text-left font-black text-black">{j.numero}</span>
+                        <span className="flex-1 text-center font-bold text-black">{ticket.moneda} {j.monto.toFixed(2)}</span>
+                        <span className="w-24 text-right font-black text-black">C$ {j.premio_posible.toFixed(0)}</span>
                       </div>
                     ))}
                     
                     {/* Línea Divisoria Térmica Inferior */}
-                    <div className="border-b border-dashed border-gray-300 my-2" />
+                    <div className="border-b-2 border-black border-dotted my-2" />
                     
                     {/* Total */}
-                    <div className="flex justify-between text-xs font-black text-[#030712] pt-1 mt-1 uppercase">
+                    <div className="flex justify-between text-xs font-black text-black pt-1 mt-1 uppercase">
                       <span>Total:</span>
                       <span>{ticket.moneda} {ticket.monto_pago.toFixed(2)}</span>
                     </div>
@@ -380,7 +383,7 @@ ${config.formato_ticket.mensaje_pie}
               })()}
             </div>
 
-            {/* Winner Evaluation Result */}
+            {/* Winner Evaluation Result (Monochrome Flat Layout) */}
             {(() => {
               const sorteoObj = config.sorteos?.find(s => s.nombre === ticket.sorteo);
               const ticketDate = ticket.timestamp_servidor.substring(0, 10);
@@ -390,19 +393,19 @@ ${config.formato_ticket.mensaje_pie}
 
               if (ticket.anulado) {
                 return (
-                  <div className="my-3 p-3 bg-[#f3f4f6] border border-[#d1d5db] rounded-xl text-center">
-                    <span className="text-[10px] font-sans font-bold text-[#6b7280] uppercase block">ESTADO DEL TICKET</span>
-                    <span className="text-sm font-display font-black text-[#9ca3af] uppercase tracking-wider block mt-0.5">ANULADO</span>
+                  <div className="my-3 p-3 border-2 border-black rounded-xl text-center text-black">
+                    <span className="text-xs font-black uppercase block">ESTADO DEL TICKET</span>
+                    <span className="text-sm font-black uppercase tracking-wider block mt-0.5">ANULADO</span>
                   </div>
                 );
               }
 
               if (!resultObj) {
                 return (
-                  <div className="my-3 p-3 bg-[#fffbeb] border border-[#fde68a] rounded-xl text-center">
-                    <span className="text-[10px] font-sans font-bold text-[#b45309] uppercase block">ESTADO DEL TICKET</span>
-                    <span className="text-sm font-display font-black text-[#78350f] uppercase tracking-wider block mt-0.5">⏳ PENDIENTE DE JUGAR</span>
-                    <span className="text-[9px] text-[#d97706] block mt-1 leading-normal font-sans font-medium">El número ganador para este sorteo del {ticketDate} aún no ha sido registrado.</span>
+                  <div className="my-3 p-3 border-2 border-black border-dotted rounded-xl text-center text-black">
+                    <span className="text-xs font-black uppercase block">ESTADO DEL TICKET</span>
+                    <span className="text-sm font-black uppercase tracking-wider block mt-0.5">⏳ PENDIENTE DE JUGAR</span>
+                    <span className="text-[10px] block mt-1 leading-normal font-sans font-bold">El número ganador para este sorteo del {ticketDate} aún no ha sido registrado.</span>
                   </div>
                 );
               }
@@ -413,67 +416,56 @@ ${config.formato_ticket.mensaje_pie}
 
               if (isWinner) {
                 return (
-                  <div className="my-3 p-4 bg-[#ecfdf5] border-2 border-[#10b981] rounded-xl text-center animate-pulse">
-                    <span className="text-[10px] font-sans font-bold text-[#15803d] uppercase block">RESULTADO DEL SORTEO: {cleanGanador}</span>
-                    <span className="text-base font-display font-black text-[#14532d] uppercase tracking-widest block mt-0.5">🎉 ¡BOLETO PREMIADO!</span>
-                    <div className="mt-2.5 pt-2 border-t border-[#d1fae5]">
-                      <span className="text-[9px] font-sans font-bold text-[#16a34a] uppercase block">CANTIDAD A PAGAR AL CLIENTE (C$)</span>
-                      <span className="text-lg font-mono font-black text-[#166534]">
+                  <div className="my-3 p-4 border-4 border-black rounded-xl text-center text-black">
+                    <span className="text-xs font-bold uppercase block">RESULTADO: {cleanGanador}</span>
+                    <span className="text-base font-black uppercase tracking-widest block mt-0.5">🎉 ¡BOLETO PREMIADO!</span>
+                    <div className="mt-2.5 pt-2 border-t-2 border-black">
+                      <span className="text-xs font-black uppercase block">PAGAR AL CLIENTE</span>
+                      <span className="text-lg font-mono font-black block mt-1">
                         C$ {potentialPrizeCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
                       </span>
-                      {ticket.moneda === "USD" && (
-                        <span className="text-[9px] text-[#16a34a] block mt-0.5 font-sans">
-                          (Apuesta: USD {ticket.monto_pago.toFixed(2)} × tasa C$ {(config.tasa_cambio || 36.50).toFixed(2)})
-                        </span>
-                      )}
                     </div>
                   </div>
                 );
               } else {
                 return (
-                  <div className="my-3 p-3 bg-[#fef2f2] border border-[#fecaca] rounded-xl text-center">
-                    <span className="text-[10px] font-sans font-bold text-[#b91c1c] uppercase block">RESULTADO DEL SORTEO: {cleanGanador}</span>
-                    <span className="text-sm font-display font-black text-[#7f1d1d] uppercase tracking-wider block mt-0.5">❌ NO PREMIADO</span>
-                    <span className="text-[9px] text-[#dc2626] block mt-1 leading-normal font-sans font-medium">Su número jugado no coincide con el número ganador.</span>
+                  <div className="my-3 p-3 border-2 border-black rounded-xl text-center text-black">
+                    <span className="text-xs font-bold uppercase block">RESULTADO: {cleanGanador}</span>
+                    <span className="text-sm font-black uppercase tracking-wider block mt-0.5">❌ NO PREMIADO</span>
                   </div>
                 );
               }
             })()}
 
-            <div className="border-t border-dashed border-[#d1d5db] my-2" />
+            <div className="border-t-2 border-black border-dotted my-2" />
 
             {/* Digital Anti-Photoshop Signature */}
             <div className="text-center py-1">
-              <div className="text-[8px] text-[#6b7280] tracking-wider font-sans uppercase font-bold">Firma Digital (Anti-Photoshop)</div>
-              <div className="font-mono text-sm font-black text-[#111827] tracking-widest mt-0.5 select-all">
+              <div className="text-xs text-black font-bold uppercase tracking-wider">Firma Digital</div>
+              <div className="font-mono text-sm font-black text-black tracking-widest mt-0.5 select-all">
                 {ticket.firma_digital}
               </div>
             </div>
 
-            <div className="border-t border-dashed border-[#d1d5db] my-2" />
+            <div className="border-t-2 border-black border-dotted my-2" />
 
             {/* Footer message */}
-            <div className="text-center text-[10px] text-[#6b7280] font-sans leading-tight italic">
+            <div className="text-center text-xs text-black font-bold font-sans leading-tight italic uppercase">
               {config.formato_ticket.mensaje_pie}
             </div>
 
             {/* Simulated Barcode & Real scannable QR Code */}
-            <div className="mt-4 flex flex-col items-center border-t border-[#e5e7eb] pt-3 space-y-3">
-              <div className="flex flex-col items-center w-full">
-                <div className="h-7 w-4/5 bg-repeat-x bg-contain opacity-75" style={{ backgroundImage: "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"10\"><rect x=\"0\" width=\"2\" height=\"10\" fill=\"black\"/><rect x=\"3\" width=\"1\" height=\"10\" fill=\"black\"/><rect x=\"6\" width=\"3\" height=\"10\" fill=\"black\"/><rect x=\"11\" width=\"2\" height=\"10\" fill=\"black\"/><rect x=\"15\" width=\"1\" height=\"10\" fill=\"black\"/><rect x=\"18\" width=\"2\" height=\"10\" fill=\"black\"/></svg>')" }} />
-                <span className="text-[8px] text-[#9ca3af] mt-1 font-mono">TK-{ticket.id}</span>
+            <div className="mt-4 flex flex-col items-center border-t-2 border-black border-dotted pt-3 space-y-3">
+              <div className="flex flex-col items-center p-2 bg-white border-2 border-black">
+                <QRCodeSVG 
+                  value={`${window.location.origin}/verificar?ticket=${ticket.numero_ticket}&firma=${ticket.firma_digital}`}
+                  size={100}
+                  level="M"
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                />
               </div>
-              
-              <div className="flex flex-col items-center p-2">
-                <div className="p-1 bg-white">
-                  <QRCodeSVG 
-                    value={`${window.location.origin}/verificar?ticket=${ticket.numero_ticket}&firma=${ticket.firma_digital}`}
-                    size={80}
-                    level="L"
-                  />
-                </div>
-                <span className="text-[7px] text-[#6b7280] font-mono mt-1 uppercase tracking-wider">Verificación Digital QR</span>
-              </div>
+              <span className="text-xs text-black font-bold font-mono mt-1 uppercase tracking-wider">Verificación Digital QR</span>
             </div>
             
           </div>
@@ -495,33 +487,37 @@ ${config.formato_ticket.mensaje_pie}
           <button
             id="print-ticket-btn"
             onClick={handlePrint}
-            disabled={isBlocked}
+            disabled={isBlocked || !imageReady || sharing}
             className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center cursor-pointer shadow-sm border-b-2 ${
-              isBlocked 
+              isBlocked || !imageReady || sharing
                 ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed border-b-0" 
                 : "bg-blue-900 text-white hover:bg-blue-800 active:scale-95 border-blue-950"
             }`}
           >
-            <Printer className="w-4 h-4" />
-            <span>Imprimir</span>
+            {!imageReady ? (
+              <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Printer className="w-4 h-4" />
+            )}
+            <span>{!imageReady ? "Cargando..." : "Imprimir"}</span>
           </button>
           
           <button
             id="share-ticket-btn"
             onClick={handleShare}
-            disabled={isBlocked || sharing}
+            disabled={isBlocked || !imageReady || sharing}
             className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center shadow-sm border-b-2 ${
-              isBlocked || sharing
+              isBlocked || !imageReady || sharing
                 ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed border-b-0" 
                 : "bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95 border-emerald-700 cursor-pointer"
             }`}
           >
-            {sharing ? (
+            {sharing || !imageReady ? (
               <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
             ) : (
               <Share2 className="w-4 h-4" />
             )}
-            <span>{sharing ? "Procesando..." : "WhatsApp"}</span>
+            <span>{!imageReady ? "Cargando..." : (sharing ? "Procesando..." : "WhatsApp")}</span>
           </button>
         </div>
 
