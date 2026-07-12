@@ -143,6 +143,7 @@ export default function VendedorInterface({
   // Ticket QR/ID Search states
   // Hardware and Permission states
   const [cameraStatus, setCameraStatus] = useState<'idle'|'loading'|'ready'|'denied'|'error'>('idle');
+  const [cameraRetry, setCameraRetry] = useState(0);
 
   const [qrSearchInput, setQrSearchInput] = useState("");
   const [qrSearchError, setQrSearchError] = useState<string | null>(null);
@@ -316,6 +317,11 @@ export default function VendedorInterface({
     const initializeCamera = async () => {
       setCameraStatus('loading');
       try {
+        if (!window.isSecureContext) {
+          setCameraStatus('error');
+          return;
+        }
+
         // 1. Solicitar permisos explicitamente primero (forzando cámara trasera)
         localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
         
@@ -349,6 +355,10 @@ export default function VendedorInterface({
         console.error("Camera error:", err);
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
           setCameraStatus('denied');
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+          setCameraStatus('error');
+        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+          setCameraStatus('error');
         } else {
           setCameraStatus('error');
         }
@@ -368,7 +378,7 @@ export default function VendedorInterface({
         localStream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [activeTab]);
+  }, [activeTab, cameraRetry]);
 
 
   const processPayment = async (query: string) => {
@@ -1768,7 +1778,10 @@ export default function VendedorInterface({
                 <div className="w-full p-4 bg-red-50 text-red-700 rounded-xl border border-red-200 text-center mb-4">
                   <AlertTriangle className="w-6 h-6 mx-auto mb-1 opacity-80" />
                   <p className="text-[11px] font-bold uppercase">Acceso Denegado</p>
-                  <p className="text-[10px] mt-1">Para escanear tickets, debes permitir el acceso a la cámara en los ajustes de tu navegador.</p>
+                  <p className="text-[10px] mt-1">Ve a Configuración del navegador &gt; Cámara y permite el acceso. Luego presiona Reintentar.</p>
+                  <button onClick={() => { setCameraStatus('loading'); setCameraRetry(c => c + 1); }} className="mt-2 px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer">
+                    Reintentar
+                  </button>
                 </div>
               )}
               
@@ -1776,7 +1789,10 @@ export default function VendedorInterface({
                 <div className="w-full p-4 bg-orange-50 text-orange-700 rounded-xl border border-orange-200 text-center mb-4">
                   <AlertTriangle className="w-6 h-6 mx-auto mb-1 opacity-80" />
                   <p className="text-[11px] font-bold uppercase">Error de Cámara</p>
-                  <p className="text-[10px] mt-1">No se detectó cámara o hardware no compatible.</p>
+                  <p className="text-[10px] mt-1">No se pudo acceder a la cámara. Verifica que no esté siendo usada por otra app o que el dispositivo tenga cámara trasera disponible.</p>
+                  <button onClick={() => { setCameraStatus('loading'); setCameraRetry(c => c + 1); }} className="mt-2 px-4 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer">
+                    Reintentar
+                  </button>
                 </div>
               )}
 

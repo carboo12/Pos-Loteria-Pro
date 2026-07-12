@@ -13,6 +13,7 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [retryCount, setRetryCount] = useState(0);
   const streamRef = useRef<MediaStream | null>(null);
   const requestRef = useRef<number>();
 
@@ -21,6 +22,12 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
 
     const startCamera = async () => {
       try {
+        if (!window.isSecureContext) {
+          setError("La cámara requiere una conexión segura (HTTPS). Si estás en desarrollo local, usa un túnel como ngrok o configura certificados SSL locales.");
+          setLoading(false);
+          return;
+        }
+
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" },
         });
@@ -38,11 +45,19 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
           setLoading(false);
           requestRef.current = requestAnimationFrame(tick);
         }
-      } catch (err) {
+      } catch (err: any) {
         if (active) {
           console.error("Camera error:", err);
           setLoading(false);
-          setError("Permiso denegado o cámara no disponible. Por favor, activa los permisos de cámara en tu navegador o digita el ID del ticket de forma manual.");
+          if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            setError("Permiso de cámara denegado. Ve a la configuración de Chrome/Navegador en tu celular, busca 'Configuración de sitios' y permite el acceso a la cámara para esta página.");
+          } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+            setError("No se encontró ninguna cámara en este dispositivo.");
+          } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+            setError("La cámara está siendo usada por otra aplicación. Cierra otras apps e intenta de nuevo.");
+          } else {
+            setError(`Error al abrir la cámara: ${err.message}`);
+          }
         }
       }
     };
@@ -86,7 +101,7 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [onScan]);
+  }, [onScan, retryCount]);
 
   return (
     <AnimatePresence>
@@ -129,7 +144,13 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
             {error && (
               <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-gray-900 z-10 space-y-4">
                 <AlertTriangle className="w-12 h-12 text-red-500" />
-                <p className="text-red-400 font-sans text-sm">{error}</p>
+                <p className="text-red-400 font-sans text-sm leading-relaxed">{error}</p>
+                <button
+                  onClick={() => { setError(null); setLoading(true); setRetryCount(c => c + 1); }}
+                  className="mt-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer border-b-2 border-blue-900 active:translate-y-[1px] active:border-b-0"
+                >
+                  Reintentar
+                </button>
               </div>
             )}
 

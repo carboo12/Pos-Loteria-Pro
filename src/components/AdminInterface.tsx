@@ -131,7 +131,7 @@ interface AdminInterfaceProps {
   closures: CierreCaja[];
   onUpdateConfig: (newConfig: Partial<Configuracion>) => Promise<boolean>;
   onUpdateUser: (userId: string, updates: Partial<Usuario>) => Promise<boolean>;
-  onCreateUser: (newUser: any) => Promise<boolean>;
+  onCreateUser: (newUser: any) => Promise<{ success: boolean; error: string | null }>;
   onDeleteUser: (userId: string) => Promise<boolean>;
   simulatedSupervisorId?: string;
 }
@@ -198,6 +198,7 @@ export default function AdminInterface({
   const [newSorteoHourCierre, setNewSorteoHourCierre] = useState("10");
   const [newSorteoMinCierre, setNewSorteoMinCierre] = useState("55");
   const [newSorteoAmPmCierre, setNewSorteoAmPmCierre] = useState("AM");
+  const [sorteoEditando, setSorteoEditando] = useState<any>(null);
 
   // Results (Resultados) Section States
   const [resultsList, setResultsList] = useState<any[]>([]);
@@ -884,9 +885,6 @@ export default function AdminInterface({
       return;
     }
 
-    setSubmitting(true);
-    let success = false;
-
     const payload: any = {
       nombre: userFormName.trim(),
       usuario: userFormUsername.trim().toLowerCase(),
@@ -903,19 +901,27 @@ export default function AdminInterface({
     }
 
     if (editingUser) {
-      success = await onUpdateUser(editingUser.id, payload);
+      const ok = await onUpdateUser(editingUser.id, payload);
+      setSubmitting(false);
+      if (ok) {
+        setSuccessText(`Usuario "${userFormName}" actualizado con éxito.`);
+        setIsUserModalOpen(false);
+        setEditingUser(null);
+        onRefreshUsers();
+      } else {
+        setAlertText("Ocurrió un error al actualizar el usuario.");
+      }
     } else {
-      success = await onCreateUser(payload);
-    }
-    setSubmitting(false);
-
-    if (success) {
-      setSuccessText(editingUser ? `Usuario "${userFormName}" actualizado con éxito.` : `Usuario "${userFormName}" registrado con éxito.`);
-      setIsUserModalOpen(false);
-      setEditingUser(null);
-      onRefreshUsers();
-    } else {
-      setAlertText("Ocurrió un error al guardar el usuario. Asegúrese de que el nickname no esté en uso.");
+      const result = await onCreateUser(payload);
+      setSubmitting(false);
+      if (result.success) {
+        setSuccessText(`Usuario "${userFormName}" registrado con éxito.`);
+        setIsUserModalOpen(false);
+        setEditingUser(null);
+        onRefreshUsers();
+      } else {
+        setAlertText(result.error || "Ocurrió un error al guardar el usuario.");
+      }
     }
   };
 
@@ -1001,6 +1007,46 @@ export default function AdminInterface({
   };
 
   // Add draw schedule
+  // Edit draw schedule
+  const handleEditSorteoClick = (sorteo: Sorteo) => {
+    setSorteoEditando(sorteo);
+    // Extract the name without game prefix and suffix
+    const parts = sorteo.nombre.split(" ");
+    const gamePrefix = parts[0];
+    parts.shift(); // remove game
+    let remaining = parts.join(" ");
+    remaining = remaining.replace(/ \((NI|HN|SV|LP|CR)\)$/, "");
+    setNewSorteoNombre(remaining);
+    setNewSorteoJuego(sorteo.juego);
+    setNewSorteoPais(getCountryFromSorteo(sorteo.nombre));
+    // Parse hora_sorteo
+    const [hStr, mStr] = sorteo.hora_sorteo.split(":");
+    let hNum = parseInt(hStr, 10);
+    const isPM = hNum >= 12;
+    setNewSorteoHourDraw(isPM && hNum > 12 ? String(hNum - 12) : isPM && hNum === 12 ? "12" : hNum === 0 ? "12" : String(hNum));
+    setNewSorteoMinDraw(mStr.padStart(2, "0"));
+    setNewSorteoAmPmDraw(isPM ? "PM" : "AM");
+    // Parse hora_cierre
+    const [chStr, cmStr] = sorteo.hora_cierre.split(":");
+    let chNum = parseInt(chStr, 10);
+    const isCPM = chNum >= 12;
+    setNewSorteoHourCierre(isCPM && chNum > 12 ? String(chNum - 12) : isCPM && chNum === 12 ? "12" : chNum === 0 ? "12" : String(chNum));
+    setNewSorteoMinCierre(cmStr.padStart(2, "0"));
+    setNewSorteoAmPmCierre(isCPM ? "PM" : "AM");
+  };
+
+  const cancelEditSorteo = () => {
+    setSorteoEditando(null);
+    setNewSorteoNombre("");
+    setNewSorteoHourDraw("11");
+    setNewSorteoMinDraw("00");
+    setNewSorteoAmPmDraw("AM");
+    setNewSorteoHourCierre("10");
+    setNewSorteoMinCierre("55");
+    setNewSorteoAmPmCierre("AM");
+  };
+
+  // Add or update draw schedule
   const handleAddSorteo = async () => {
     setAlertText(null);
     setSuccessText(null);
@@ -1028,31 +1074,57 @@ export default function AdminInterface({
     else if (newSorteoPais === "La Primera") suffix = "(LP)";
     else if (newSorteoPais === "Costa Rica") suffix = "(CR)";
 
-    const newSorteoObj: Sorteo = {
-      id: "sort_" + Math.random().toString(36).substring(2, 9),
-      juego: newSorteoJuego,
-      nombre: `${newSorteoJuego} ${newSorteoNombre} ${suffix}`,
-      hora_sorteo: horaSorteo24,
-      hora_cierre: horaCierre24
-    };
-
-    const updatedSorteos = [...config.sorteos, newSorteoObj];
-
-    setSubmitting(true);
-    const success = await onUpdateConfig({ sorteos: updatedSorteos });
-    setSubmitting(false);
-
-    if (success) {
-      setSuccessText(`Sorteo "${newSorteoObj.nombre}" agregado con éxito.`);
-      setNewSorteoNombre("");
-      setNewSorteoHourDraw("11");
-      setNewSorteoMinDraw("00");
-      setNewSorteoAmPmDraw("AM");
-      setNewSorteoHourCierre("10");
-      setNewSorteoMinCierre("55");
-      setNewSorteoAmPmCierre("AM");
+    if (sorteoEditando) {
+      // UPDATE existing
+      const updatedSorteos = config.sorteos.map(s => {
+        if (s.id === sorteoEditando.id) {
+          return {
+            ...s,
+            juego: newSorteoJuego,
+            nombre: `${newSorteoJuego} ${newSorteoNombre} ${suffix}`,
+            hora_sorteo: horaSorteo24,
+            hora_cierre: horaCierre24
+          };
+        }
+        return s;
+      });
+      setSubmitting(true);
+      const success = await onUpdateConfig({ sorteos: updatedSorteos });
+      setSubmitting(false);
+      if (success) {
+        setSuccessText(`Sorteo "${newSorteoJuego} ${newSorteoNombre}" actualizado con éxito.`);
+        cancelEditSorteo();
+      } else {
+        setAlertText("Error al actualizar el sorteo.");
+      }
     } else {
-      setAlertText("Error al agregar el sorteo.");
+      // CREATE new
+      const newSorteoObj: Sorteo = {
+        id: "sort_" + Math.random().toString(36).substring(2, 9),
+        juego: newSorteoJuego,
+        nombre: `${newSorteoJuego} ${newSorteoNombre} ${suffix}`,
+        hora_sorteo: horaSorteo24,
+        hora_cierre: horaCierre24
+      };
+
+      const updatedSorteos = [...config.sorteos, newSorteoObj];
+
+      setSubmitting(true);
+      const success = await onUpdateConfig({ sorteos: updatedSorteos });
+      setSubmitting(false);
+
+      if (success) {
+        setSuccessText(`Sorteo "${newSorteoObj.nombre}" agregado con éxito.`);
+        setNewSorteoNombre("");
+        setNewSorteoHourDraw("11");
+        setNewSorteoMinDraw("00");
+        setNewSorteoAmPmDraw("AM");
+        setNewSorteoHourCierre("10");
+        setNewSorteoMinCierre("55");
+        setNewSorteoAmPmCierre("AM");
+      } else {
+        setAlertText("Error al agregar el sorteo.");
+      }
     }
   };
 

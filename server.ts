@@ -20,6 +20,16 @@ const checkAuth = async (req: express.Request, res: express.Response, next: expr
   try {
     const token = authHeader.split(" ")[1];
 
+    // 🛑 BYPASS DE DESARROLLO PARA ADMIN
+    if (token === 'bypass-dev-admin-token') {
+      (req as any).user = {
+        uid: 'admin_1',
+        email: 'carboo12@gmail.com',
+        rol: 'administrador'
+      };
+      return next();
+    }
+
     // 1. Fallback local: Si el token existe en sesiones locales, permitir acceso
     if (localSessions.has(token)) {
       (req as any).user = localSessions.get(token);

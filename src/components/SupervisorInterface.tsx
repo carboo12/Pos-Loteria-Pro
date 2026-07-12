@@ -453,7 +453,7 @@ export default function SupervisorInterface({
       </div>
 
       {/* Main Viewport Container Scrollable Area */}
-      <div className="flex-1 p-4 overflow-y-auto">
+      <div className="p-4 pb-24">
         
         {/* 2. COMPACT PORTFOLIO BENTO METRICS */}
         <div className="grid grid-cols-2 gap-3 mb-4">

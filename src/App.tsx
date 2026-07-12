@@ -221,12 +221,14 @@ export default function App() {
       });
       if (res.ok) {
         await fetchUsers();
-        return true;
+        return { success: true, error: null };
       }
-    } catch (e) {
+      const body = await res.json().catch(() => ({}));
+      return { success: false, error: body.error || `Error del servidor (HTTP ${res.status})` };
+    } catch (e: any) {
       console.error("Error creating user:", e);
+      return { success: false, error: e.message || "Error de red al contactar el servidor" };
     }
-    return false;
   };
 
   const handleDeleteUser = async (userId: string) => {
@@ -337,7 +339,7 @@ export default function App() {
           ) : currentUser.rol === "supervisor" ? (
 
             /* Supervisor view */
-            <div className="w-full flex-1 flex flex-col min-h-0 overflow-hidden animate-fade-in">
+            <div className="w-full flex-1 flex flex-col min-h-0 overflow-y-auto animate-fade-in">
                 <Suspense fallback={<SuspenseLoader />}>
               <SupervisorInterface
                 user={currentUser}
