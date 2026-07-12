@@ -997,6 +997,27 @@ app.post("/api/resultados", (req, res) => {
   res.status(201).json(newResult);
 });
 
+app.put("/api/resultados/:id", (req, res) => {
+  const { id } = req.params;
+  const { id_sorteo, fecha, numero_ganador } = req.body;
+  if (!id_sorteo || !fecha || !numero_ganador) {
+    return res.status(400).json({ error: "Sorteo, Fecha y Número ganador son requeridos." });
+  }
+
+  db.configuracion.resultados = db.configuracion.resultados || [];
+  const idx = db.configuracion.resultados.findIndex((r: any) => r.id === id);
+  if (idx === -1) {
+    return res.status(404).json({ error: "Resultado no encontrado." });
+  }
+
+  db.configuracion.resultados[idx].id_sorteo = id_sorteo;
+  db.configuracion.resultados[idx].fecha = fecha;
+  db.configuracion.resultados[idx].numero_ganador = numero_ganador;
+
+  saveToDB();
+  res.json(db.configuracion.resultados[idx]);
+});
+
 app.delete("/api/resultados/:id", (req, res) => {
   const { id } = req.params;
   db.configuracion.resultados = (db.configuracion.resultados || []).filter((r: any) => r.id !== id);

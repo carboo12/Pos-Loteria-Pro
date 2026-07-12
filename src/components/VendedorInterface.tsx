@@ -13,6 +13,8 @@ import {
   Check, 
   X, 
   ArrowRight,
+  ArrowLeft,
+  SlidersHorizontal,
   TrendingDown,
   TrendingUp,
   AlertCircle,
@@ -29,6 +31,10 @@ import { Html5QrcodeScanner } from "html5-qrcode";
 import { Usuario, Configuracion, Venta, Sorteo, Jugada } from "../types";
 import TicketPreviewModal from "./TicketPreviewModal";
 import { QrScannerModal } from "./QrScannerModal";
+import ResumenFacturacionCard from "./ResumenFacturacionCard";
+import FacturacionVendedorCard from "./FacturacionVendedorCard";
+import { collection, addDoc, serverTimestamp, query, where, getDocs, doc, updateDoc, getDoc } from "firebase/firestore";
+import { firestore } from "../lib/firebase";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -79,7 +85,13 @@ export default function VendedorInterface({
   serverTime
 }: VendedorInterfaceProps) {
   // Navigation tabs
-  const [activeTab, setActiveTab] = useState<"venta" | "historial" | "pagos">("venta");
+  const [activeTab, setActiveTab] = useState<"venta" | "reportes" | "pagos">("venta");
+  
+  // Filtros y estados de Firestore para Reportes
+  const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => new Date().toISOString().split("T")[0]);
+  const [reportFilterFechaFin, setReportFilterFechaFin] = useState(() => new Date().toISOString().split("T")[0]);
+  const [reportTickets, setReportTickets] = useState<any[]>([]);
+  const [reportLoading, setReportLoading] = useState(false);
   
   // País state
   const [selectedPais, setSelectedPais] = useState<"Nicaragua" | "Honduras" | "El Salvador" | "La Primera" | "Costa Rica">("Nicaragua");
@@ -166,11 +178,7 @@ export default function VendedorInterface({
   const totalTicketMonto = jugadas.reduce((acc, j) => acc + j.monto, 0);
   const totalTicketPremio = jugadas.reduce((acc, j) => acc + j.premio_posible, 0);
 
-  // --- NEW BOLETO SEARCH STATE ---
-  const [boletoSearchInput, setBoletoSearchInput] = useState("");
-  const [boletoLoading, setBoletoLoading] = useState(false);
-  const [boletoError, setBoletoError] = useState<string | null>(null);
-  const [boletoFound, setBoletoFound] = useState<Venta | null>(null);
+
 
   const addJugadaAlCarrito = () => {
     setErrorMessage(null);
@@ -230,84 +238,7 @@ export default function VendedorInterface({
     setActiveField("numero");
   };
 
-  const handleBoletoSearch = async (query: string) => {
-    setBoletoError(null);
-    setBoletoFound(null);
-    if (!query.trim()) return;
 
-    setBoletoLoading(true);
-    let targetNum = query;
-    let targetFirma = "";
-
-    if (query.includes("ticket=")) {
-      try {
-        const urlObj = new URL(query);
-        targetNum = urlObj.searchParams.get("ticket") || targetNum;
-        targetFirma = urlObj.searchParams.get("firma") || targetFirma;
-      } catch (err) {
-        const tMatch = query.match(/[?&]ticket=([^&]+)/);
-        const fMatch = query.match(/[?&]firma=([^&]+)/);
-        if (tMatch) targetNum = tMatch[1];
-        if (fMatch) targetFirma = fMatch[1];
-      }
-    }
-    const cleanNum = targetNum.replace(/^#/, "").trim();
-
-    try {
-      const foundInCache = sales.find(s => 
-        s.id === cleanNum || s.numero_ticket === cleanNum || 
-        (s.firma_digital && s.firma_digital.toUpperCase() === cleanNum.toUpperCase()) ||
-        (targetFirma && s.firma_digital && s.firma_digital.toUpperCase() === targetFirma.toUpperCase())
-      );
-
-      if (foundInCache) {
-        setBoletoFound(foundInCache);
-      } else {
-        const res = await fetch(`/api/ventas?ticket=${cleanNum}`);
-        if (!res.ok) throw new Error("Error en red");
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setBoletoFound(data[0]);
-        } else {
-          setBoletoError(`No se encontró boleto con el ID/Firma: "${query}"`);
-        }
-      }
-    } catch (err) {
-      setBoletoError(`Error al buscar boleto: ${query}`);
-    } finally {
-      setBoletoLoading(false);
-    }
-  };
-
-  const handleVolverAJugar = (boleto: Venta) => {
-    // Clone logic: switch to Venta tab and clone game/sorteo/numbers
-    setActiveTab("venta");
-    setSelectedPais(boleto.juego === "Sabadito" ? "Nicaragua" : "Nicaragua"); // Simplified mapping for cloned
-    setSelectedJuego(boleto.juego);
-    setMoneda(boleto.moneda);
-    setNombreCliente(boleto.nombre_cliente || "Genérico");
-    
-    // Attempt to set Sorteo if it's still available
-    const sorteosActivos = getSorteosByGame(boleto.juego);
-    const todaviaAbierto = sorteosActivos.some(s => s.nombre === boleto.sorteo && !isSorteoCerrado(s));
-    if (todaviaAbierto) {
-      setSelectedSorteo(boleto.sorteo);
-    } else if (sorteosActivos.length > 0) {
-      // Pick first open if previous is closed
-      setSelectedSorteo(sorteosActivos[0].nombre);
-    }
-
-    if (boleto.jugadas && boleto.jugadas.length > 0) {
-      setJugadas([...boleto.jugadas]);
-    } else {
-      // Legacy single number clone
-      setJugadas([{
-        numero: boleto.numero_jugado,
-        monto: boleto.monto_pago,
-        premio_posible: boleto.premio_posible_cs || 0
-      }]);
-    }
-  };
 
 
   // QR Scanner Effect
@@ -390,57 +321,313 @@ export default function VendedorInterface({
   }, [activeTab, cameraRetry]);
 
 
-  const processPayment = async (query: string) => {
+  const processPayment = async (queryStr: string) => {
     setLoading(true);
     setPaymentResult(null);
     try {
-      let targetNum = query.trim();
-      if (query.includes("ticket=")) {
-        const tMatch = query.match(/[?&]ticket=([^&]+)/);
+      let targetNum = queryStr.trim();
+      if (queryStr.includes("ticket=")) {
+        const tMatch = queryStr.match(/[?&]ticket=([^&]+)/);
         if (tMatch) targetNum = tMatch[1];
       }
       
       const cleanNum = targetNum.replace(/^#/, "").trim();
-      const response = await fetch(`/api/ventas/${cleanNum}/pagar`, {
-        method: "POST"
-      });
-      const data = await response.json();
       
-      if (!response.ok) {
-        setPaymentResult({
-          ganador: false,
-          message: data.error || "Error al validar el ticket.",
-          monto: 0
-        });
-      } else {
-        setPaymentResult({
-          ganador: data.ganador,
-          message: data.message,
-          monto: data.monto_ganado_cs || 0
-        });
-        if (data.ganador) {
-          onRefreshSales();
+      // 1. Fetch from Firestore tickets collection
+      const docRef = doc(firestore, "tickets", cleanNum);
+      let docSnap = await getDoc(docRef);
+      let ticketId = cleanNum;
+      
+      if (!docSnap.exists()) {
+        const q = query(collection(firestore, "tickets"), where("id_ticket", "==", cleanNum));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+          docSnap = qSnap.docs[0];
+          ticketId = docSnap.id;
         }
       }
+
+      if (!docSnap.exists()) {
+        setPaymentResult({
+          ganador: false,
+          estado: "error",
+          message: `No se encontró ningún ticket con ID o Firma: "${cleanNum}"`,
+          monto: 0
+        } as any);
+        return;
+      }
+
+      const ticket = docSnap.data() as any;
+      ticket.id = ticketId;
+      ticket.fecha_emision_date = ticket.fecha_emision?.toDate() || new Date();
+
+      // 2. Check if already cobrado or anulado
+      if (ticket.estado === "anulado") {
+        setPaymentResult({
+          ganador: false,
+          estado: "anulado",
+          message: "Este ticket está ANULADO y no puede cobrarse.",
+          monto: 0
+        } as any);
+        return;
+      }
+
+      if (ticket.estado === "cobrado") {
+        setPaymentResult({
+          ganador: false,
+          estado: "cobrado",
+          message: "Ticket ya pagado anteriormente.",
+          monto: 0
+        } as any);
+        return;
+      }
+
+      // 3. Find draw result
+      let game = ticket.id_juego || "";
+      let draw = ticket.id_sorteo || "";
+      if (!game || !draw) {
+        // Legacy fallback: parse from juego_sorteo string
+        const js = ticket.juego_sorteo || "";
+        if (js.startsWith("La Diaria")) {
+          game = "La Diaria";
+          draw = js.substring("La Diaria".length).trim();
+        } else if (js.startsWith("Premia2")) {
+          game = "Premia2";
+          draw = js.substring("Premia2".length).trim();
+        } else if (js.startsWith("Pega 3")) {
+          game = "Pega 3";
+          draw = js.substring("Pega 3".length).trim();
+        } else if (js.startsWith("Jugá 3")) {
+          game = "Jugá 3";
+          draw = js.substring("Jugá 3".length).trim();
+        } else if (js.startsWith("Diaria")) {
+          game = "Diaria";
+          draw = js.substring("Diaria".length).trim();
+        } else if (js.startsWith("Fechas")) {
+          game = "Fechas";
+          draw = js.substring("Fechas".length).trim();
+        } else if (js.startsWith("Terminación 2")) {
+          game = "Terminación 2";
+          draw = js.substring("Terminación 2".length).trim();
+        } else if (js.startsWith("Súper Premio")) {
+          game = "Súper Premio";
+          draw = js.substring("Súper Premio".length).trim();
+        } else if (js.startsWith("3 Monazos")) {
+          game = "3 Monazos";
+          draw = js.substring("3 Monazos".length).trim();
+        } else {
+          const parts = js.split(" ");
+          game = parts[0] || "";
+          draw = parts.slice(1).join(" ");
+        }
+      }
+
+      const tDate = ticket.fecha_emision_date.toISOString().substring(0, 10);
+      const sObj = config.sorteos?.find(d => d.nombre === draw && d.juego === game);
+      const rObj = sObj
+        ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
+        : null;
+
+      if (!rObj) {
+        setPaymentResult({
+          ganador: false,
+          estado: "pendiente_sorteo",
+          message: `El sorteo ${game} ${draw} del ${tDate} aún no se ha realizado o no tiene resultados oficiales cargados.`,
+          monto: 0
+        } as any);
+        return;
+      }
+
+      const officialWinnerNum = rObj.numero_ganador;
+      let prizeAmount = 0;
+      
+      // Calculate prize
+      if (ticket.jugadas && ticket.jugadas.length > 0) {
+        ticket.jugadas.forEach((j: any) => {
+          if (j.numero.trim().toLowerCase() === officialWinnerNum.trim().toLowerCase()) {
+            const multiplier = calculatePrizeMultiplier(game, draw);
+            let p = j.monto * multiplier;
+            if (ticket.moneda === "USD") p *= (config.tasa_cambio || 36.50);
+            prizeAmount += p;
+          }
+        });
+      } else if (ticket.numero_jugado) {
+        if (ticket.numero_jugado.trim().toLowerCase() === officialWinnerNum.trim().toLowerCase()) {
+          const multiplier = calculatePrizeMultiplier(game, draw);
+          let p = (ticket.monto_pago || 0) * multiplier;
+          if (ticket.moneda === "USD") p *= (config.tasa_cambio || 36.50);
+          prizeAmount += p;
+        }
+      }
+
+      if (prizeAmount > 0) {
+        setPaymentResult({
+          ganador: true,
+          estado: "pendiente",
+          ticketId: ticketId,
+          juegoSorteo: ticket.juego_sorteo,
+          numGanador: officialWinnerNum,
+          message: `El número ganador del sorteo ${ticket.juego_sorteo} fue: ${officialWinnerNum}`,
+          monto: prizeAmount
+        } as any);
+      } else {
+        setPaymentResult({
+          ganador: false,
+          estado: "pendiente",
+          message: `El número ganador del sorteo ${ticket.juego_sorteo} fue: ${officialWinnerNum}. El ticket no coincide.`,
+          monto: 0
+        } as any);
+      }
+
     } catch (err) {
+      console.error("Error checking ticket prize:", err);
       setPaymentResult({
         ganador: false,
-        message: "Error de conexión con el servidor.",
+        estado: "error",
+        message: "Error al validar el ticket en Firestore.",
         monto: 0
-      });
+      } as any);
     } finally {
       setLoading(false);
       setQrSearchInput("");
-      
-      // Try to resume scanner if possible
-      try {
-        const scannerEl = document.getElementById("reader");
-        if (scannerEl) {
-          // If the library supports resuming, we can do it here, but usually it's better to just let the user re-open the tab.
-        }
-      } catch (e) {}
     }
   };
+
+  const handleEfectuarPago = async (tId: string) => {
+    setLoading(true);
+    try {
+      const docRef = doc(firestore, "tickets", tId);
+      await updateDoc(docRef, { estado: "cobrado" });
+      
+      try {
+        await fetch(`/api/ventas/${tId}/pagar`, {
+          method: "POST"
+        });
+      } catch (errSync) {
+        console.warn("REST API sync failed (possibly offline). Ticket is marked as cobrado in Firestore.", errSync);
+      }
+
+      toast.success("¡Pago registrado con éxito!");
+      setPaymentResult(null);
+      onRefreshSales();
+    } catch (err) {
+      console.error("Error registering ticket payment:", err);
+      toast.error("Error al registrar el pago");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getTicketTheoreticalPrize = (ticket: any): number => {
+    if (ticket.estado === "anulado") return 0;
+    
+    // Parse game and draw (new fields or legacy fallback)
+    let game = ticket.id_juego || "";
+    let draw = ticket.id_sorteo || "";
+    if (!game || !draw) {
+      const js = ticket.juego_sorteo || "";
+      if (js.startsWith("La Diaria")) {
+        game = "La Diaria";
+        draw = js.substring("La Diaria".length).trim();
+      } else if (js.startsWith("Premia2")) {
+        game = "Premia2";
+        draw = js.substring("Premia2".length).trim();
+      } else if (js.startsWith("Pega 3")) {
+        game = "Pega 3";
+        draw = js.substring("Pega 3".length).trim();
+      } else if (js.startsWith("Jugá 3")) {
+        game = "Jugá 3";
+        draw = js.substring("Jugá 3".length).trim();
+      } else if (js.startsWith("Diaria")) {
+        game = "Diaria";
+        draw = js.substring("Diaria".length).trim();
+      } else if (js.startsWith("Fechas")) {
+        game = "Fechas";
+        draw = js.substring("Fechas".length).trim();
+      } else if (js.startsWith("Terminación 2")) {
+        game = "Terminación 2";
+        draw = js.substring("Terminación 2".length).trim();
+      } else if (js.startsWith("Súper Premio")) {
+        game = "Súper Premio";
+        draw = js.substring("Súper Premio".length).trim();
+      } else if (js.startsWith("3 Monazos")) {
+        game = "3 Monazos";
+        draw = js.substring("3 Monazos".length).trim();
+      } else {
+        const parts = js.split(" ");
+        game = parts[0] || "";
+        draw = parts.slice(1).join(" ");
+      }
+    }
+
+    const tDate = ticket.fecha_emision_date ? (ticket.fecha_emision_date instanceof Date ? ticket.fecha_emision_date : ticket.fecha_emision_date.toDate()).toISOString().substring(0, 10) : "";
+    const sObj = config.sorteos?.find(d => d.nombre === draw && d.juego === game);
+    const rObj = sObj
+      ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
+      : null;
+
+    if (!rObj) return 0;
+    
+    let prize = 0;
+    const winnerNum = rObj.numero_ganador.trim().toLowerCase();
+    
+    if (ticket.jugadas && ticket.jugadas.length > 0) {
+      ticket.jugadas.forEach((j: any) => {
+        if (j.numero.trim().toLowerCase() === winnerNum) {
+          const multiplier = calculatePrizeMultiplier(game, draw);
+          let p = j.monto * multiplier;
+          if (ticket.moneda === "USD") p *= (config.tasa_cambio || 36.50);
+          prize += p;
+        }
+      });
+    } else if (ticket.numero_jugado) {
+      if (ticket.numero_jugado.trim().toLowerCase() === winnerNum) {
+        const multiplier = calculatePrizeMultiplier(game, draw);
+        let p = (ticket.monto_pago || 0) * multiplier;
+        if (ticket.moneda === "USD") p *= (config.tasa_cambio || 36.50);
+        prize += p;
+      }
+    }
+
+    return prize;
+  };
+
+  const fetchReportTickets = async () => {
+    setReportLoading(true);
+    try {
+      const startDate = new Date(reportFilterFechaInicio + "T00:00:00");
+      const endDate = new Date(reportFilterFechaFin + "T23:59:59");
+      const q = query(
+        collection(firestore, "tickets"),
+        where("id_vendedor", "==", user.id),
+        where("fecha_emision", ">=", startDate),
+        where("fecha_emision", "<=", endDate)
+      );
+      const querySnapshot = await getDocs(q);
+      const tickets = querySnapshot.docs.map(docVal => {
+        const data = docVal.data();
+        return {
+          id: docVal.id,
+          ...data,
+          fecha_emision_date: data.fecha_emision?.toDate() || new Date()
+        };
+      });
+      // Sort descending
+      tickets.sort((a, b) => b.fecha_emision_date.getTime() - a.fecha_emision_date.getTime());
+      setReportTickets(tickets);
+    } catch (err) {
+      console.error("Error loading tickets from Firestore:", err);
+      toast.error("Error al cargar reportes desde Firestore");
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "reportes") {
+      fetchReportTickets();
+    }
+  }, [activeTab]);
 
   // Verificar premio de un ticket contra resultados oficiales
   const verificarPremioTicket = async (ticket: Venta) => {
@@ -944,13 +1131,30 @@ export default function VendedorInterface({
     }, 0);
     const totalPremioCs = jugadas.reduce((sum, j) => sum + j.premio_posible, 0);
 
-    // 6. Offline: queue entire cart to local storage
-    if (!isOnline) {
-      setErrorMessage("ERROR DE CONEXIÓN: No se puede conectar con el servidor. Ticket guardado en cola local offline.");
-      const tempId = "off_" + Math.random().toString(36).substring(2, 9);
-      const offlineTicket: Venta = {
-        id: tempId,
-        numero_ticket: "PENDIENTE",
+    // 6. Online/Offline Firestore document creation
+    setLoading(true);
+    try {
+      const ticketData = {
+        id_vendedor: user.id,
+        fecha_emision: serverTimestamp(),
+        id_juego: selectedJuego,
+        id_sorteo: selectedSorteo,
+        juego_sorteo: `${selectedJuego} ${selectedSorteo}`,
+        jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto })),
+        estado: "pendiente",
+        total_apostado: totalMontoCs
+      };
+
+      const docRef = await addDoc(collection(firestore, "tickets"), ticketData);
+      const id_ticket = docRef.id;
+
+      // Update the document to include the generated id_ticket
+      await updateDoc(docRef, { id_ticket });
+
+      // Create a compatible Venta object for preview and printing
+      const syncedTicket: Venta = {
+        id: id_ticket,
+        numero_ticket: id_ticket.substring(0, 7).toUpperCase(),
         timestamp_servidor: new Date().toISOString(),
         juego: selectedJuego,
         sorteo: selectedSorteo,
@@ -961,65 +1165,28 @@ export default function VendedorInterface({
         nombre_vendedor: user.nombre,
         nombre_cliente: nombreCliente.trim() || "Genérico",
         premio_posible_cs: totalPremioCs,
-        firma_digital: "OFFLINE-QUEUED",
+        firma_digital: id_ticket.substring(0, 7).toUpperCase(),
         anulado: false,
+        estado: "pendiente",
         jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto, premio_posible: j.premio_posible }))
       };
 
-      setLoading(true);
-      setTimeout(() => {
-        setLoading(false);
-        onNewSaleCreated(offlineTicket);
-        setSuccessMessage("¡Ticket guardado fuera de línea! Se sincronizará al recuperar señal.");
-        // Full cleanup: cart + form + nombre
-        setJugadas([]);
-        setNumeroJugado("");
-        setMontoPago("");
-        setNombreCliente("Genérico");
-        setActiveField("numero");
-      }, 800);
-      return;
-    }
-
-    // 7. Online: persist full cart to server
-    setLoading(true);
-    try {
-      const response = await fetch("/api/ventas", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          juego: selectedJuego,
-          sorteo: selectedSorteo,
-          numero_jugado: jugadas[0].numero,
-          monto_pago: totalMontoCs,
-          moneda: moneda,
-          id_vendedor: user.id,
-          nombre_cliente: nombreCliente.trim() || "Genérico",
-          premio_posible_cs: totalPremioCs,
-          jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto, premio_posible: j.premio_posible }))
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = "Error al generar venta";
-        try {
-          const errData = JSON.parse(errorText);
-          errorMessage = errData.error || errorMessage;
-        } catch (e) {
-          errorMessage = errorText || errorMessage;
-        }
-        throw new Error(errorMessage);
+      // Background sync to local server REST API (so supervisor dashboard still works)
+      try {
+        await fetch("/api/ventas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(syncedTicket)
+        });
+      } catch (errSync) {
+        console.warn("REST API sync failed (possibly offline). Ticket is safe in Firestore.", errSync);
       }
 
-      const data = await response.json();
+      onNewSaleCreated(syncedTicket);
+      setActiveTicket(syncedTicket);
+      setSuccessMessage(`Ticket #${syncedTicket.numero_ticket} emitido con éxito en Firestore.`);
 
-      // 8. Success — full cleanup
-      onNewSaleCreated(data);
-      setActiveTicket(data);
-      setSuccessMessage(`Ticket #${data.numero_ticket} emitido con éxito. (${jugadas.length} jugada${jugadas.length > 1 ? "s" : ""})`);
+      // Full cleanup: cart + form + nombre
       setJugadas([]);
       setNumeroJugado("");
       setMontoPago("");
@@ -1027,7 +1194,7 @@ export default function VendedorInterface({
       setActiveField("numero");
       onRefreshSales();
     } catch (err: any) {
-      setErrorMessage(err.message || "Ocurrió un error inesperado al emitir el ticket.");
+      setErrorMessage(err.message || "Ocurrió un error al guardar el ticket en Firestore.");
     } finally {
       setLoading(false);
     }
@@ -1684,188 +1851,213 @@ export default function VendedorInterface({
                 </div>
               </div>
             )}
-
           </div>
         )}
 
-        {/* TAB 2: HISTORIAL Y ANULACIONES */}
-        {activeTab === "historial" && (
-          <div className="space-y-4 animate-fade-in">
-            {/* Header and Refresh */}
-            <div className="flex justify-between items-center border-b border-gray-200 pb-2">
-              <div>
-                <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider">Historial de Ventas</h3>
-                <p className="text-[10px] text-gray-400 font-sans mt-0.5">Consulta de boletos emitidos y estados de anulación.</p>
-              </div>
-              <button
-                id="refresh-history-btn"
-                onClick={onRefreshSales}
-                className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-600 flex items-center space-x-1 text-xs font-bold transition-colors cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Actualizar</span>
-              </button>
-            </div>
+        {/* TAB 2: REPORTES */}
+        {activeTab === "reportes" && (() => {
+          // Parse start and end date boundaries
+          const start = new Date(reportFilterFechaInicio + "T00:00:00");
+          const end = new Date(reportFilterFechaFin + "T23:59:59");
+          
+          // Filter tickets locally
+          const rangeTickets = reportTickets.filter(t => {
+            const d = t.fecha_emision_date;
+            return d >= start && d <= end;
+          });
 
-            {/* Filter and Search Bar */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 bg-gray-50 p-3 rounded-2xl border border-gray-200">
-              {/* Date Filter */}
-              <div>
-                <label className="block text-[9px] font-display font-bold text-gray-500 uppercase tracking-wider mb-1">Filtrar por Fecha</label>
-                <div className="relative">
+          // Calculate totals
+          const facturado = rangeTickets.filter(t => t.estado !== "anulado").reduce((sum, t) => sum + (t.total_apostado || 0), 0);
+          const sellerIngresos = ((config as any).ingresos || []).filter((i: any) => {
+            const isSeller = i.id_vendedor === user.id;
+            const inRange = i.fecha >= reportFilterFechaInicio && i.fecha <= reportFilterFechaFin;
+            return isSeller && inRange;
+          });
+          const ingresos = sellerIngresos.reduce((sum: number, i: any) => sum + i.monto_cs + (i.monto_usd * config.tasa_cambio), 0);
+          
+          // Calculate theoretical prizes (A Pagar)
+          let aPagar = 0;
+          rangeTickets.forEach(t => {
+            aPagar += getTicketTheoreticalPrize(t);
+          });
+
+          // Calculate actually paid/cobrado prizes (Pagado)
+          const pagado = rangeTickets
+            .filter(t => t.estado === "cobrado")
+            .reduce((sum, t) => sum + getTicketTheoreticalPrize(t), 0);
+
+          // Calculate withdrawals made by supervisor (Cobro)
+          const sellerCobros = (config.cobros || []).filter(c => {
+            const isSeller = c.id_vendedor === user.id;
+            const inRange = c.fecha >= reportFilterFechaInicio && c.fecha <= reportFilterFechaFin;
+            return isSeller && inRange;
+          });
+          const cobro = sellerCobros.reduce((sum, c) => sum + c.monto_cs + (c.monto_usd * config.tasa_cambio), 0);
+
+          const total = (facturado - pagado) + ingresos - cobro;
+          const ganancia = (facturado - aPagar) + ingresos;
+
+          const formatCurrency = (val: number) => {
+            return `C$ ${val.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          };
+
+          return (
+            <div className="space-y-4 animate-fade-in text-left">
+              {/* Header and Refresh */}
+              <div className="flex justify-between items-center border-b border-gray-200 pb-2">
+                <div>
+                  <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider">Reporte de Caja</h3>
+                  <p className="text-[10px] text-gray-400 font-sans mt-0.5">Consulta tu arqueo de caja y boletos emitidos.</p>
+                </div>
+                <button
+                  id="refresh-report-btn"
+                  onClick={fetchReportTickets}
+                  disabled={reportLoading}
+                  className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-600 flex items-center space-x-1 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${reportLoading ? "animate-spin" : ""}`} />
+                  <span>Actualizar</span>
+                </button>
+              </div>
+
+              {/* Rango de Fechas */}
+              <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-2xl border border-gray-200 shadow-xs">
+                <div>
+                  <label className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-1">Fecha Inicio</label>
                   <input
-                    id="history-date-filter"
                     type="date"
-                    value={filterDate}
-                    onChange={(e) => setFilterDate(e.target.value)}
-                    className="w-full p-2 text-xs font-mono font-bold bg-white border border-gray-300 rounded-xl focus:outline-none focus:border-blue-900"
+                    value={reportFilterFechaInicio}
+                    onChange={(e) => setReportFilterFechaInicio(e.target.value)}
+                    className="w-full p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
                   />
-                  {filterDate && (
-                    <button
-                      onClick={() => setFilterDate("")}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs font-bold"
-                    >
-                      Limpiar
-                    </button>
-                  )}
                 </div>
-              </div>
-
-              {/* Search Query */}
-              <div>
-                <label className="block text-[9px] font-display font-bold text-gray-500 uppercase tracking-wider mb-1">Buscar Ticket o Número</label>
-                <div className="relative">
+                <div>
+                  <label className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-1">Fecha Fin</label>
                   <input
-                    id="history-search-input"
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Ej. 0001041 o número jugado..."
-                    className="w-full p-2 text-xs bg-white border border-gray-300 rounded-xl focus:outline-none focus:border-blue-900 pr-8"
+                    type="date"
+                    value={reportFilterFechaFin}
+                    onChange={(e) => setReportFilterFechaFin(e.target.value)}
+                    className="w-full p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
                   />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery("")}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs font-bold"
-                    >
-                      ✕
-                    </button>
-                  )}
                 </div>
               </div>
-            </div>
 
-            {/* Stats / Summary of Filtered Items */}
-            <div className="bg-[#1E3A8A]/5 p-3 rounded-xl border border-[#1E3A8A]/10 flex flex-wrap justify-between items-center gap-2 text-xs font-semibold text-gray-700">
-              <div>
-                Tickets: <span className="font-bold text-[#1E3A8A]">{displayedSales.length}</span> {filterDate ? "este día" : "en total"}
-              </div>
-              <div className="flex space-x-3">
-                <span>Total C$: <strong className="text-gray-950">C$ {displayedSales.filter(s => !s.anulado && s.moneda === "C$").reduce((sum, s) => sum + s.monto_pago, 0).toFixed(2)}</strong></span>
-                <span>Total USD: <strong className="text-emerald-700">$ {displayedSales.filter(s => !s.anulado && s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0).toFixed(2)}</strong></span>
-              </div>
-            </div>
+              <ResumenFacturacionCard
+                facturado={facturado}
+                ingresos={ingresos}
+                aPagar={aPagar}
+                cobro={cobro}
+                pagado={pagado}
+                total={total}
+              />
+              <FacturacionVendedorCard
+                nombreVendedor={user.nombre}
+                vendido={facturado}
+                pagado={pagado}
+                ingresos={ingresos}
+                totalAPagar={aPagar}
+                cobrado={cobro}
+                ganancia={ganancia}
+                total={total}
+              />
 
-            {displayedSales.length === 0 ? (
-              <div className="text-center py-10 bg-white border border-gray-300 rounded-2xl text-gray-500 text-sm font-sans font-medium">
-                No se encontraron ventas para los filtros seleccionados.
-              </div>
-            ) : (
-              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
-                {displayedSales.map((sale) => {
-                  const saleSorteo = config?.sorteos?.find(s => s.nombre === sale.sorteo && s.juego === sale.juego);
-                  const isClosed = saleSorteo ? isSorteoCerrado(saleSorteo) : true;
-                  const canVoid = !isClosed && !sale.anulado;
+              {/* Lista de Boletos (UI Stitch) */}
+              <div className="space-y-3">
+                <span className="block text-[10px] font-display font-black text-gray-500 uppercase tracking-wider">
+                  Boletos Emitidos ({rangeTickets.length})
+                </span>
+                
+                {reportLoading ? (
+                  <div className="text-center py-10">
+                    <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-800 rounded-full animate-spin mx-auto mb-2"></div>
+                    <span className="text-xs text-gray-500 font-bold uppercase tracking-wider">Cargando de Firestore...</span>
+                  </div>
+                ) : rangeTickets.length === 0 ? (
+                  <div className="text-center py-10 bg-white border border-gray-200 rounded-2xl text-gray-400 text-xs">
+                    No se encontraron boletos en el rango seleccionado.
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                    {rangeTickets.map((t) => {
+                      // Parse game and draw
+                      let game = "";
+                      let draw = "";
+                      const js = t.juego_sorteo || "";
+                      if (js.startsWith("La Diaria")) {
+                        game = "La Diaria";
+                        draw = js.substring("La Diaria".length).trim();
+                      } else if (js.startsWith("Premia2")) {
+                        game = "Premia2";
+                        draw = js.substring("Premia2".length).trim();
+                      } else if (js.startsWith("Pega 3")) {
+                        game = "Pega 3";
+                        draw = js.substring("Pega 3".length).trim();
+                      } else if (js.startsWith("Jugá 3")) {
+                        game = "Jugá 3";
+                        draw = js.substring("Jugá 3".length).trim();
+                      } else if (js.startsWith("Diaria")) {
+                        game = "Diaria";
+                        draw = js.substring("Diaria".length).trim();
+                      } else if (js.startsWith("Fechas")) {
+                        game = "Fechas";
+                        draw = js.substring("Fechas".length).trim();
+                      } else if (js.startsWith("Terminación 2")) {
+                        game = "Terminación 2";
+                        draw = js.substring("Terminación 2".length).trim();
+                      } else if (js.startsWith("Súper Premio")) {
+                        game = "Súper Premio";
+                        draw = js.substring("Súper Premio".length).trim();
+                      } else if (js.startsWith("3 Monazos")) {
+                        game = "3 Monazos";
+                        draw = js.substring("3 Monazos".length).trim();
+                      } else {
+                        const parts = js.split(" ");
+                        game = parts[0] || "";
+                        draw = parts.slice(1).join(" ");
+                      }
 
-                  return (
-                    <div 
-                      key={sale.id} 
-                      className={`p-3 rounded-2xl border bg-white shadow-xs relative flex flex-col justify-between transition-all ${
-                        sale.anulado 
-                          ? "border-red-200 bg-red-50/20 opacity-75" 
-                          : "border-gray-200 hover:border-gray-300"
-                      }`}
-                    >
-                      {/* Ticket top tag */}
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <span className="font-mono text-xs font-black text-gray-950 bg-gray-100 px-2 py-0.5 rounded">
-                            Ticket #{sale.numero_ticket}
-                          </span>
-                          <span className="text-[10px] text-gray-400 block font-mono mt-1">
-                            {new Date(sale.timestamp_servidor).toLocaleDateString("es-ES")} {formatTo12HourTime(sale.timestamp_servidor)}
-                          </span>
-                        </div>
-
-                        <div className="text-right">
-                          <span className="font-display font-black text-lg text-blue-950 block">
-                            {sale.moneda} {sale.monto_pago.toFixed(2)}
-                          </span>
-                          <span className="text-[10px] text-gray-400 block font-mono uppercase">
-                            Firma: {sale.firma_digital}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Info Row */}
-                      <div className="flex justify-between items-center py-1.5 border-t border-b border-dashed border-gray-200 text-xs font-semibold text-gray-700">
-                        <div>
-                          Juego: <span className="font-bold text-gray-950 uppercase">{sale.juego}</span>
-                        </div>
-                        <div>
-                          Número: <span className="font-mono font-black text-gray-950 bg-yellow-100 px-2 py-0.5 rounded text-sm">{sale.numero_jugado}</span>
-                        </div>
-                      </div>
-
-                      {/* Footer & Anular button */}
-                      <div className="mt-2.5 flex justify-between items-center">
-                        <div>
-                          {sale.anulado ? (
-                            <span className="inline-flex items-center space-x-1 bg-[#EF4444] text-white px-2 py-0.5 rounded text-[10px] font-black uppercase">
-                              <X className="w-3 h-3 stroke-[3]" />
-                              <span>Anulado</span>
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded font-black uppercase">
-                              ✓ Emitido
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex space-x-2">
-                          <button
-                            id={`view-ticket-${sale.id}`}
-                            onClick={() => setActiveTicket(sale)}
-                            className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-[#1E3A8A] font-sans font-bold text-xs rounded-lg border border-blue-200 cursor-pointer transition-colors"
-                          >
-                            Ver Ticket
-                          </button>
-                          
-                          {canVoid ? (
-                            <button
-                              id={`void-ticket-${sale.id}`}
-                              onClick={() => handleAnularTicket(sale.id)}
-                              className="px-2.5 py-1 bg-[#EF4444] hover:bg-[#D83A3A] text-white font-sans font-bold text-xs rounded-lg flex items-center space-x-1 cursor-pointer shadow-xs animate-pulse"
-                            >
-                              <X className="w-3.5 h-3.5 stroke-[2.5]" />
-                              <span>Anular</span>
-                            </button>
-                          ) : (
-                            !sale.anulado && (
-                              <span className="text-[10px] text-gray-400 font-sans italic self-center">
-                                Sorteo Cerrado
+                      return (
+                        <div key={t.id} className={`bg-white rounded-xl p-4 shadow-sm border border-gray-200 flex flex-col justify-between ${t.estado === "anulado" ? "opacity-60 bg-gray-50" : ""}`}>
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <span className="font-bold text-gray-800 uppercase block">{user.nombre}</span>
+                              <span className="text-[9px] text-gray-400 font-mono mt-0.5 block">
+                                {t.fecha_emision_date.toLocaleDateString("es-ES")} {formatTo12HourTime(t.fecha_emision_date)}
                               </span>
-                            )
-                          )}
+                            </div>
+                            <span className={`text-[9px] font-black uppercase px-2.5 py-0.5 rounded ${
+                              t.estado === "cobrado" ? "bg-emerald-100 text-emerald-800" :
+                              t.estado === "anulado" ? "bg-red-100 text-red-800" :
+                              "bg-amber-100 text-amber-800"
+                            }`}>
+                              {t.estado}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            <span className="bg-blue-50 text-blue-700 rounded-md px-2.5 py-0.5 text-xs font-bold font-sans">
+                              {game}
+                            </span>
+                            <span className="bg-slate-100 text-slate-700 rounded-md px-2.5 py-0.5 text-xs font-bold font-sans">
+                              {draw}
+                            </span>
+                          </div>
+
+                          <div className="border-t border-gray-100 pt-2.5 flex justify-between items-center text-xs">
+                            <span className="text-gray-500 font-medium">Total Apostado:</span>
+                            <span className="font-mono font-black text-gray-900 text-sm">
+                              C$ {(t.total_apostado || 0).toFixed(2)}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {/* TAB 3: PAGOS (QR SCANNERS) */}
         {activeTab === "pagos" && (
@@ -1935,51 +2127,192 @@ export default function VendedorInterface({
             
             {/* Payment Animation Modals */}
             <AnimatePresence>
-              {paymentResult && paymentResult.ganador && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.8, y: 50 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.8, y: 50 }}
-                  className="bg-emerald-500 rounded-3xl p-6 text-white text-center shadow-2xl relative overflow-hidden"
-                >
-                  <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white to-transparent mix-blend-overlay"></div>
-                  <CheckCircle className="w-16 h-16 mx-auto mb-2 text-emerald-100" />
-                  <h2 className="text-2xl font-black uppercase tracking-widest mb-1">¡Ganador!</h2>
-                  <p className="text-emerald-100 text-xs mb-4">El ticket ha sido premiado.</p>
-                  
-                  <div className="bg-white/20 rounded-2xl p-4 backdrop-blur-sm border border-white/30">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-100 mb-1">Monto a Entregar</span>
-                    <span className="text-4xl font-black tracking-tighter">
-                      C$ {paymentResult.monto.toFixed(2)}
-                    </span>
-                  </div>
-                  
-                  <button 
-                    onClick={() => setPaymentResult(null)}
-                    className="mt-6 w-full py-3 bg-white text-emerald-600 rounded-xl font-bold uppercase tracking-wider hover:bg-emerald-50 transition-colors cursor-pointer"
-                  >
-                    Aceptar y Cerrar
-                  </button>
-                </motion.div>
-              )}
+              {paymentResult && (
+                <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+                  {/* Confetti particles for winners */}
+                  {paymentResult.ganador && paymentResult.estado === "pendiente" && (
+                    <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                      {Array.from({ length: 35 }).map((_, i) => {
+                        const randomLeft = Math.random() * 100;
+                        const randomDelay = Math.random() * 2.5;
+                        const randomDuration = 2.5 + Math.random() * 2.5;
+                        const randomSize = 6 + Math.random() * 8;
+                        return (
+                          <motion.div
+                            key={i}
+                            initial={{ y: -50, x: `${randomLeft}vw`, rotate: 0 }}
+                            animate={{ y: "100vh", rotate: 720 }}
+                            transition={{
+                              duration: randomDuration,
+                              repeat: Infinity,
+                              delay: randomDelay,
+                              ease: "linear"
+                            }}
+                            className="absolute rounded-xs pointer-events-none"
+                            style={{
+                              width: randomSize,
+                              height: randomSize * 1.5,
+                              backgroundColor: ["#10B981", "#F59E0B", "#3B82F6", "#EF4444", "#EC4899", "#8B5CF6"][i % 6]
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
 
-              {paymentResult && !paymentResult.ganador && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.8, y: 50 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.8, y: 50 }}
-                  className="bg-red-500 rounded-3xl p-6 text-white text-center shadow-2xl relative overflow-hidden"
-                >
-                  <X className="w-16 h-16 mx-auto mb-2 text-red-100" />
-                  <h2 className="text-2xl font-black uppercase tracking-widest mb-1">Sin Premio</h2>
-                  <p className="text-red-100 text-sm mb-4">{paymentResult.message}</p>
-                  <button 
-                    onClick={() => setPaymentResult(null)}
-                    className="mt-6 w-full py-3 bg-white text-red-600 rounded-xl font-bold uppercase tracking-wider hover:bg-red-50 transition-colors cursor-pointer"
-                  >
-                    Cerrar
-                  </button>
-                </motion.div>
+                  {/* 1. YA COBRADO (RED ALERT LOCK SCREEN) */}
+                  {paymentResult.estado === "cobrado" && (
+                    <motion.div
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.9, opacity: 0 }}
+                      className="bg-red-600 rounded-3xl p-6 text-white text-center shadow-2xl max-w-sm w-full border border-red-700 relative"
+                    >
+                      <AlertCircle className="w-16 h-16 mx-auto mb-3 text-red-100 animate-bounce" />
+                      <h2 className="text-2xl font-black uppercase tracking-wider mb-2">¡Bloqueado!</h2>
+                      <p className="text-red-100 text-sm font-semibold mb-6">
+                        Ticket ya pagado anteriormente. No se permite realizar otro desembolso para este documento.
+                      </p>
+                      <button
+                        onClick={() => setPaymentResult(null)}
+                        className="w-full py-3 bg-white hover:bg-red-50 text-red-700 rounded-xl font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                      >
+                        Aceptar y Cerrar
+                      </button>
+                    </motion.div>
+                  )}
+
+                  {/* 2. ANULADO */}
+                  {paymentResult.estado === "anulado" && (
+                    <motion.div
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.9, opacity: 0 }}
+                      className="bg-slate-700 rounded-3xl p-6 text-white text-center shadow-2xl max-w-sm w-full border border-slate-800"
+                    >
+                      <AlertTriangle className="w-16 h-16 mx-auto mb-3 text-slate-200" />
+                      <h2 className="text-xl font-black uppercase tracking-wider mb-2">Ticket Anulado</h2>
+                      <p className="text-slate-200 text-xs mb-6">
+                        {paymentResult.message}
+                      </p>
+                      <button
+                        onClick={() => setPaymentResult(null)}
+                        className="w-full py-3 bg-white hover:bg-slate-100 text-slate-700 rounded-xl font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                      >
+                        Cerrar
+                      </button>
+                    </motion.div>
+                  )}
+
+                  {/* 3. PENDIENTE DE SORTEO (SIN RESULTADOS OFICIALES AUN) */}
+                  {paymentResult.estado === "pendiente_sorteo" && (
+                    <motion.div
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.9, opacity: 0 }}
+                      className="bg-amber-500 rounded-3xl p-6 text-white text-center shadow-2xl max-w-sm w-full border border-amber-600"
+                    >
+                      <AlertTriangle className="w-16 h-16 mx-auto mb-3 text-amber-100" />
+                      <h2 className="text-xl font-black uppercase tracking-wider mb-2">Sorteo Abierto</h2>
+                      <p className="text-amber-100 text-xs mb-6">
+                        {paymentResult.message}
+                      </p>
+                      <button
+                        onClick={() => setPaymentResult(null)}
+                        className="w-full py-3 bg-white hover:bg-amber-50 text-amber-600 rounded-xl font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                      >
+                        Cerrar
+                      </button>
+                    </motion.div>
+                  )}
+
+                  {/* 4. ERROR */}
+                  {paymentResult.estado === "error" && (
+                    <motion.div
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.9, opacity: 0 }}
+                      className="bg-red-500 rounded-3xl p-6 text-white text-center shadow-2xl max-w-sm w-full border border-red-600"
+                    >
+                      <AlertCircle className="w-16 h-16 mx-auto mb-3 text-red-100" />
+                      <h2 className="text-xl font-black uppercase tracking-wider mb-2">Error de Verificación</h2>
+                      <p className="text-red-100 text-xs mb-6">
+                        {paymentResult.message}
+                      </p>
+                      <button
+                        onClick={() => setPaymentResult(null)}
+                        className="w-full py-3 bg-white hover:bg-red-50 text-red-600 rounded-xl font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                      >
+                        Cerrar
+                      </button>
+                    </motion.div>
+                  )}
+
+                  {/* 5. GANADOR (PENDIENTE DE PAGO) */}
+                  {paymentResult.ganador && paymentResult.estado === "pendiente" && (
+                    <motion.div
+                      initial={{ scale: 0.9, y: 50, opacity: 0 }}
+                      animate={{ scale: 1, y: 0, opacity: 1 }}
+                      exit={{ scale: 0.9, y: 50, opacity: 0 }}
+                      className="bg-emerald-600 rounded-3xl p-6 text-white text-center shadow-2xl max-w-sm w-full relative overflow-hidden border border-emerald-700"
+                    >
+                      <CheckCircle className="w-16 h-16 mx-auto mb-2 text-emerald-100 animate-pulse" />
+                      <h2 className="text-2xl font-black uppercase tracking-wider mb-1">¡Premio Detectado!</h2>
+                      <p className="text-emerald-100 text-xs mb-4">
+                        El número ganador del sorteo {paymentResult.juegoSorteo} fue: <strong className="bg-white/20 px-2 py-0.5 rounded text-sm font-mono">{paymentResult.numGanador}</strong>
+                      </p>
+
+                      <div className="bg-white/10 rounded-2xl p-4 backdrop-blur-xs border border-white/20 mb-6">
+                        <span className="block text-[10px] font-bold uppercase tracking-wider text-emerald-100 mb-1">Total a Entregar</span>
+                        <span className="text-4xl font-mono font-black tracking-tight">
+                          C$ {paymentResult.monto.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => handleEfectuarPago(paymentResult.ticketId)}
+                          disabled={loading}
+                          className="w-full py-3 bg-white hover:bg-emerald-50 text-emerald-700 rounded-xl font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center space-x-2"
+                        >
+                          {loading ? (
+                            <div className="w-5 h-5 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin"></div>
+                          ) : (
+                            <span>Efectuar Pago de Premio</span>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => setPaymentResult(null)}
+                          className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-emerald-100 rounded-xl font-bold uppercase tracking-wider text-xs transition-colors cursor-pointer"
+                        >
+                          Cerrar sin pagar
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* 6. NO GANADOR */}
+                  {!paymentResult.ganador && paymentResult.estado === "pendiente" && (
+                    <motion.div
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.9, opacity: 0 }}
+                      className="bg-gray-700 rounded-3xl p-6 text-white text-center shadow-2xl max-w-sm w-full border border-gray-800"
+                    >
+                      <X className="w-16 h-16 mx-auto mb-3 text-gray-400" />
+                      <h2 className="text-xl font-black uppercase tracking-wider mb-2">Boleto sin Premio</h2>
+                      <p className="text-gray-200 text-xs mb-6">
+                        {paymentResult.message}
+                      </p>
+                      <button
+                        onClick={() => setPaymentResult(null)}
+                        className="w-full py-3 bg-white hover:bg-gray-100 text-gray-700 rounded-xl font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                      >
+                        Cerrar
+                      </button>
+                    </motion.div>
+                  )}
+                </div>
               )}
             </AnimatePresence>
           </div>
@@ -1988,132 +2321,15 @@ export default function VendedorInterface({
       </div>
 
       
-        {/* TAB 4: BOLETO */}
-        {activeTab === "boleto" && (
-          <div className="space-y-4 animate-fade-in">
-            <div className="border-b border-gray-200 pb-2">
-              <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider">Gestión de Boletos</h3>
-              <p className="text-[10px] text-gray-400 font-sans mt-0.5">Busca, verifica y reutiliza tickets anteriores.</p>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-gray-200 p-3 shadow-xs">
-              <label className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-2">ID, Número o Firma</label>
-              <div className="flex space-x-2">
-                <input type="text" value={boletoSearchInput}
-                  onChange={(e) => setBoletoSearchInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleBoletoSearch(boletoSearchInput); }}
-                  placeholder="Ej. 0001045 o A9X-2M..."
-                  className="flex-1 text-sm p-2.5 border-2 border-gray-200 rounded-xl font-mono font-bold text-gray-800 focus:outline-none focus:border-blue-900" />
-                <button onClick={() => handleBoletoSearch(boletoSearchInput)}
-                  disabled={boletoLoading || !boletoSearchInput.trim()}
-                  className="px-4 bg-blue-900 hover:bg-blue-800 text-white rounded-xl font-bold flex items-center space-x-1 cursor-pointer disabled:opacity-50">
-                  <Search className="w-4 h-4" /><span className="text-xs">Buscar</span>
-                </button>
-              </div>
-              {boletoError && (
-                <div className="mt-2 text-[10px] text-red-600 font-medium flex items-center space-x-1">
-                  <AlertCircle className="w-3 h-3" /><span>{boletoError}</span>
-                </div>
-              )}
-              {boletoLoading && (
-                <div className="mt-3 flex items-center space-x-2 text-blue-700 text-xs">
-                  <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-700 rounded-full animate-spin"></div>
-                  <span>Buscando boleto...</span>
-                </div>
-              )}
-            </div>
-
-            {boletoFound && (
-              <div className="bg-white border-2 border-blue-100 rounded-2xl overflow-hidden shadow-sm">
-                <div className={`px-4 py-3 flex justify-between items-start ${boletoFound.anulado ? 'bg-red-800' : 'bg-blue-900'}`}>
-                  <div>
-                    <span className="text-white font-display font-black text-sm">Ticket #{boletoFound.numero_ticket}</span>
-                    <span className="block text-blue-200 text-[10px] font-mono mt-0.5">{new Date(boletoFound.timestamp_servidor).toLocaleString("es-ES")}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${boletoFound.anulado ? 'bg-red-600 text-white' : 'bg-emerald-500 text-white'}`}>
-                      {boletoFound.anulado ? "ANULADO" : "ACTIVO"}
-                    </span>
-                    <span className="block text-blue-200 text-[10px] font-mono mt-1">Firma: {boletoFound.firma_digital}</span>
-                  </div>
-                </div>
-                <div className="p-4 space-y-3">
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="bg-gray-50 p-2 rounded-lg">
-                      <span className="block text-[9px] text-gray-500 uppercase font-black tracking-wider">Juego</span>
-                      <span className="font-mono font-black text-gray-900">{boletoFound.juego}</span>
-                    </div>
-                    <div className="bg-gray-50 p-2 rounded-lg">
-                      <span className="block text-[9px] text-gray-500 uppercase font-black tracking-wider">Monto</span>
-                      <span className="font-mono font-black text-blue-900">{boletoFound.moneda} {boletoFound.monto_pago.toFixed(2)}</span>
-                    </div>
-                  </div>
-
-                  {boletoFound.jugadas && boletoFound.jugadas.length > 0 ? (
-                    <div>
-                      <span className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-1">Jugadas ({boletoFound.jugadas.length})</span>
-                      <table className="w-full text-xs border border-gray-200 rounded-xl overflow-hidden">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="text-left px-3 py-1.5 font-black text-gray-500 uppercase text-[9px]">Número</th>
-                            <th className="text-right px-3 py-1.5 font-black text-gray-500 uppercase text-[9px]">Monto</th>
-                            <th className="text-right px-3 py-1.5 font-black text-gray-500 uppercase text-[9px]">Premio</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {boletoFound.jugadas.map((j, i) => (
-                            <tr key={i}><td className="px-3 py-2 font-mono font-black text-blue-900">{j.numero}</td><td className="px-3 py-2 text-right font-mono text-gray-800">{boletoFound.moneda} {j.monto.toFixed(2)}</td><td className="px-3 py-2 text-right font-mono text-emerald-600">C$ {j.premio_posible.toFixed(2)}</td></tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2 flex justify-between items-center">
-                      <span className="text-[9px] font-black text-yellow-700 uppercase">Número</span>
-                      <span className="font-mono font-black text-yellow-900 text-sm">{boletoFound.numero_jugado}</span>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100">
-                    <button onClick={() => setActiveTicket(boletoFound)}
-                      className="flex flex-col items-center justify-center py-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-xl text-[9px] font-black uppercase tracking-wide cursor-pointer space-y-1">
-                      <QrCode className="w-4 h-4" /><span>Reimprimir</span>
-                    </button>
-                    <button onClick={() => handleVolverAJugar(boletoFound)}
-                      className="flex flex-col items-center justify-center py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-xl text-[9px] font-black uppercase tracking-wide cursor-pointer space-y-1">
-                      <ArrowRight className="w-4 h-4" /><span>Volver Jugar</span>
-                    </button>
-                  </div>
-
-                  {!boletoFound.anulado && (() => {
-                    const sorteoObj = config.sorteos.find(s => s.nombre === boletoFound.sorteo && s.juego === boletoFound.juego);
-                    return (sorteoObj && !isSorteoCerrado(sorteoObj)) ? (
-                      <button onClick={() => { handleAnularTicket(boletoFound.id); setBoletoFound(null); }}
-                        className="w-full mt-1 py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-xl text-xs font-black uppercase tracking-wide flex items-center justify-center space-x-2 cursor-pointer">
-                        <X className="w-4 h-4 stroke-[3]" /><span>Anular Boleto</span>
-                      </button>
-                    ) : null;
-                  })()}
-                </div>
-              </div>
-            )}
-
-          </div>
-        )}
-
       {/* Bottom Navigation Bar — fixed, never shrinks */}
       <div className="bg-white border-t border-gray-300 py-1 px-2 flex justify-between items-center z-10 shrink-0">
         <button id="nav-venta" onClick={() => { setActiveTab("venta"); setErrorMessage(null); setSuccessMessage(null); }} className={`flex flex-col items-center flex-1 py-1 px-1 text-center transition-all cursor-pointer ${activeTab === "venta" ? "text-[#1E3A8A] scale-105" : "text-gray-400 hover:text-gray-600"}`}>
           <Gamepad2 className={`w-5 h-5 stroke-[2.5] ${activeTab === "venta" ? "text-[#1E3A8A]" : ""}`} />
           <span className="text-[9px] font-display font-black uppercase tracking-wider mt-0.5">Venta</span>
         </button>
-        <button id="nav-boleto" onClick={() => { setActiveTab("boleto"); setErrorMessage(null); setSuccessMessage(null); }} className={`flex flex-col items-center flex-1 py-1 px-1 text-center transition-all cursor-pointer ${activeTab === "boleto" ? "text-[#1E3A8A] scale-105" : "text-gray-400 hover:text-gray-600"}`}>
-          <Ticket className={`w-5 h-5 stroke-[2.5] ${activeTab === "boleto" ? "text-[#1E3A8A]" : ""}`} />
-          <span className="text-[9px] font-display font-black uppercase tracking-wider mt-0.5">Boleto</span>
-        </button>
-        <button id="nav-historial" onClick={() => { setActiveTab("historial"); setErrorMessage(null); setSuccessMessage(null); onRefreshSales(); }} className={`flex flex-col items-center flex-1 py-1 px-1 text-center transition-all cursor-pointer ${activeTab === "historial" ? "text-[#1E3A8A] scale-105" : "text-gray-400 hover:text-gray-600"}`}>
-          <History className={`w-5 h-5 stroke-[2.5] ${activeTab === "historial" ? "text-[#1E3A8A]" : ""}`} />
-          <span className="text-[9px] font-display font-black uppercase tracking-wider mt-0.5">Historial</span>
+        <button id="nav-reportes" onClick={() => { setActiveTab("reportes"); setErrorMessage(null); setSuccessMessage(null); fetchReportTickets(); }} className={`flex flex-col items-center flex-1 py-1 px-1 text-center transition-all cursor-pointer ${activeTab === "reportes" ? "text-[#1E3A8A] scale-105" : "text-gray-400 hover:text-gray-600"}`}>
+          <History className={`w-5 h-5 stroke-[2.5] ${activeTab === "reportes" ? "text-[#1E3A8A]" : ""}`} />
+          <span className="text-[9px] font-display font-black uppercase tracking-wider mt-0.5">Reportes</span>
         </button>
         <button id="nav-pagos" onClick={() => { setActiveTab("pagos"); setErrorMessage(null); setSuccessMessage(null); }} className={`flex flex-col items-center flex-1 py-1 px-1 text-center transition-all cursor-pointer ${activeTab === "pagos" ? "text-[#1E3A8A] scale-105" : "text-gray-400 hover:text-gray-600"}`}>
           <CheckCircle className={`w-5 h-5 stroke-[2.5] ${activeTab === "pagos" ? "text-[#1E3A8A]" : ""}`} />
@@ -2219,7 +2435,12 @@ export default function VendedorInterface({
               )}
 
               <button
-                onClick={() => setPrizeResult(p => ({ ...p, show: false }))}
+                onClick={async () => {
+                  if (prizeResult.type === 'winner' && prizeResult.ticket?.id) {
+                    await handleEfectuarPago(prizeResult.ticket.id);
+                  }
+                  setPrizeResult(p => ({ ...p, show: false }));
+                }}
                 className={`w-full py-3 rounded-xl font-display font-black text-sm uppercase tracking-wider cursor-pointer transition-all ${
                   prizeResult.type === 'winner'
                     ? 'bg-emerald-600 hover:bg-emerald-500 text-white'

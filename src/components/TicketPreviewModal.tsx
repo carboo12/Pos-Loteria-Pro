@@ -195,7 +195,7 @@ ${config.formato_ticket.mensaje_pie}
   const generarTextoTicketRaw = (): string => {
     let t = "";
     // Cabecera con logo e información principal de RawBT centrado
-    t += "[C]<img>https://la-nueva-era-api--rapigestion-2.us-central1.hosted.app/assets/logo_print_bw.png</img>\n";
+    t += "[C]<img>" + window.location.origin + "/logo_print_bw.png</img>\n";
     t += "[C]<b>LA NUEVA ERA</b>\n";
     t += "[C]pida su linea\n";
     t += "[C]--------------------------------\n";
@@ -233,8 +233,8 @@ ${config.formato_ticket.mensaje_pie}
     t += `[L]<b>FIRMA:</b> [R]<b>${ticket.firma_digital || 'XXXX-XX'}</b>\n`;
     t += "[C]--------------------------------\n";
     
-    // Código QR nativo de RawBT apuntando a la URL de producción
-    t += `\n[C]<qr>https://la-nueva-era-api--rapigestion-2.us-central1.hosted.app/verificar?ticket=${ticket.numero_ticket}&firma=${ticket.firma_digital}</qr>\n`;
+    // Código QR nativo de RawBT con sintaxis <qrcode>
+    t += `\n[C]<qrcode size='8'>${window.location.origin}/verificar?ticket=${ticket.numero_ticket}&firma=${ticket.firma_digital}</qrcode>\n`;
     
     t += "[C]ESTADO DEL TICKET\n";
     
@@ -260,7 +260,7 @@ ${config.formato_ticket.mensaje_pie}
       }
     }
     
-    t += "\n\n\n\n";
+    t += "\n\n\n\n\n\n\n\n\n\n\n\n";
     return t;
   };
 
@@ -293,8 +293,9 @@ ${config.formato_ticket.mensaje_pie}
       if (!el) throw new Error("Elemento del ticket no encontrado");
 
       const blob = await toBlob(el, {
-        pixelRatio: 3,
+        pixelRatio: 2,
         cacheBust: true,
+        skipAutoScale: true,
         style: { backgroundColor: '#ffffff' },
       });
       if (!blob) throw new Error("No se pudo generar la imagen");
@@ -349,7 +350,7 @@ ${config.formato_ticket.mensaje_pie}
 
         {/* Thermal Ticket Render */}
         <div className="overflow-y-auto max-h-[60vh] bg-white flex justify-center border-b border-gray-200">
-          <div ref={ticketRenderRef} id="thermal-ticket-render" className="bg-white px-6 py-6 w-full font-mono text-sm text-black relative">
+          <div ref={ticketRenderRef} id="thermal-ticket-render" className="bg-white px-6 py-6 w-full font-mono text-sm text-black">
             
             {/* Ticket Brand Header */}
             <div className="flex justify-center mb-1">

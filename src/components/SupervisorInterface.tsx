@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, FormEvent, useMemo } from "react";
 import { 
   Users, 
   History, 
@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, CobroVendedor } from "../types";
 import { motion, AnimatePresence } from "framer-motion";
+import FacturacionVendedorCard from "./FacturacionVendedorCard";
+import ResumenFacturacionCard from "./ResumenFacturacionCard";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -85,7 +87,6 @@ export default function SupervisorInterface({
   
   // Search and Filter States for Mobile-First Dashboard
   const [searchQuery, setSearchQuery] = useState("");
-  const [subTab, setSubTab] = useState<"equipo" | "disponibles">("equipo");
   const [arqueosFilter, setArqueosFilter] = useState<"todos" | "pendientes" | "cobrados">("todos");
   const [monitoreoFilter, setMonitoreoFilter] = useState<"todos" | "validos" | "anulados">("todos");
 
@@ -138,97 +139,6 @@ export default function SupervisorInterface({
   }, []);
   
   
-  // --- NUEVOS ESTADOS: Liquidación en Ruta ---
-  const [fechaInicioLiquidacion, setFechaInicioLiquidacion] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 7); // Default a últimos 7 días
-    return d.toISOString().split("T")[0];
-  });
-  const [fechaFinLiquidacion, setFechaFinLiquidacion] = useState(() => {
-    return new Date().toISOString().split("T")[0];
-  });
-  const [selectedVendedorLiquidacion, setSelectedVendedorLiquidacion] = useState<string>("");
-  const [resumenesLiquidacion, setResumenesLiquidacion] = useState<any[]>([]);
-  const [loadingLiquidacion, setLoadingLiquidacion] = useState(false);
-  const [showCobroModal, setShowCobroModal] = useState(false);
-
-  // Calcula totales a cobrar
-  const totalVendidoLiq = resumenesLiquidacion.reduce((sum, r) => sum + r.vendido, 0);
-  const totalPagadoLiq = resumenesLiquidacion.reduce((sum, r) => sum + r.pagado, 0);
-  const totalNetoLiq = totalVendidoLiq - totalPagadoLiq;
-
-  const fetchResumenesLiquidacion = async () => {
-    if (!selectedVendedorLiquidacion) {
-      setErrorMessage("Por favor seleccione un vendedor.");
-      return;
-    }
-    setErrorMessage(null);
-    setSuccessMessage(null);
-    setLoadingLiquidacion(true);
-    try {
-      const response = await fetch("/api/finanzas/cierres/rango", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id_vendedor: selectedVendedorLiquidacion,
-          fecha_inicio: fechaInicioLiquidacion,
-          fecha_fin: fechaFinLiquidacion
-        })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Fallo al consultar resumenes");
-      
-      if (data.resumenes.length === 0) {
-        setErrorMessage(data.mensaje || "No hay saldo pendiente por liquidar en este rango.");
-      } else {
-        setSuccessMessage(`Consultado con éxito. ${data.resumenes.length} día(s) pendientes.`);
-      }
-      setResumenesLiquidacion(data.resumenes);
-    } catch (err: any) {
-      setErrorMessage(err.message || "Error al conectar con servidor.");
-      setResumenesLiquidacion([]);
-    } finally {
-      setLoadingLiquidacion(false);
-    }
-  };
-
-  const handleProcesarLiquidacion = async () => {
-    if (resumenesLiquidacion.length === 0 || !selectedVendedorLiquidacion) return;
-    setLoadingLiquidacion(true);
-    setErrorMessage(null);
-    try {
-      const payload = {
-        id_supervisor: user.id,
-        id_vendedor: selectedVendedorLiquidacion,
-        rango_inicio: fechaInicioLiquidacion,
-        rango_fin: fechaFinLiquidacion,
-        dias_cerrados: resumenesLiquidacion.map(r => ({ id: r.id })),
-        total_vendido: totalVendidoLiq,
-        total_pagado: totalPagadoLiq,
-        total_neto: totalNetoLiq
-      };
-
-      const res = await fetch("/api/cobros/procesar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Error al procesar cobro");
-
-      setSuccessMessage(`Cobro de C$ ${totalNetoLiq.toLocaleString("es-ES")} procesado correctamente.`);
-      setResumenesLiquidacion([]); // Limpiar para evitar doble submit
-      setShowCobroModal(false);
-      
-      // Refrescar cobros generales y cierres para actualizar vistas
-      await handleRefreshAll();
-    } catch (err: any) {
-      setErrorMessage(err.message || "Fallo al procesar el cobro.");
-    } finally {
-      setLoadingLiquidacion(false);
-    }
-  };
-
   const [timeText, setTimeText] = useState("");
 
   useEffect(() => {
@@ -267,21 +177,6 @@ export default function SupervisorInterface({
 
   // 1. Linked sellers list
   const linkedSellers = users.filter(u => u.rol === "vendedor" && u.id_supervisor === user.id);
-  const otherSellers = users.filter(u => u.rol === "vendedor" && (!u.id_supervisor || u.id_supervisor === ""));
-
-  // Toggle seller association
-  const handleToggleAssociation = async (sellerId: string, isAssociated: boolean) => {
-    setErrorMessage(null);
-    setSuccessMessage(null);
-    const updated = await onUpdateUser(sellerId, { 
-      id_supervisor: isAssociated ? "" : user.id 
-    });
-    if (updated) {
-      setSuccessMessage(isAssociated ? "Vendedor desvinculado con éxito." : "Vendedor vinculado a su supervisión con éxito.");
-    } else {
-      setErrorMessage("No se pudo actualizar la vinculación del vendedor.");
-    }
-  };
 
   // 2. Transactions of linked vendedores
   const linkedSellersIds = linkedSellers.map(s => s.id);
@@ -383,13 +278,6 @@ export default function SupervisorInterface({
            (s.usuario && s.usuario.toLowerCase().includes(sTerm));
   });
 
-  const filteredOtherSellers = otherSellers.filter(s => {
-    const sTerm = searchQuery.toLowerCase();
-    return s.nombre.toLowerCase().includes(sTerm) || 
-           s.email.toLowerCase().includes(sTerm) ||
-           (s.usuario && s.usuario.toLowerCase().includes(sTerm));
-  });
-
   const searchedClosures = linkedClosures.filter(c => {
     const sTerm = searchQuery.toLowerCase();
     const matchSearch = c.nombre_vendedor.toLowerCase().includes(sTerm) || c.fecha.toLowerCase().includes(sTerm);
@@ -420,6 +308,56 @@ export default function SupervisorInterface({
   // Portfolio total outstanding sums
   const totalPendingCs = linkedSellers.reduce((sum, s) => sum + getSellerSummary(s.id).pendingCs, 0);
   const totalPendingUsd = linkedSellers.reduce((sum, s) => sum + getSellerSummary(s.id).pendingUsd, 0);
+
+  // Arqueo data pre-computado con useMemo para evitar filtrado redundante en render
+  const arqueoData = useMemo(() => {
+    const sellers = linkedSellers.filter(s => selectedVendedorFilter === "TODOS" || s.id === selectedVendedorFilter);
+    return sellers.map(seller => {
+      const sellerSales = sales.filter(s => {
+        const saleDateStr = s.timestamp_servidor.substring(0, 10);
+        const dateMatch = saleDateStr >= reportFilterFechaInicio && saleDateStr <= reportFilterFechaFin;
+        const activeMatch = !s.anulado;
+        const sellerMatch = s.id_vendedor === seller.id;
+        return dateMatch && activeMatch && sellerMatch;
+      });
+      const sumCs = sellerSales.filter(s => s.moneda === "C$").reduce((sum, s) => sum + s.monto_pago, 0);
+      const sumUsd = sellerSales.filter(s => s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0);
+      const vendido = sumCs + (sumUsd * config.tasa_cambio);
+      let totalAPagar = 0;
+      sellerSales.forEach(s => {
+        const tDate = s.timestamp_servidor.substring(0, 10);
+        const sObj = config.sorteos?.find(draw => draw.nombre === s.sorteo);
+        const rObj = sObj
+          ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
+          : null;
+        if (rObj && s.numero_jugado.trim().toLowerCase() === rObj.numero_ganador.trim().toLowerCase()) {
+          const multiplier = calculatePrizeMultiplier(s.juego, s.sorteo);
+          const prizeCs = s.moneda === "C$"
+            ? (s.monto_pago * multiplier)
+            : (s.monto_pago * multiplier * config.tasa_cambio);
+          totalAPagar += prizeCs;
+        }
+      });
+      const pagado = sellerSales
+        .filter(s => s.estado === 'pagado')
+        .reduce((sum, s) => sum + (s.premio_posible_cs || 0), 0);
+      const sellerIngresos = ((config as any).ingresos || []).filter((i: any) => {
+        const isSeller = i.id_vendedor === seller.id;
+        const inRange = i.fecha >= reportFilterFechaInicio && i.fecha <= reportFilterFechaFin;
+        return isSeller && inRange;
+      });
+      const ingresos = sellerIngresos.reduce((sum: number, i: any) => sum + i.monto_cs + (i.monto_usd * config.tasa_cambio), 0);
+      const sellerCobros = (allCobros || []).filter((c: any) => {
+        const isSeller = c.id_vendedor === seller.id;
+        const inRange = c.fecha >= reportFilterFechaInicio && c.fecha <= reportFilterFechaFin;
+        return isSeller && inRange;
+      });
+      const cobrado = sellerCobros.reduce((sum: number, c: any) => sum + c.monto_cs + (c.monto_usd * config.tasa_cambio), 0);
+      const ganancia = (vendido - totalAPagar) + ingresos;
+      const total = (vendido - pagado) + ingresos - cobrado;
+      return { seller, vendido, totalAPagar, pagado, ingresos, cobrado, ganancia, total };
+    });
+  }, [linkedSellers, selectedVendedorFilter, sales, reportFilterFechaInicio, reportFilterFechaFin, config, allCobros]);
 
   return (
     <div id="supervisor-container" className="flex flex-col bg-[#F3F4F6] flex-1 w-full">
@@ -747,100 +685,42 @@ export default function SupervisorInterface({
             )}
           </AnimatePresence>
 
-          {/* Contenido / Tarjetas */}
+          {/* Contenido / Tarjetas (optimizado con useMemo) */}
           <div className="p-4 space-y-4 overflow-y-auto flex-1">
-            {linkedSellers
-              .filter(seller => selectedVendedorFilter === "TODOS" || seller.id === selectedVendedorFilter)
-              .map(seller => {
-                // Filtrar ventas del vendedor en el rango
-                const sellerSales = sales.filter(s => {
-                  const saleDateStr = s.timestamp_servidor.substring(0, 10);
-                  const dateMatch = saleDateStr >= reportFilterFechaInicio && saleDateStr <= reportFilterFechaFin;
-                  const activeMatch = !s.anulado;
-                  const sellerMatch = s.id_vendedor === seller.id;
-                  return dateMatch && activeMatch && sellerMatch;
-                });
-
-                // Vendido
-                const sumCs = sellerSales.filter(s => s.moneda === "C$").reduce((sum, s) => sum + s.monto_pago, 0);
-                const sumUsd = sellerSales.filter(s => s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0);
-                const vendido = sumCs + (sumUsd * config.tasa_cambio);
-
-                // Total a Pagar (premios teóricos de tickets vendidos en el rango)
-                let totalAPagar = 0;
-                sellerSales.forEach(s => {
-                  const tDate = s.timestamp_servidor.substring(0, 10);
-                  const sObj = config.sorteos?.find(draw => draw.nombre === s.sorteo);
-                  const rObj = sObj
-                    ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
-                    : null;
-                  
-                  if (rObj && s.numero_jugado.trim().toLowerCase() === rObj.numero_ganador.trim().toLowerCase()) {
-                    const multiplier = calculatePrizeMultiplier(s.juego, s.sorteo);
-                    const prizeCs = s.moneda === "C$" 
-                      ? (s.monto_pago * multiplier)
-                      : (s.monto_pago * multiplier * config.tasa_cambio);
-                    totalAPagar += prizeCs;
-                  }
-                });
-
-                // Pagado Real (premios efectivamente pagados por este vendedor en el rango)
-                const pagado = sellerSales
-                  .filter(s => s.estado === 'pagado')
-                  .reduce((sum, s) => sum + (s.premio_posible_cs || 0), 0);
-
-                // Ingresos (inyecciones de caja)
-                const ingresos = 0;
-
-                // Cobrado (dinero retirado por el supervisor)
-                const sellerCobros = (allCobros || []).filter((c: any) => {
-                  const isSeller = c.id_vendedor === seller.id;
-                  const inRange = c.fecha >= reportFilterFechaInicio && c.fecha <= reportFilterFechaFin;
-                  return isSeller && inRange;
-                });
-                const cobrado = sellerCobros.reduce((sum: number, c: any) => sum + c.monto_cs + (c.monto_usd * config.tasa_cambio), 0);
-
-                // Fórmulas financieras estrictas
-                const ganancia = (vendido - totalAPagar) + ingresos;
-                const total = (vendido - pagado) + ingresos - cobrado;
-
-                // Formato simple y limpio
-                const formatVal = (val: number) => {
-                  return val.toLocaleString("es-ES", { maximumFractionDigits: 0 });
-                };
-
-                return (
-                  <div key={seller.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-200 mb-4 text-left">
-                    <div className="flex justify-between items-start mb-3">
-                      <span className="text-lg font-bold text-gray-800">{seller.nombre}</span>
-                      <div className="text-right">
-                        <span className="text-xs text-gray-500 block">Vendido: {formatVal(vendido)}</span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      {/* Columna Izquierda (Flujo de Caja) */}
-                      <div className="text-gray-700 space-y-1 text-xs">
-                        <div>Pagado: {formatVal(pagado)}</div>
-                        <div>Ingresos: {formatVal(ingresos)}</div>
-                        <div>Total a pagar: {formatVal(totalAPagar)}</div>
-                        <div>Cobrado: {formatVal(cobrado)}</div>
-                      </div>
-
-                      {/* Columna Derecha (Métricas Clave) */}
-                      <div className="text-right text-xs space-y-1.5 flex flex-col justify-end">
-                        <div className="text-blue-700 font-bold">
-                          Ganancia: {formatVal(ganancia)}
-                        </div>
-                        <div className="text-blue-700 font-bold">
-                          Total: {formatVal(total)}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+            {arqueoData.map(ad => (
+              <FacturacionVendedorCard
+                key={ad.seller.id}
+                nombreVendedor={ad.seller.nombre}
+                vendido={ad.vendido}
+                pagado={ad.pagado}
+                ingresos={ad.ingresos}
+                totalAPagar={ad.totalAPagar}
+                cobrado={ad.cobrado}
+                ganancia={ad.ganancia}
+                total={ad.total}
+              />
+            ))}
           </div>
+
+          {/* Resumen global de facturación */}
+          {(() => {
+            const sumFacturado = arqueoData.reduce((a, d) => a + d.vendido, 0);
+            const sumIngresos = arqueoData.reduce((a, d) => a + d.ingresos, 0);
+            const sumAPagar = arqueoData.reduce((a, d) => a + d.totalAPagar, 0);
+            const sumCobro = arqueoData.reduce((a, d) => a + d.cobrado, 0);
+            const sumPagado = arqueoData.reduce((a, d) => a + d.pagado, 0);
+            const sumTotal = arqueoData.reduce((a, d) => a + d.total, 0);
+            return (
+              <ResumenFacturacionCard
+                facturado={sumFacturado}
+                ingresos={sumIngresos}
+                aPagar={sumAPagar}
+                cobro={sumCobro}
+                pagado={sumPagado}
+                total={sumTotal}
+              />
+            );
+          })()}
         </div>
       )}
 

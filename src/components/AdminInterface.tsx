@@ -208,6 +208,7 @@ export default function AdminInterface({
   const [resultFechasDia, setResultFechasDia] = useState("01");
   const [resultFechasMes, setResultFechasMes] = useState("Enero");
   const [fechaResultadosInput, setFechaResultadosInput] = useState(new Date().toISOString().substring(0, 10));
+  const [resultadoEditando, setResultadoEditando] = useState<any>(null);
 
   // Limits (Límites) Section States
   const [limitsList, setLimitsList] = useState<any[]>([]);
@@ -1130,6 +1131,10 @@ export default function AdminInterface({
 
   // Delete draw schedule
   const handleDeleteSorteo = async (sortId: string) => {
+    if (!window.confirm("¿Está seguro que desea eliminar este sorteo? Esta acción es irreversible.")) {
+      return;
+    }
+
     const updatedSorteos = config.sorteos.filter(s => s.id !== sortId);
 
     const success = await onUpdateConfig({ sorteos: updatedSorteos });
@@ -1234,7 +1239,7 @@ export default function AdminInterface({
     setSuccessText(null);
 
     try {
-      const res = await fetch(`/api/resultados?id=${resId}`, {
+      const res = await fetch(`/api/resultados/${resId}`, {
         method: "DELETE"
       });
 
@@ -2693,7 +2698,7 @@ export default function AdminInterface({
 
                     <div>
                       {(() => {
-                        const matchedSorteo = config.sorteos.find(s => s.nombre === selectedSorteoResultados);
+                        const matchedSorteo = config.sorteos.find(s => s.id === selectedSorteoResultados);
                         const matchedJuego = matchedSorteo ? matchedSorteo.juego : "";
 
                         if (matchedJuego === "Fechas") {
@@ -3139,8 +3144,12 @@ export default function AdminInterface({
                       .reduce((sum, s) => sum + (s.premio_posible_cs || 0), 0);
 
                     // Ingresos: inyecciones de caja del supervisor/administrador
-                    // TODO: implementar endpoint/UI para registrar inyecciones de caja
-                    const sumIngresosCs = 0;
+                    const sellerIngresos = ((config as any).ingresos || []).filter((i: any) => {
+                      const isSeller = i.id_vendedor === seller.id;
+                      const inRange = i.fecha >= reportFilterFechaInicio && i.fecha <= reportFilterFechaFin;
+                      return isSeller && inRange;
+                    });
+                    const sumIngresosCs = sellerIngresos.reduce((sum: number, i: any) => sum + i.monto_cs + (i.monto_usd * config.tasa_cambio), 0);
 
                     // Cobrado: dinero retirado por el supervisor
                     const sellerCobros = (config.cobros || []).filter((c: any) => {
