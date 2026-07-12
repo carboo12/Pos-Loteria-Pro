@@ -1,5 +1,6 @@
 import { X, Share2, Printer, CheckCircle, Smartphone, Lock } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
+import { toBlob } from "html-to-image";
 
 import { Venta, Configuracion } from "../types";
 import { QRCodeSVG } from "qrcode.react";
@@ -87,6 +88,7 @@ function calculatePrizeMultiplier(juego: string, sorteo: string): number {
 export default function TicketPreviewModal({ ticket, config, onClose, userRole = "vendedor", serverTime }: TicketPreviewModalProps) {
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const ticketRenderRef = useRef<HTMLDivElement>(null);
 
   // Compute server-synced reference time for draw close check
   const syncedNow = (() => {
@@ -191,19 +193,19 @@ ${config.formato_ticket.mensaje_pie}
 
   const generarTextoTicketRaw = (): string => {
     let t = "";
-    t += "        LA NUEVA ERA\n";
-    t += "       pida su ticket\n";
-    t += "--------------------------------\n";
-    t += `N° TICKET:           #${ticket.numero_ticket}\n`;
-    t += `FECHA: ${ticket.timestamp_servidor}\n`;
-    t += `VENDEDOR:                  ${ticket.nombre_vendedor || 'JOSE'}\n`;
-    t += `CLIENTE:               ${ticket.nombre_cliente || 'GENERICO'}\n`;
-    t += "--------------------------------\n";
+    t += "[image:https://rapigestion-2.firebasestorage.app/logo_print.png]\n";
+    t += "         LA NUEVA ERA\n";
+    t += "        pida su ticket\n";
+    t += "------------------------------\n";
+    t += `TICKET:            #${ticket.numero_ticket}\n`;
+    t += `FECHA: ${ticket.timestamp_servidor.substring(0, 10)}\n`;
+    t += `VEND: ${ticket.nombre_vendedor || 'JOSE'}  CLI: ${ticket.nombre_cliente || 'GENERICO'}\n`;
+    t += "------------------------------\n";
     t += `            ${ticket.juego}\n`;
-    t += `     ${ticket.sorteo || ''}\n`;
-    t += "--------------------------------\n";
-    t += "NUM.         MONTO        PREMIO\n";
-    t += "--------------------------------\n";
+    t += `    ${ticket.sorteo || ''}\n`;
+    t += "------------------------------\n";
+    t += "NUM.   MONTO   PREMIO\n";
+    t += "------------------------------\n";
 
     const jugadas = ticket.jugadas && ticket.jugadas.length > 0
       ? ticket.jugadas
@@ -211,16 +213,18 @@ ${config.formato_ticket.mensaje_pie}
 
     jugadas.forEach((j: any) => {
       const num = j.numero.toString().padStart(2, '0');
-      const monto = `C$ ${parseFloat(j.monto).toFixed(2)}`.padEnd(12, ' ');
-      const premio = `C$ ${parseFloat(j.premio_posible).toFixed(2)}`.padStart(10, ' ');
-      t += `${num}           ${monto}${premio}\n`;
+      const monto = `C$${parseFloat(j.monto).toFixed(0)}`.padEnd(9, ' ');
+      const premio = `C$${parseFloat(j.premio_posible).toFixed(0)}`.padStart(9, ' ');
+      t += `${num}     ${monto}${premio}\n`;
     });
 
-    t += "--------------------------------\n";
-    t += `TOTAL:               C$ ${parseFloat(ticket.monto_pago.toString()).toFixed(2)}\n`;
-    t += "--------------------------------\n";
-    t += "        ESTADO DEL TICKET\n";
-    t += "        PENDIENTE DE JUGAR\n\n\n\n";
+    t += "------------------------------\n";
+    t += `TOTAL:           C$${parseFloat(ticket.monto_pago.toString()).toFixed(2)}\n`;
+    t += "------------------------------\n";
+    t += `FIRMA: ${ticket.firma_digital || 'XXXX-XX'}\n`;
+    t += "------------------------------\n";
+    t += `\n[qr:${window.location.origin}/verificar/${ticket.numero_ticket}]\n`;
+    t += "\n\n\n\n";
     return t;
   };
 
@@ -246,10 +250,38 @@ ${config.formato_ticket.mensaje_pie}
     }
   };
 
-  const handleShare = () => {
-    const textoCodificado = encodeURIComponent(ticketText);
-    window.open(`https://api.whatsapp.com/send?text=${textoCodificado}`, '_blank');
-  };
+  const handleShare = useCallback(async () => {
+    setSharing(true);
+    try {
+      const el = ticketRenderRef.current;
+      if (!el) throw new Error("Elemento del ticket no encontrado");
+
+      const blob = await toBlob(el, {
+        pixelRatio: 3,
+        cacheBust: true,
+        style: { backgroundColor: '#ffffff' },
+      });
+      if (!blob) throw new Error("No se pudo generar la imagen");
+
+      const file = new File([blob], `ticket_${ticket.numero_ticket}.png`, { type: 'image/png' });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `Ticket #${ticket.numero_ticket}`,
+        });
+      } else {
+        const textoCodificado = encodeURIComponent(ticketText);
+        window.open(`https://api.whatsapp.com/send?text=${textoCodificado}`, '_blank');
+      }
+    } catch (error) {
+      console.error("Error al compartir imagen nativa:", error);
+      const textoCodificado = encodeURIComponent(ticketText);
+      window.open(`https://api.whatsapp.com/send?text=${textoCodificado}`, '_blank');
+    } finally {
+      setSharing(false);
+    }
+  }, [ticket, ticketText]);
 
   const fallbackCopy = () => {
     navigator.clipboard.writeText(ticketText);
@@ -281,7 +313,7 @@ ${config.formato_ticket.mensaje_pie}
 
         {/* Thermal Ticket Render */}
         <div className="overflow-y-auto max-h-[60vh] bg-white flex justify-center border-b border-gray-200">
-          <div id="thermal-ticket-render" className="bg-white px-6 py-6 w-full font-mono text-sm text-black relative">
+          <div ref={ticketRenderRef} id="thermal-ticket-render" className="bg-white px-6 py-6 w-full font-mono text-sm text-black relative">
             
             {/* Ticket Brand Header */}
             <div className="flex justify-center mb-1">
