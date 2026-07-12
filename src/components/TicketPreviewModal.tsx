@@ -1,6 +1,6 @@
 import { X, Share2, Printer, CheckCircle, Smartphone, Lock } from "lucide-react";
-import { useState, useEffect } from "react";
-import { toBlob } from "html-to-image";
+import { useState } from "react";
+
 import { Venta, Configuracion } from "../types";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -87,41 +87,6 @@ function calculatePrizeMultiplier(juego: string, sorteo: string): number {
 export default function TicketPreviewModal({ ticket, config, onClose, userRole = "vendedor", serverTime }: TicketPreviewModalProps) {
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
-  const [imageReady, setImageReady] = useState(false);
-
-  useEffect(() => {
-    const preGenerateImage = async () => {
-      try {
-        // Esperar 400ms para garantizar que la fuente mono, el logo y el DOM estén completamente renderizados
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        const ticketElement = document.getElementById("thermal-ticket-render");
-        if (!ticketElement) return;
-
-        // Capturar usando html-to-image a 3x pixelRatio para HD absoluto en la ticketera física
-        const blob = await toBlob(ticketElement, { 
-          pixelRatio: 3, 
-          cacheBust: true,
-          style: {
-            backgroundColor: '#ffffff'
-          }
-        });
-
-        if (blob) {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            (ticket as any).imagenCompletaUrlOrBase64 = reader.result as string;
-            setImageReady(true);
-            console.log("Imagen de alta definición pre-generada y almacenada en ticket.imagenCompletaUrlOrBase64");
-          };
-          reader.readAsDataURL(blob);
-        }
-      } catch (err) {
-        console.error("Error pre-generando la imagen nativa:", err);
-      }
-    };
-
-    preGenerateImage();
-  }, [ticket]);
 
   // Compute server-synced reference time for draw close check
   const syncedNow = (() => {
@@ -224,46 +189,66 @@ ${config.formato_ticket.mensaje_pie}
 --------------------------------
   `.trim();
 
-  const ejecutarFallbackWhatsApp = () => {
-    const textoCodificado = encodeURIComponent(ticketText);
-    window.open(`https://api.whatsapp.com/send?text=${textoCodificado}`, '_blank');
+  const generarTextoTicketRaw = (): string => {
+    let t = "";
+    t += "        LA NUEVA ERA\n";
+    t += "       pida su ticket\n";
+    t += "--------------------------------\n";
+    t += `N° TICKET:           #${ticket.numero_ticket}\n`;
+    t += `FECHA: ${ticket.timestamp_servidor}\n`;
+    t += `VENDEDOR:                  ${ticket.nombre_vendedor || 'JOSE'}\n`;
+    t += `CLIENTE:               ${ticket.nombre_cliente || 'GENERICO'}\n`;
+    t += "--------------------------------\n";
+    t += `            ${ticket.juego}\n`;
+    t += `     ${ticket.sorteo || ''}\n`;
+    t += "--------------------------------\n";
+    t += "NUM.         MONTO        PREMIO\n";
+    t += "--------------------------------\n";
+
+    const jugadas = ticket.jugadas && ticket.jugadas.length > 0
+      ? ticket.jugadas
+      : [{ numero: ticket.numero_jugado, monto: ticket.monto_pago, premio_posible: potentialPrizeCs }];
+
+    jugadas.forEach((j: any) => {
+      const num = j.numero.toString().padStart(2, '0');
+      const monto = `C$ ${parseFloat(j.monto).toFixed(2)}`.padEnd(12, ' ');
+      const premio = `C$ ${parseFloat(j.premio_posible).toFixed(2)}`.padStart(10, ' ');
+      t += `${num}           ${monto}${premio}\n`;
+    });
+
+    t += "--------------------------------\n";
+    t += `TOTAL:               C$ ${parseFloat(ticket.monto_pago.toString()).toFixed(2)}\n`;
+    t += "--------------------------------\n";
+    t += "        ESTADO DEL TICKET\n";
+    t += "        PENDIENTE DE JUGAR\n\n\n\n";
+    return t;
   };
 
-  const shareTicketImage = async () => {
+  const handlePrintRaw = async () => {
     setSharing(true);
     try {
-      // Extraer directamente la imagen en alta definición que ya existe en el ticket
-      const base64Data = (ticket as any).imagenCompletaUrlOrBase64;
-      if (!base64Data) {
-        throw new Error("Imagen de alta definición del ticket no encontrada o no cargada todavía.");
-      }
-      
-      const response = await fetch(base64Data);
-      const blob = await response.blob();
-      const file = new File([blob], `ticket_${ticket.numero_ticket}.png`, { type: 'image/png' });
+      const textoTicket = generarTextoTicketRaw();
+      const blob = new Blob([textoTicket], { type: 'text/plain;charset=utf-8' });
+      const file = new File([blob], `ticket_${ticket.numero_ticket}.txt`, { type: 'text/plain' });
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
-          title: `Ticket #${ticket.numero_ticket}`,
+          title: `Imprimir Ticket #${ticket.numero_ticket}`,
         });
       } else {
-        ejecutarFallbackWhatsApp();
+        alert("Tu navegador no soporta el envío de archivos de texto.");
       }
     } catch (error) {
-      console.error("Error al despachar imagen nativa:", error);
-      ejecutarFallbackWhatsApp();
+      console.error("Error al despachar texto plano:", error);
     } finally {
       setSharing(false);
     }
   };
 
-  const handlePrint = () => {
-    shareTicketImage();
-  };
-
   const handleShare = () => {
-    shareTicketImage();
+    const textoCodificado = encodeURIComponent(ticketText);
+    window.open(`https://api.whatsapp.com/send?text=${textoCodificado}`, '_blank');
   };
 
   const fallbackCopy = () => {
@@ -486,38 +471,30 @@ ${config.formato_ticket.mensaje_pie}
         <div className="p-4 bg-white grid grid-cols-2 gap-3 border-t border-gray-100">
           <button
             id="print-ticket-btn"
-            onClick={handlePrint}
-            disabled={isBlocked || !imageReady || sharing}
+            onClick={handlePrintRaw}
+            disabled={isBlocked || sharing}
             className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center cursor-pointer shadow-sm border-b-2 ${
-              isBlocked || !imageReady || sharing
+              isBlocked || sharing
                 ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed border-b-0" 
                 : "bg-blue-900 text-white hover:bg-blue-800 active:scale-95 border-blue-950"
             }`}
           >
-            {!imageReady ? (
-              <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <Printer className="w-4 h-4" />
-            )}
-            <span>{!imageReady ? "Cargando..." : "Imprimir"}</span>
+            <Printer className="w-4 h-4" />
+            <span>Imprimir</span>
           </button>
           
           <button
             id="share-ticket-btn"
             onClick={handleShare}
-            disabled={isBlocked || !imageReady || sharing}
+            disabled={isBlocked}
             className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center shadow-sm border-b-2 ${
-              isBlocked || !imageReady || sharing
+              isBlocked
                 ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed border-b-0" 
                 : "bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95 border-emerald-700 cursor-pointer"
             }`}
           >
-            {sharing || !imageReady ? (
-              <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <Share2 className="w-4 h-4" />
-            )}
-            <span>{!imageReady ? "Cargando..." : (sharing ? "Procesando..." : "WhatsApp")}</span>
+            <Share2 className="w-4 h-4" />
+            <span>WhatsApp</span>
           </button>
         </div>
 
