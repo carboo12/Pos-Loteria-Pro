@@ -375,9 +375,6 @@ ${config.formato_ticket.mensaje_pie}
                       <span>Total:</span>
                       <span>{ticket.moneda} {ticket.monto_pago.toFixed(2)}</span>
                     </div>
-                    <div className="text-[10px] font-black text-emerald-600 mt-2 text-center">
-                      PREMIO POSIBLE TOTAL: C$ {potentialPrizeCs.toFixed(2)}
-                    </div>
                   </div>
                 );
               })()}
