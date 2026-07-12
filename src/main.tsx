@@ -36,17 +36,51 @@ window.fetch = async (input, init) => {
 };
 import './index.css';
 
-// Register Service Worker + capture install prompt for Android
-let deferredPrompt: any = null;
+// Register Service Worker with auto-update
+const registerServiceWorker = () => {
+  if (!("serviceWorker" in navigator)) return;
+
+  let registration: ServiceWorkerRegistration | null = null;
+  let refreshing = false;
+
+  // Listen for the 'controllerchange' event to reload when a new SW takes over
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshing) return;
+    refreshing = true;
+    console.log("Nueva versión del Service Worker activa. Recargando...");
+    window.location.reload();
+  });
+
+  navigator.serviceWorker.register("/sw.js").then((reg) => {
+    registration = reg;
+    console.log("Service Worker registrado:", reg.scope);
+
+    // Check if a new SW is waiting to activate
+    if (reg.installing) {
+      console.log("SW instalando...");
+    } else if (reg.waiting) {
+      console.log("Nueva versión detectada (waiting). Forzando activación...");
+      reg.waiting.postMessage({ type: "SKIP_WAITING" });
+    }
+
+    // Detect new SW on updatefound
+    reg.addEventListener("updatefound", () => {
+      const newWorker = reg.installing;
+      if (!newWorker) return;
+
+      newWorker.addEventListener("statechange", () => {
+        if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+          console.log("Nueva versión instalada. Forzando activación...");
+          newWorker.postMessage({ type: "SKIP_WAITING" });
+        }
+      });
+    });
+  }).catch((err) => console.error("Error al registrar SW:", err));
+};
 
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js")
-      .then((reg) => {
-        console.log("Service Worker registrado:", reg.scope);
-      })
-      .catch((err) => console.error("Error al registrar SW:", err));
-  });
+  // Delay registration slightly to not block initial render
+  window.addEventListener("load", () => registerServiceWorker());
 }
 
 window.addEventListener("beforeinstallprompt", (e: Event) => {
