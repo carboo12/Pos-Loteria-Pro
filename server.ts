@@ -19,13 +19,13 @@ const checkAuth = async (req: express.Request, res: express.Response, next: expr
   }
   try {
     const token = authHeader.split(" ")[1];
-    
+
     // 1. Fallback local: Si el token existe en sesiones locales, permitir acceso
     if (localSessions.has(token)) {
       (req as any).user = localSessions.get(token);
       return next();
     }
-    
+
     // 2. Firebase ID Token original
     const decoded = await getAuth().verifyIdToken(token);
     (req as any).user = decoded;
@@ -73,7 +73,7 @@ function getFirestoreInstance() {
       "grpc.keepalive_timeout_ms": 10000
     }
   };
-  
+
   const firestoreDb = firestoreDbId ? getFirestore(firestoreDbId) : getFirestore();
   firestoreDb.settings(settings);
   return firestoreDb;
@@ -102,14 +102,14 @@ function initDatabase() {
         if (!parsed.configuracion.limites_numeros) parsed.configuracion.limites_numeros = [];
         if (!parsed.configuracion.resultados) parsed.configuracion.resultados = [];
         if (!parsed.configuracion.cobros) parsed.configuracion.cobros = [];
-        
+
         // Migrate old default "Indicaciones del Ticket" value
         if (parsed.configuracion.formato_ticket?.ruc === "RUC-J0310000123456") {
           parsed.configuracion.formato_ticket.ruc = "exiga su ticket en su compra de su numero.";
         }
-        
+
         if (!parsed.usuarios) parsed.usuarios = [];
-        
+
         // Migrate existing users to the full schema
         parsed.usuarios = parsed.usuarios.map((u: any) => {
           const isOnline = u.estado === "online" || u.conexion === "online";
@@ -140,15 +140,15 @@ function initDatabase() {
         });
 
         if (!parsed.usuarios.some((u: any) => u.rol === "supervisor")) {
-          parsed.usuarios.push({ 
-            id: "super_1", 
-            nombre: "Supervisor Managua", 
-            usuario: "supermanagua", 
-            rol: "supervisor", 
-            estado: "activo", 
-            conexion: "online", 
-            activo: true, 
-            region: "Nicaragua", 
+          parsed.usuarios.push({
+            id: "super_1",
+            nombre: "Supervisor Managua",
+            usuario: "supermanagua",
+            rol: "supervisor",
+            estado: "activo",
+            conexion: "online",
+            activo: true,
+            region: "Nicaragua",
             email: "supervisor@loteria.com",
             id_supervisor: "",
             vendedoresAsignados: ["vend_1", "vend_2"]
@@ -167,8 +167,10 @@ function initDatabase() {
 
   const initialDB = {
     usuarios: [
-      { id: "admin_1",
-      requiereCambioPassword: true, nombre: "Administrador Global", usuario: "admin", rol: "administrador", estado: "activo", conexion: "online", activo: true, region: "Nicaragua", email: "carboo12@gmail.com", id_supervisor: "", vendedoresAsignados: [] }
+      {
+        id: "admin_1",
+        requiereCambioPassword: true, nombre: "Administrador Global", usuario: "admin", rol: "administrador", estado: "activo", conexion: "online", activo: true, region: "Nicaragua", email: "carboo12@gmail.com", id_supervisor: "", vendedoresAsignados: []
+      }
     ],
     configuracion: {
       tasa_cambio: 36.50,
@@ -361,7 +363,7 @@ function findServiceAccountPath(): string | null {
   if (envPath && fs.existsSync(envPath)) {
     return envPath;
   }
-  
+
   try {
     const files = fs.readdirSync(process.cwd());
     const svcFile = files.find(f => f.includes("firebase-adminsdk") && f.endsWith(".json"));
@@ -424,9 +426,9 @@ async function syncDatabaseUsersToFirebaseAuth() {
   }
 
   console.log("[Firebase Auth Sync] Sincronizando usuarios con Firebase Auth...");
-  
+
   const validUsers = db.usuarios.filter((u: any) => !!u.email);
-  
+
   // Procesamiento paralelo con Promise.allSettled
   await Promise.allSettled(
     validUsers.map(async (u: any) => {
@@ -608,13 +610,13 @@ app.get("/api/reloj", (req, res) => {
 // Autenticación Híbrida (Login Endpoint)
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
-  
+
   if (!email || !password) {
     return res.status(400).json({ error: "Email y contraseña son requeridos." });
   }
 
   const user = db.usuarios.find((u: any) => u.email && u.email.toLowerCase() === email.toLowerCase());
-  
+
   if (!user) {
     return res.status(401).json({ error: "Credenciales incorrectas o usuario no encontrado." });
   }
@@ -671,7 +673,7 @@ app.post("/api/setup-admin", async (req, res) => {
 
   const adminEmail = req.body.email || "admin@sistema.com";
   let userInDb = db.usuarios.find((u: any) => u.email.toLowerCase() === adminEmail.toLowerCase());
-  
+
   if (!userInDb) {
     userInDb = {
       id: "admin_1",
@@ -775,7 +777,7 @@ app.post("/api/usuarios", checkAuth, (req, res) => {
   };
 
   if (newUser.password) { newUser.password = bcrypt.hashSync(newUser.password, 10); }
-db.usuarios.push(newUser);
+  db.usuarios.push(newUser);
 
   // If this is a supervisor and has assigned vendors, update those vendors' supervisor ID
   if (newUser.rol === "supervisor" && newUser.vendedoresAsignados.length > 0) {
@@ -814,7 +816,7 @@ app.put("/api/usuarios/:id", (req, res) => {
   if (rol !== undefined) {
     user.rol = rol === "admin" || rol === "administrador" ? "administrador" : (rol === "supervisor" ? "supervisor" : "vendedor");
   }
-  
+
   if (estado !== undefined) {
     user.estado = estado === "activo" ? "activo" : "inactivo";
     user.activo = (estado === "activo");
@@ -899,10 +901,10 @@ app.get("/api/limites-numeros", (req, res) => {
 });
 
 app.post("/api/limites-numeros", (req, res) => {
-  const { 
-    juego, 
-    numero, 
-    max_monto, 
+  const {
+    juego,
+    numero,
+    max_monto,
     id_vendedor,
     vendedorId,
     pais,
@@ -925,7 +927,7 @@ app.post("/api/limites-numeros", (req, res) => {
     numero: resolvedNumero,
     max_monto: resolvedMonto,
     id_vendedor: resolvedVendedor,
-    
+
     // extra granular keys
     vendedorId: resolvedVendedor,
     pais: pais || "",
@@ -1139,9 +1141,9 @@ app.get("/api/ping", (req, res) => {
 app.get("/api/ventas", (req, res) => {
   if (req.query.ticket) {
     const ticketId = (req.query.ticket as string).toUpperCase();
-    const found = db.ventas.find((v: any) => 
-      v.id === ticketId || 
-      v.numero_ticket === ticketId || 
+    const found = db.ventas.find((v: any) =>
+      v.id === ticketId ||
+      v.numero_ticket === ticketId ||
       (v.firma_digital && v.firma_digital.toUpperCase() === ticketId)
     );
     return res.json(found ? [found] : []);
@@ -1169,11 +1171,11 @@ app.post("/api/ventas", checkAuth, (req, res) => {
   // Let's locate the selected draw schedule
   const selectedSorteo = db.configuracion.sorteos.find((s: any) => s.nombre === sorteo && s.juego === juego);
   const now = new Date();
-  
+
   if (selectedSorteo) {
     const [cierreHour, cierreMin] = selectedSorteo.hora_cierre.split(":").map(Number);
     const [sorteoHour, sorteoMin] = selectedSorteo.hora_sorteo.split(":").map(Number);
-    
+
     // We convert current server clock time to compare hours/minutes
     const currentHour = now.getHours();
     const currentMin = now.getMinutes();
@@ -1181,7 +1183,7 @@ app.post("/api/ventas", checkAuth, (req, res) => {
 
     // Check if we are past the draw closure time for TODAY'S draw
     const isPastCierre = (currentHour > cierreHour) || (currentHour === cierreHour && currentMin >= cierreMin);
-    
+
     // If it's after closure, it is BLOCKED (anti-fraude)
     if (isPastCierre) {
       return res.status(400).json({
@@ -1192,7 +1194,7 @@ app.post("/api/ventas", checkAuth, (req, res) => {
 
   // 2.5 LIMIT CHECK (Techo de venta granular)
   const limits = db.configuracion.limites_numeros || [];
-  
+
   // Helper to format 24h string to standard AM/PM format
   const formatHourToAmPm = (timeStr: string): string => {
     if (!timeStr) return "";
@@ -1237,8 +1239,8 @@ app.post("/api/ventas", checkAuth, (req, res) => {
     // 5. Match Sorteo
     const limitSorteoName = l.sorteo || "";
     const sorteoMatch = !limitSorteoName || limitSorteoName === "TODOS" ||
-                        sorteo.toLowerCase().includes(limitSorteoName.toLowerCase()) ||
-                        limitSorteoName.toLowerCase().includes(sorteo.toLowerCase());
+      sorteo.toLowerCase().includes(limitSorteoName.toLowerCase()) ||
+      limitSorteoName.toLowerCase().includes(sorteo.toLowerCase());
     if (!sorteoMatch) return false;
 
     // 6. Match Sorteo Hour
@@ -1255,22 +1257,22 @@ app.post("/api/ventas", checkAuth, (req, res) => {
   for (const applicableLimit of applicableLimits) {
     const limitMontoCs = Number(applicableLimit.max_monto ?? applicableLimit.montoMaximo ?? applicableLimit.techo_dinero);
     const todayStr = now.toISOString().split("T")[0];
-    
+
     // Sum previous active sales of this number matching this limit today
     const matchingSales = db.ventas.filter((v: any) => {
       if (v.anulado) return false;
-      
+
       // Match criteria of the limit
       const limitJuego = applicableLimit.juego || "";
       if (limitJuego && limitJuego !== "TODOS" && v.juego.toLowerCase() !== limitJuego.toLowerCase()) return false;
-      
+
       const limitNum = applicableLimit.numero ?? applicableLimit.numero_jugado ?? "TODOS";
       if (limitNum !== "TODOS" && String(v.numero_jugado) !== String(limitNum)) return false;
 
       const limitSorteoName = applicableLimit.sorteo || "";
-      if (limitSorteoName && limitSorteoName !== "TODOS" && 
-          !v.sorteo.toLowerCase().includes(limitSorteoName.toLowerCase()) &&
-          !limitSorteoName.toLowerCase().includes(v.sorteo.toLowerCase())) return false;
+      if (limitSorteoName && limitSorteoName !== "TODOS" &&
+        !v.sorteo.toLowerCase().includes(limitSorteoName.toLowerCase()) &&
+        !limitSorteoName.toLowerCase().includes(v.sorteo.toLowerCase())) return false;
 
       const limitSellerId = applicableLimit.id_vendedor || applicableLimit.vendedorId || "";
       if (limitSellerId && limitSellerId !== "TODOS" && v.id_vendedor !== limitSellerId) return false;
@@ -1297,11 +1299,11 @@ app.post("/api/ventas", checkAuth, (req, res) => {
 
     if (totalPrevSalesCs + requestedMontoCs > limitMontoCs) {
       const availableCs = Math.max(0, limitMontoCs - totalPrevSalesCs);
-      const availableMsg = moneda === "C$" 
-        ? `C$ ${availableCs.toFixed(2)}` 
+      const availableMsg = moneda === "C$"
+        ? `C$ ${availableCs.toFixed(2)}`
         : `$ ${(availableCs / db.configuracion.tasa_cambio).toFixed(2)}`;
-        
-      const limitTypeMsg = (!applicableLimit.id_vendedor || applicableLimit.id_vendedor === "TODOS") 
+
+      const limitTypeMsg = (!applicableLimit.id_vendedor || applicableLimit.id_vendedor === "TODOS")
         ? "GLOBAL" : "INDIVIDUAL (Vendedor)";
 
       return res.status(400).json({
@@ -1396,9 +1398,9 @@ app.post("/api/ventas/:id/anular", (req, res) => {
       const [cierreHour, cierreMin] = selectedSorteo.hora_cierre.split(":").map(Number);
       const currentHour = now.getHours();
       const currentMin = now.getMinutes();
-      
+
       const isPastCierre = (currentHour > cierreHour) || (currentHour === cierreHour && currentMin >= cierreMin);
-      
+
       if (isPastCierre) {
         return res.status(400).json({
           error: `VENTA BLOQUEADA: El sorteo ${sale.sorteo} ya cerró a las ${selectedSorteo.hora_cierre}. No se puede anular.`
@@ -1460,21 +1462,21 @@ app.post("/api/ventas/:id/pagar", (req, res) => {
 
       sale.estado = "pagado";
       sale.premio_posible_cs = premioReal; // Sobrescribir con el calculado por el servidor
-      
+
       saveToDB();
-      return res.json({ 
-        message: "¡Ganador!", 
-        ganador: true, 
+      return res.json({
+        message: "¡Ganador!",
+        ganador: true,
         ticket: sale,
-        monto_ganado_cs: premioReal 
+        monto_ganado_cs: premioReal
       });
     } else {
       sale.estado = "perdedor";
       saveToDB();
-      return res.json({ 
-        message: "Ticket No Premiado.", 
-        ganador: false, 
-        ticket: sale 
+      return res.json({
+        message: "Ticket No Premiado.",
+        ganador: false,
+        ticket: sale
       });
     }
   } finally {
@@ -1561,7 +1563,7 @@ app.patch("/api/cierres/:id", (req, res) => {
 function getOrCreateResumenDiario(id_vendedor: string, nombre_vendedor: string, dateStr: string) {
   const resumenId = `${id_vendedor}_${dateStr}`;
   let resumen = db.resumenes_diarios.find((r: any) => r.id === resumenId);
-  
+
   if (!resumen) {
     resumen = {
       id: resumenId,
@@ -1587,10 +1589,10 @@ app.post("/api/resumen-diario/init", (req, res) => {
   if (!id_vendedor || !nombre_vendedor) {
     return res.status(400).json({ error: "Faltan datos." });
   }
-  
+
   const today = new Date();
   const dateStr = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, '0') + "-" + String(today.getDate()).padStart(2, '0');
-  
+
   const resumen = getOrCreateResumenDiario(id_vendedor, nombre_vendedor, dateStr);
   res.json({ success: true, resumen });
 });
@@ -1598,18 +1600,18 @@ app.post("/api/resumen-diario/init", (req, res) => {
 // Endpoint de migración histórica (Backfill)
 app.post("/api/admin/backfill-resumenes", (req, res) => {
   const { default_status = 'pagado' } = req.body; // Puede ser 'pagado' o 'pendiente'
-  
+
   // 1. Obtener todas las ventas no anuladas
   const ventasValidas = db.ventas.filter((v: any) => v.estado !== 'anulado');
-  
+
   // 2. Agrupar por vendedor y fecha
   const groups: Record<string, { id_vendedor: string, nombre_vendedor: string, fecha: string, vendido: number, pagado: number }> = {};
-  
+
   ventasValidas.forEach((v: any) => {
     const d = new Date(v.timestamp);
     const dateStr = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, '0') + "-" + String(d.getDate()).padStart(2, '0');
     const key = `${v.id_vendedor}_${dateStr}`;
-    
+
     if (!groups[key]) {
       groups[key] = {
         id_vendedor: v.id_vendedor,
@@ -1619,19 +1621,19 @@ app.post("/api/admin/backfill-resumenes", (req, res) => {
         pagado: 0
       };
     }
-    
+
     groups[key].vendido += v.total_cs || 0;
     if (v.estado === 'pagado') {
       groups[key].pagado += v.monto_ganado_cs || 0;
     }
   });
-  
+
   // 3. Upsert en resumenes_diarios
   let migrados = 0;
   for (const key in groups) {
     const g = groups[key];
     let resumen = db.resumenes_diarios.find((r: any) => r.id === key);
-    
+
     if (!resumen) {
       resumen = {
         id: key,
@@ -1655,7 +1657,7 @@ app.post("/api/admin/backfill-resumenes", (req, res) => {
       migrados++;
     }
   }
-  
+
   saveToDB();
   res.json({ success: true, message: `Migración completada. ${migrados} resúmenes diarios actualizados/creados.` });
 });
@@ -1663,19 +1665,19 @@ app.post("/api/admin/backfill-resumenes", (req, res) => {
 // Endpoint de Anulación de Cobro
 app.post("/api/cobros/:id/anular", (req, res) => {
   const { id } = req.params;
-  
+
   const cobro = db.cobros_admin.find((c: any) => c.id === id);
   if (!cobro) {
     return res.status(404).json({ error: "Cobro no encontrado." });
   }
-  
+
   if (cobro.estado === 'anulado') {
     return res.status(400).json({ error: "El cobro ya se encuentra anulado." });
   }
-  
+
   // 1. Anular el cobro
   cobro.estado = 'anulado';
-  
+
   // 2. Revertir los resumenes_diarios asociados
   let resumenesRevertidos = 0;
   db.resumenes_diarios.forEach((r: any) => {
@@ -1689,7 +1691,7 @@ app.post("/api/cobros/:id/anular", (req, res) => {
       resumenesRevertidos++;
     }
   });
-  
+
   // 3. Anular pagos de comisión relacionados
   let comisionesAnuladas = 0;
   db.pagos_comision.forEach((p: any) => {
@@ -1698,11 +1700,11 @@ app.post("/api/cobros/:id/anular", (req, res) => {
       comisionesAnuladas++;
     }
   });
-  
+
   saveToDB();
-  res.json({ 
-    success: true, 
-    message: "Cobro anulado exitosamente.", 
+  res.json({
+    success: true,
+    message: "Cobro anulado exitosamente.",
     resumenes_revertidos: resumenesRevertidos,
     comisiones_anuladas: comisionesAnuladas
   });
@@ -1714,20 +1716,20 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
   if (!id_vendedor || !fecha_inicio || !fecha_fin) {
     return res.status(400).json({ error: "Faltan parámetros" });
   }
-  
+
   const start = new Date(fecha_inicio as string).getTime();
   const end = new Date(fecha_fin as string).getTime() + 86400000;
-  
-  const ventasPeriodo = db.ventas.filter((v: any) => 
-    v.id_vendedor === id_vendedor && 
+
+  const ventasPeriodo = db.ventas.filter((v: any) =>
+    v.id_vendedor === id_vendedor &&
     new Date(v.timestamp).getTime() >= start &&
     new Date(v.timestamp).getTime() < end
   );
-  
+
   const grouped: Record<string, any> = {};
   ventasPeriodo.forEach((v: any) => {
     const d = new Date(v.timestamp);
-    const dateStr = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,'0') + "-" + String(d.getDate()).padStart(2,'0');
+    const dateStr = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, '0') + "-" + String(d.getDate()).padStart(2, '0');
     if (!grouped[dateStr]) {
       grouped[dateStr] = { vendido: 0, pagado: 0 };
     }
@@ -1738,7 +1740,7 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
       grouped[dateStr].pagado += v.monto_ganado_cs || 0;
     }
   });
-  
+
   const resumenes = [];
   let hayVentas = Object.keys(grouped).length > 0;
 
@@ -1748,9 +1750,9 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
     if (existente && existente.cierre === 'pagado') {
       continue;
     }
-    
-    const vendedorInfo = db.usuarios.find((u:any) => u.id === id_vendedor);
-    
+
+    const vendedorInfo = db.usuarios.find((u: any) => u.id === id_vendedor);
+
     resumenes.push({
       id,
       id_vendedor,
@@ -1764,7 +1766,7 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
       timestamp_actualizacion: new Date().toISOString()
     });
   }
-  
+
   if (hayVentas && resumenes.length === 0) {
     return res.json({ resumenes: [], mensaje: "Los días dentro de este rango ya han sido liquidados y cobrados anteriormente." });
   }
@@ -1774,14 +1776,14 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
 
 app.post("/api/cobros/procesar", (req, res) => {
   const { id_admin, id_supervisor, id_vendedor, rango_inicio, rango_fin, dias_cerrados, total_vendido, total_pagado, total_neto } = req.body;
-  
+
   const procesadorId = id_admin || id_supervisor;
-  const admin = db.usuarios.find((u:any) => u.id === procesadorId);
-  const vendedor = db.usuarios.find((u:any) => u.id === id_vendedor);
-  
+  const admin = db.usuarios.find((u: any) => u.id === procesadorId);
+  const vendedor = db.usuarios.find((u: any) => u.id === id_vendedor);
+
   const id_cobro = `cobro_${Date.now()}`;
   const timestamp = new Date().toISOString();
-  
+
   const nuevoCobro = {
     id: id_cobro,
     id_admin: procesadorId, // backward compatible, stores who processed it
@@ -1793,14 +1795,14 @@ app.post("/api/cobros/procesar", (req, res) => {
     total_vendido,
     total_pagado,
     total_neto,
-    dias_cerrados: dias_cerrados.map((d:any) => d.id),
+    dias_cerrados: dias_cerrados.map((d: any) => d.id),
     timestamp
   };
-  
+
   db.cobros_admin.push(nuevoCobro);
-  
+
   for (const dia of dias_cerrados) {
-    let rd = db.resumenes_diarios.find((r:any) => r.id === dia.id);
+    let rd = db.resumenes_diarios.find((r: any) => r.id === dia.id);
     if (!rd) {
       rd = { ...dia };
       db.resumenes_diarios.push(rd);
@@ -1812,15 +1814,15 @@ app.post("/api/cobros/procesar", (req, res) => {
     rd.procesado_por = procesadorId;
     rd.timestamp_actualizacion = timestamp;
   }
-  
+
   saveToDB();
   res.json({ success: true, cobro: nuevoCobro });
 });
 
 app.post("/api/pagos/registrar", (req, res) => {
   const { id_admin, id_vendedor, monto_pago, concepto, id_cobro_relacionado } = req.body;
-  const vendedor = db.usuarios.find((u:any) => u.id === id_vendedor);
-  
+  const vendedor = db.usuarios.find((u: any) => u.id === id_vendedor);
+
   const nuevoPago = {
     id: `pago_${Date.now()}`,
     id_admin,
@@ -1831,7 +1833,7 @@ app.post("/api/pagos/registrar", (req, res) => {
     id_cobro_relacionado,
     timestamp: new Date().toISOString()
   };
-  
+
   db.pagos_comision.push(nuevoPago);
   saveToDB();
   res.json({ success: true, pago: nuevoPago });
@@ -1857,16 +1859,16 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    
+
     // Asegurar que Express sirva los assets estáticos con el tipo MIME correcto
     app.use(express.static(distPath));
     app.use('/assets', express.static(path.join(distPath, "assets")));
-    
+
     // IMPORTANTE: Si un asset no existe, devolver 404, NO el index.html
     app.use('/assets', (req, res) => {
       res.status(404).send('Asset no encontrado');
     });
-    
+
     // Ruta comodín al final para el enrutamiento de la SPA
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
