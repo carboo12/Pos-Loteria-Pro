@@ -37,7 +37,7 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
   const [setupLoading, setSetupLoading] = useState(false);
   const [setupSuccessMsg, setSetupSuccessMsg] = useState<string | null>(null);
 
-  const handleSetupAdmin = async () => {
+    const handleSetupAdmin = async () => {
     setSetupLoading(true);
     setError(null);
     setSetupSuccessMsg(null);
@@ -75,21 +75,29 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
     // Bypass de desarrollo para administrador
     if (email.trim() === "carboo12@gmail.com" && password === "ld14304") {
       console.log("Bypass de desarrollo activado para administrador.");
-      const bypassUser: Usuario = {
-        id: "dev-bypass-admin",
-        nombre: "Admin Dev",
-        usuario: "admin",
-        rol: "administrador",
-        estado: "activo",
-        conexion: "online",
-        activo: true,
-        region: "Nicaragua",
-        email: "carboo12@gmail.com",
-      };
-      localStorage.setItem("localToken", "bypass-dev-admin-token");
-      localStorage.setItem("currentUser", JSON.stringify(bypassUser));
-      toast.success("¡Bienvenido Admin (Bypass de Desarrollo)!", { position: 'top-center' });
-      onLoginSuccess(bypassUser);
+      const matchedUser = users.find(u => u.email.toLowerCase() === "carboo12@gmail.com");
+      if (matchedUser) {
+        localStorage.setItem("localToken", "bypass-dev-admin-token");
+        localStorage.setItem("currentUser", JSON.stringify(matchedUser));
+        toast.success(`¡Bienvenido Admin, ${matchedUser.nombre}!`, { position: 'top-center' });
+        onLoginSuccess(matchedUser);
+      } else {
+        const fallbackUser: Usuario = {
+          id: "dev-bypass-admin",
+          nombre: "Admin Dev",
+          usuario: "admin",
+          rol: "administrador",
+          estado: "activo",
+          conexion: "online",
+          activo: true,
+          region: "Nicaragua",
+          email: "carboo12@gmail.com",
+        };
+        localStorage.setItem("localToken", "bypass-dev-admin-token");
+        localStorage.setItem("currentUser", JSON.stringify(fallbackUser));
+        toast.success("¡Bienvenido Admin (Bypass)!", { position: 'top-center' });
+        onLoginSuccess(fallbackUser);
+      }
       return;
     }
 
