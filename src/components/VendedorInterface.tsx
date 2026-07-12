@@ -28,6 +28,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Html5QrcodeScanner } from "html5-qrcode";
 import { Usuario, Configuracion, Venta, Sorteo, Jugada } from "../types";
 import TicketPreviewModal from "./TicketPreviewModal";
+import { QrScannerModal } from "./QrScannerModal";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -147,6 +148,14 @@ export default function VendedorInterface({
 
   const [qrSearchInput, setQrSearchInput] = useState("");
   const [qrSearchError, setQrSearchError] = useState<string | null>(null);
+  const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
+  const [prizeResult, setPrizeResult] = useState<{
+    show: boolean;
+    type: 'winner' | 'loser' | 'pending' | 'already_paid' | 'not_found' | 'sorteo_abierto' | 'error';
+    ticket: Venta | null;
+    monto_premio?: number;
+    message: string;
+  }>({ show: false, type: 'error', ticket: null, message: '' });
 
   // Payment states
   const [paymentResult, setPaymentResult] = useState<{ganador: boolean, message: string, monto: number} | null>(null);
@@ -433,6 +442,97 @@ export default function VendedorInterface({
     }
   };
 
+  // Verificar premio de un ticket contra resultados oficiales
+  const verificarPremioTicket = async (ticket: Venta) => {
+    // 1. Verificar si ya fue pagado
+    if (ticket.estado === 'pagado') {
+      setPrizeResult({
+        show: true,
+        type: 'already_paid',
+        ticket,
+        message: 'Este ticket ya fue pagado anteriormente.'
+      });
+      return;
+    }
+    if (ticket.anulado) {
+      setPrizeResult({
+        show: true,
+        type: 'error',
+        ticket,
+        message: 'Este ticket está anulado y no puede cobrarse.'
+      });
+      return;
+    }
+
+    // 2. Buscar el sorteo en config para verificar si tiene resultados
+    const sorteoObj = config.sorteos.find(s => s.nombre === ticket.sorteo);
+    const ticketDate = ticket.timestamp_servidor.substring(0, 10);
+
+    // 3. Buscar resultado oficial para ese sorteo y fecha
+    const resultado = (config.resultados || []).find(r =>
+      r.id_sorteo === (sorteoObj?.id || '') && r.fecha === ticketDate
+    );
+
+    if (!resultado) {
+      setPrizeResult({
+        show: true,
+        type: 'sorteo_abierto',
+        ticket,
+        message: 'El sorteo de este ticket aún no se ha realizado o no tiene resultados cargados.'
+      });
+      return;
+    }
+
+    // 4. Cruzar cada jugada contra el número ganador
+    const jugadas = ticket.jugadas || [];
+    let premioTotal = 0;
+    let aciertos: { numero: string; monto: number; premio: number }[] = [];
+
+    if (jugadas.length === 0 && ticket.numero_jugado) {
+      // Fallback para tickets antiguos sin jugadas[]
+      const ganador = resultado.numero_ganador.trim().toLowerCase();
+      const jugado = ticket.numero_jugado.trim().toLowerCase();
+
+      if (ganador === jugado) {
+        const multiplier = calculatePrizeMultiplier(ticket.juego, ticket.sorteo);
+        premioTotal = ticket.moneda === "C$"
+          ? (ticket.monto_pago * multiplier)
+          : (ticket.monto_pago * multiplier * config.tasa_cambio);
+        aciertos.push({ numero: ticket.numero_jugado, monto: ticket.monto_pago, premio: premioTotal });
+      }
+    } else {
+      for (const jugada of jugadas) {
+        const ganador = resultado.numero_ganador.trim().toLowerCase();
+        const jugado = jugada.numero.trim().toLowerCase();
+
+        if (jugado === ganador) {
+          const multiplier = calculatePrizeMultiplier(ticket.juego, ticket.sorteo);
+          let premioJugada = jugada.monto * multiplier;
+          if (ticket.moneda === "USD") premioJugada *= config.tasa_cambio;
+          premioTotal += premioJugada;
+          aciertos.push({ numero: jugada.numero, monto: jugada.monto, premio: premioJugada });
+        }
+      }
+    }
+
+    if (premioTotal > 0) {
+      setPrizeResult({
+        show: true,
+        type: 'winner',
+        ticket,
+        monto_premio: premioTotal,
+        message: `¡Ticket premiado por C$ ${premioTotal.toFixed(2)}!`
+      });
+    } else {
+      setPrizeResult({
+        show: true,
+        type: 'loser',
+        ticket,
+        message: 'Ticket no premiado. Ningún número coincide con los resultados oficiales.'
+      });
+    }
+  };
+
   const handleTicketQrSearch = async (e: FormEvent) => {
     e.preventDefault();
     setQrSearchError(null);
@@ -471,7 +571,7 @@ export default function VendedorInterface({
     );
 
     if (found) {
-      setActiveTicket(found);
+      verificarPremioTicket(found);
       setQrSearchInput("");
     } else {
       try {
@@ -479,7 +579,7 @@ export default function VendedorInterface({
         if (!response.ok) throw new Error("Error en red");
         const data = await response.json();
         if (data && data.length > 0) {
-          setActiveTicket(data[0]);
+          verificarPremioTicket(data[0]);
           setQrSearchInput("");
         } else {
           setQrSearchError(`No se encontró ningún ticket con ID, número o firma: "${query}"`);
@@ -1114,6 +1214,17 @@ export default function VendedorInterface({
             >
               <QrCode className="w-3.5 h-3.5" />
               <span>Buscar QR</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsQrScannerOpen(true)}
+              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-xl text-xs font-display font-black tracking-wider uppercase transition-colors flex items-center space-x-1 cursor-pointer shrink-0"
+              title="Escanear con cámara"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9V7a2 2 0 012-2h2M3 15v2a2 2 0 002 2h2M21 9V7a2 2 0 00-2-2h-2M21 15v2a2 2 0 01-2 2h-2" />
+              </svg>
+              <span>Cámara</span>
             </button>
           </form>
           {qrSearchError && (
@@ -2020,6 +2131,109 @@ export default function VendedorInterface({
           serverTime={serverTime}
         />
       )}
+
+      {/* QR Scanner Modal */}
+      {isQrScannerOpen && (
+        <QrScannerModal
+          onScan={(data) => {
+            setQrSearchInput(data);
+            setIsQrScannerOpen(false);
+            // Trigger search with scanned data
+            const fakeEvent = { preventDefault: () => {} } as FormEvent;
+            setQrSearchInput(data);
+            setTimeout(() => {
+              const input = document.querySelector<HTMLInputElement>('input[placeholder*="ID del Ticket"]');
+              if (input) {
+                input.value = data;
+                const form = input.closest('form');
+                if (form) form.requestSubmit();
+              }
+            }, 100);
+          }}
+          onClose={() => setIsQrScannerOpen(false)}
+        />
+      )}
+
+      {/* Prize Verification Result Modal */}
+      <AnimatePresence>
+        {prizeResult.show && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4"
+            onClick={() => setPrizeResult(p => ({ ...p, show: false }))}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border text-center ${
+                prizeResult.type === 'winner' ? 'bg-emerald-50 border-emerald-300' :
+                prizeResult.type === 'already_paid' ? 'bg-red-50 border-red-300' :
+                prizeResult.type === 'loser' ? 'bg-gray-50 border-gray-300' :
+                'bg-amber-50 border-amber-300'
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {prizeResult.type === 'winner' && (
+                <div className="text-emerald-600 mb-2">
+                  <CheckCircle className="w-16 h-16 mx-auto stroke-[1.5]" />
+                </div>
+              )}
+              {prizeResult.type === 'already_paid' && (
+                <div className="text-red-600 mb-2">
+                  <AlertCircle className="w-16 h-16 mx-auto stroke-[1.5]" />
+                </div>
+              )}
+
+              <h2 className={`text-lg font-display font-black uppercase tracking-wider mb-2 ${
+                prizeResult.type === 'winner' ? 'text-emerald-800' :
+                prizeResult.type === 'already_paid' ? 'text-red-800' :
+                prizeResult.type === 'loser' ? 'text-gray-700' :
+                'text-amber-800'
+              }`}>
+                {prizeResult.type === 'winner' && '¡Ticket Premiado!'}
+                {prizeResult.type === 'loser' && 'Ticket No Premiado'}
+                {prizeResult.type === 'already_paid' && 'Ya Pagado'}
+                {prizeResult.type === 'sorteo_abierto' && 'Sorteo Pendiente'}
+                {prizeResult.type === 'not_found' && 'No Encontrado'}
+                {prizeResult.type === 'error' && 'Error'}
+              </h2>
+
+              <p className="text-sm font-sans text-gray-600 mb-3">{prizeResult.message}</p>
+
+              {prizeResult.ticket && (
+                <div className="text-xs font-mono text-gray-500 mb-4 space-y-1">
+                  <p>Ticket: #{prizeResult.ticket.numero_ticket}</p>
+                  <p>Cliente: {prizeResult.ticket.nombre_cliente || 'Genérico'}</p>
+                  <p>Sorteo: {prizeResult.ticket.sorteo}</p>
+                </div>
+              )}
+
+              {prizeResult.type === 'winner' && prizeResult.monto_premio && (
+                <div className="bg-emerald-100 rounded-2xl p-4 mb-4">
+                  <p className="text-[10px] uppercase font-display font-black text-emerald-700 tracking-wider">Monto a Pagar</p>
+                  <p className="text-2xl font-display font-black text-emerald-900">C$ {prizeResult.monto_premio.toFixed(2)}</p>
+                </div>
+              )}
+
+              <button
+                onClick={() => setPrizeResult(p => ({ ...p, show: false }))}
+                className={`w-full py-3 rounded-xl font-display font-black text-sm uppercase tracking-wider cursor-pointer transition-all ${
+                  prizeResult.type === 'winner'
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                    : prizeResult.type === 'already_paid'
+                      ? 'bg-red-600 hover:bg-red-500 text-white'
+                      : 'bg-gray-700 hover:bg-gray-600 text-white'
+                }`}
+              >
+                {prizeResult.type === 'winner' ? 'Cobrar Premio' : 'Cerrar'}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

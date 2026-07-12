@@ -1146,14 +1146,22 @@ export default function AdminInterface({
     setAlertText(null);
     setSuccessText(null);
 
-    const matchedSorteo = config.sorteos.find(s => s.nombre === selectedSorteoResultados);
+    console.log("🔍 DEBUG handleSaveResultado:", {
+      selectedSorteoResultados,
+      fechaResultadosInput,
+      winningNumberInput,
+      resultFechasDia,
+      resultFechasMes,
+    });
+
+    const matchedSorteo = config.sorteos.find(s => s.id === selectedSorteoResultados);
     const matchedJuego = matchedSorteo ? matchedSorteo.juego : "";
 
     const winningNum = matchedJuego === "Fechas" 
       ? `${resultFechasDia}-${resultFechasMes}` 
       : winningNumberInput.trim();
 
-    if (!selectedSorteoResultados || (!winningNumberInput.trim() && matchedJuego !== "Fechas")) {
+    if (!selectedSorteoResultados || !fechaResultadosInput || (!winningNum && matchedJuego !== "Fechas")) {
       setAlertText("Por favor seleccione un sorteo e ingrese el número ganador.");
       return;
     }
@@ -1199,10 +1207,9 @@ export default function AdminInterface({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pais: selectedPaisResultados,
-          sorteo: selectedSorteoResultados,
-          numero_ganador: winningNum,
-          fecha: fechaResultadosInput
+          id_sorteo: selectedSorteoResultados,
+          fecha: fechaResultadosInput,
+          numero_ganador: winningNum
         })
       });
 
@@ -2137,14 +2144,23 @@ export default function AdminInterface({
                                   </span>
                                 </div>
                                 
-                                <button
-                                  id={`delete-sorteo-${s.id}`}
-                                  onClick={() => handleDeleteSorteo(s.id)}
-                                  className="w-9 h-9 flex items-center justify-center bg-red-50 text-[#EF4444] hover:bg-red-100 rounded-lg transition-colors border border-red-150 cursor-pointer shrink-0"
-                                  title="Eliminar Sorteo"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => handleEditSorteoClick(s)}
+                                    className="w-9 h-9 flex items-center justify-center bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors border border-blue-200 cursor-pointer shrink-0"
+                                    title="Editar Sorteo"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    id={`delete-sorteo-${s.id}`}
+                                    onClick={() => handleDeleteSorteo(s.id)}
+                                    className="w-9 h-9 flex items-center justify-center bg-red-50 text-[#EF4444] hover:bg-red-100 rounded-lg transition-colors border border-red-150 cursor-pointer shrink-0"
+                                    title="Eliminar Sorteo"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </div>
                             ))}
                         </div>
@@ -2155,7 +2171,12 @@ export default function AdminInterface({
 
               {/* Form to add drawing */}
               <div className="pt-4 border-t border-gray-100 space-y-3">
-                <span className="font-display font-black text-xs text-gray-700 uppercase tracking-wider block">Agregar Nuevo Sorteo</span>
+                <span className="font-display font-black text-xs text-gray-700 uppercase tracking-wider block">
+                  {sorteoEditando ? "Editar Sorteo" : "Agregar Nuevo Sorteo"}
+                  {sorteoEditando && (
+                    <button onClick={cancelEditSorteo} className="ml-2 text-[10px] text-blue-600 hover:text-blue-800 underline align-baseline" type="button">Cancelar</button>
+                  )}
+                </span>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
                   <div>
@@ -2274,8 +2295,17 @@ export default function AdminInterface({
                   onClick={handleAddSorteo}
                   className="flex items-center justify-center space-x-1 py-2 px-4 min-h-[44px] bg-emerald-600 hover:bg-emerald-500 text-white font-sans font-bold text-xs rounded-xl border-b-2 border-emerald-700 cursor-pointer shadow-xs"
                 >
-                  <Plus className="w-4 h-4 stroke-[2.5]" />
-                  <span>Agregar Sorteo</span>
+                  {sorteoEditando ? (
+                    <>
+                      <Edit2 className="w-4 h-4 stroke-[2.5]" />
+                      <span>Actualizar Sorteo</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4 stroke-[2.5]" />
+                      <span>Agregar Sorteo</span>
+                    </>
+                  )}
                 </button>
               </div>
 
@@ -2645,7 +2675,7 @@ export default function AdminInterface({
                           return false;
                         })
                         .map((s) => (
-                          <option key={s.id} value={s.nombre}>{s.nombre}</option>
+                          <option key={s.id} value={s.id}>{s.nombre}</option>
                         ))}
                     </select>
                   </div>
