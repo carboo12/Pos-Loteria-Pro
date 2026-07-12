@@ -194,37 +194,72 @@ ${config.formato_ticket.mensaje_pie}
 
   const generarTextoTicketRaw = (): string => {
     let t = "";
-    t += "[image:http://localhost:3000/assets/logo_print_bw.png]\n";
-    t += "         LA NUEVA ERA\n";
-    t += "        pida su ticket\n";
-    t += "------------------------------\n";
-    t += `TICKET:            #${ticket.numero_ticket}\n`;
-    t += `FECHA: ${ticket.timestamp_servidor.substring(0, 10)}\n`;
-    t += `VEND: ${ticket.nombre_vendedor || 'JOSE'}  CLI: ${ticket.nombre_cliente || 'GENERICO'}\n`;
-    t += "------------------------------\n";
-    t += `            ${ticket.juego}\n`;
-    t += `    ${ticket.sorteo || ''}\n`;
-    t += "------------------------------\n";
-    t += "NUM.   MONTO   PREMIO\n";
-    t += "------------------------------\n";
+    // Cabecera con logo e información principal de RawBT centrado
+    t += "[C]<img>https://la-nueva-era-api--rapigestion-2.us-central1.hosted.app/assets/logo_print_bw.png</img>\n";
+    t += "[C]<b>LA NUEVA ERA</b>\n";
+    t += "[C]pida su linea\n";
+    t += "[C]--------------------------------\n";
+    
+    // Información del ticket
+    t += `[L]TICKET: [R]#${ticket.numero_ticket}\n`;
+    t += `[L]FECHA: [R]${ticket.timestamp_servidor.substring(0, 10)}\n`;
+    t += `[L]VEND: ${ticket.nombre_vendedor || 'JOSE'} [R]CLI: ${ticket.nombre_cliente || 'GENERICO'}\n`;
+    t += "[C]--------------------------------\n";
+    
+    // Juego y sorteo en negrita centrado
+    t += `[C]<b>${ticket.juego.toUpperCase()}</b>\n`;
+    t += `[C]${ticket.sorteo || ''}\n`;
+    t += "[C]--------------------------------\n";
+    
+    // Encabezado de la tabla
+    t += "[L]<b>NUM.</b>[C]<b>MONTO</b>[R]<b>PREMIO</b>\n";
+    t += "[C]--------------------------------\n";
 
     const jugadas = ticket.jugadas && ticket.jugadas.length > 0
       ? ticket.jugadas
       : [{ numero: ticket.numero_jugado, monto: ticket.monto_pago, premio_posible: potentialPrizeCs }];
 
+    // Filas alineadas por columnas
     jugadas.forEach((j: any) => {
       const num = j.numero.toString().padStart(2, '0');
-      const monto = `C$${parseFloat(j.monto).toFixed(0)}`.padEnd(9, ' ');
-      const premio = `C$${parseFloat(j.premio_posible).toFixed(0)}`.padStart(9, ' ');
-      t += `${num}     ${monto}${premio}\n`;
+      const monto = `${ticket.moneda} ${parseFloat(j.monto).toFixed(0)}`;
+      const premio = `C$ ${parseFloat(j.premio_posible).toFixed(0)}`;
+      t += `[L]${num}[C]${monto}[R]${premio}\n`;
     });
 
-    t += "------------------------------\n";
-    t += `TOTAL:           C$${parseFloat(ticket.monto_pago.toString()).toFixed(2)}\n`;
-    t += "------------------------------\n";
-    t += `FIRMA: ${ticket.firma_digital || 'XXXX-XX'}\n`;
-    t += "------------------------------\n";
-    t += `\n[qr:${window.location.origin}/verificar/${ticket.numero_ticket}]\n`;
+    t += "[C]--------------------------------\n";
+    t += `[L]<b>TOTAL:</b> [R]<b>${ticket.moneda} ${parseFloat(ticket.monto_pago.toString()).toFixed(2)}</b>\n`;
+    t += "[C]--------------------------------\n";
+    t += `[L]<b>FIRMA:</b> [R]<b>${ticket.firma_digital || 'XXXX-XX'}</b>\n`;
+    t += "[C]--------------------------------\n";
+    
+    // Código QR nativo de RawBT apuntando a la URL de producción
+    t += `\n[C]<qr>https://la-nueva-era-api--rapigestion-2.us-central1.hosted.app/verificar?ticket=${ticket.numero_ticket}&firma=${ticket.firma_digital}</qr>\n`;
+    
+    t += "[C]ESTADO DEL TICKET\n";
+    
+    // Determinar resultado
+    const sorteoObj = config.sorteos?.find(s => s.nombre === ticket.sorteo);
+    const ticketDate = ticket.timestamp_servidor.substring(0, 10);
+    const resultObj = sorteoObj 
+      ? (config.resultados || []).find((r: any) => r.id_sorteo === sorteoObj.id && r.fecha === ticketDate)
+      : null;
+
+    if (ticket.anulado) {
+      t += "[C]<b>ANULADO</b>\n";
+    } else if (!resultObj) {
+      t += "[C]<b>PENDIENTE DE JUGAR</b>\n";
+    } else {
+      const cleanJugado = ticket.numero_jugado.trim().toLowerCase();
+      const cleanGanador = resultObj.numero_ganador.trim().toLowerCase();
+      const isWinner = cleanJugado === cleanGanador;
+      if (isWinner) {
+        t += "[C]<b>Boleta Premiada</b>\n";
+      } else {
+        t += "[C]<b>No Premiada</b>\n";
+      }
+    }
+    
     t += "\n\n\n\n";
     return t;
   };

@@ -3115,8 +3115,8 @@ export default function AdminInterface({
                     const sumUsd = sellerSales.filter(s => s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0);
                     const totalVendidoCs = sumCs + (sumUsd * config.tasa_cambio);
 
-                    // Calculate Prizes paid for winning tickets in range
-                    let totalPaidCs = 0;
+                    // Total a Pagar: premios teóricos de tickets vendidos por este vendedor en el rango
+                    let totalAPagarCs = 0;
                     sellerSales.forEach(s => {
                       const tDate = s.timestamp_servidor.substring(0, 10);
                       const sObj = config.sorteos?.find(draw => draw.nombre === s.sorteo);
@@ -3129,11 +3129,20 @@ export default function AdminInterface({
                         const prizeCs = s.moneda === "C$" 
                           ? (s.monto_pago * multiplier)
                           : (s.monto_pago * multiplier * config.tasa_cambio);
-                        totalPaidCs += prizeCs;
+                        totalAPagarCs += prizeCs;
                       }
                     });
 
-                    // Calculate supervisor collections ("cobros")
+                    // Pagado Real: suma de premios efectivamente pagados por este vendedor en el rango
+                    const totalPagadoRealCs = sellerSales
+                      .filter(s => s.estado === 'pagado')
+                      .reduce((sum, s) => sum + (s.premio_posible_cs || 0), 0);
+
+                    // Ingresos: inyecciones de caja del supervisor/administrador
+                    // TODO: implementar endpoint/UI para registrar inyecciones de caja
+                    const sumIngresosCs = 0;
+
+                    // Cobrado: dinero retirado por el supervisor
                     const sellerCobros = (config.cobros || []).filter((c: any) => {
                       const isSeller = c.id_vendedor === seller.id;
                       const inRange = c.fecha >= reportFilterFechaInicio && c.fecha <= reportFilterFechaFin;
@@ -3141,8 +3150,11 @@ export default function AdminInterface({
                     });
                     const sumCobradoCs = sellerCobros.reduce((sum: number, c: any) => sum + c.monto_cs + (c.monto_usd * config.tasa_cambio), 0);
 
-                    const gananciaCs = Math.max(0, totalVendidoCs - totalPaidCs - sumCobradoCs);
-                    const totalNetCs = Math.max(0, totalVendidoCs - totalPaidCs - sumCobradoCs);
+                    // Fórmula 1: Ganancia = (Vendido - Total a Pagar) + Ingresos
+                    const gananciaCs = (totalVendidoCs - totalAPagarCs) + sumIngresosCs;
+
+                    // Fórmula 2: Total (Efectivo Neto) = (Vendido - Pagado Real) + Ingresos - Cobrado
+                    const totalNetCs = (totalVendidoCs - totalPagadoRealCs) + sumIngresosCs - sumCobradoCs;
 
                     return (
                       <div key={seller.id} className="bg-white p-6 rounded-2xl border border-gray-300 shadow-xs flex flex-col justify-between font-sans">
@@ -3164,15 +3176,15 @@ export default function AdminInterface({
                           <div className="space-y-1.5 text-gray-600">
                             <div>
                               <span>Pagado: </span>
-                              <span className="font-mono font-bold text-gray-950">C$ {totalPaidCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
+                              <span className="font-mono font-bold text-gray-950">C$ {totalPagadoRealCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
                             </div>
                             <div>
                               <span>Ingresos: </span>
-                              <span className="font-mono font-bold text-gray-950">C$ {sumCobradoCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
+                              <span className="font-mono font-bold text-gray-950">C$ {sumIngresosCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
                             </div>
                             <div>
                               <span>Total a pagar: </span>
-                              <span className="font-mono font-bold text-gray-950">C$ {totalPaidCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
+                              <span className="font-mono font-bold text-gray-950">C$ {totalAPagarCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
                             </div>
                             <div>
                               <span>Cobrado: </span>
