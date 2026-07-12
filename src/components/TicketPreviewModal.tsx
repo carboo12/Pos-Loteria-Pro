@@ -194,7 +194,7 @@ ${config.formato_ticket.mensaje_pie}
     window.open(`https://api.whatsapp.com/send?text=${textoCodificado}`, '_blank');
   };
 
-  const shareTicketImage = async () => {
+  const shareTicketImage = async (isThermal: boolean = false) => {
     setSharing(true);
     
     // Crear una promesa que se rechace automáticamente a los 4 segundos
@@ -205,6 +205,11 @@ ${config.formato_ticket.mensaje_pie}
     try {
       const ticketElement = document.getElementById("thermal-ticket-render");
       if (!ticketElement) throw new Error("Elemento no encontrado");
+
+      // Activar modo térmico si es requerido (B&W alto contraste y ancho 384px)
+      if (isThermal) {
+        ticketElement.classList.add("thermal-print-mode");
+      }
 
       // Ejecutar el render a Blob directamente con html-to-image (soporta OKLCH, Tailwind v4, y modern CSS)
       const blob = await Promise.race([
@@ -218,6 +223,11 @@ ${config.formato_ticket.mensaje_pie}
         timeoutPromise
       ]) as Blob | null;
 
+      // Desactivar modo térmico INMEDIATAMENTE
+      if (isThermal) {
+        ticketElement.classList.remove("thermal-print-mode");
+      }
+
       if (!blob) throw new Error("Blob corrupto o vacío");
 
       const file = new File([blob], `ticket_${ticket.numero_ticket}.png`, { type: 'image/png' });
@@ -229,23 +239,28 @@ ${config.formato_ticket.mensaje_pie}
           text: 'Aquí está su ticket de juego.'
         });
       } else {
-        ejecutarFallbackWhatsApp();
+        alert("Su navegador no soporta el menú nativo de impresión. Asegúrese de estar usando HTTPS.");
       }
     } catch (err) {
       console.error("Flujo de compartir interrumpido de forma segura:", err);
-      ejecutarFallbackWhatsApp();
+      // Fallback de seguridad vital: Si algo falla generar la imagen, intentar al menos WhatsApp texto
+      if (!isThermal) ejecutarFallbackWhatsApp();
     } finally {
       // Regla de oro de Stitch UI: El botón SIEMPRE recupera su estado activo
       setSharing(false);
+      const ticketEl = document.getElementById("thermal-ticket-render");
+      if (ticketEl) ticketEl.classList.remove("thermal-print-mode"); // Seguro final
     }
   };
 
   const handlePrint = () => {
-    shareTicketImage();
+    // Botón Azul (Imprimir): Llama a shareTicketImage en modo Térmico (B&W)
+    shareTicketImage(true);
   };
 
   const handleShare = () => {
-    shareTicketImage();
+    // Botón Verde (WhatsApp): Llama a shareTicketImage en modo Normal (A Colores!)
+    shareTicketImage(false);
   };
 
   const fallbackCopy = () => {
