@@ -1234,6 +1234,8 @@ export default function AdminInterface({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id_sorteo: selectedSorteoResultados,
+          sorteo: matchedSorteo ? matchedSorteo.nombre : "",
+          pais: selectedPaisResultados,
           fecha: fechaResultadosInput,
           numero_ganador: winningNum
         })

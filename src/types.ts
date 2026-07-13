@@ -36,7 +36,9 @@ export interface Sorteo {
 export interface SorteoResultado {
   id: string;
   id_sorteo: string;
-  fecha: string; // YYYY-MM-DD
+  sorteo: string;   // Nombre legible del sorteo (ej. "Diaria 3:00 PM (NI)")
+  pais: string;     // País del sorteo (ej. "Nicaragua")
+  fecha: string;    // YYYY-MM-DD
   numero_ganador: string;
   timestamp: string;
 }

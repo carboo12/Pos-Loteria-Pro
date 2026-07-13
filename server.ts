@@ -1018,7 +1018,7 @@ app.get("/api/resultados", (req, res) => {
 });
 
 app.post("/api/resultados", (req, res) => {
-  const { id_sorteo, fecha, numero_ganador } = req.body;
+  const { id_sorteo, fecha, numero_ganador, sorteo, pais } = req.body;
   if (!id_sorteo || !fecha || !numero_ganador) {
     return res.status(400).json({ error: "Sorteo, Fecha y Número ganador son requeridos." });
   }
@@ -1026,6 +1026,8 @@ app.post("/api/resultados", (req, res) => {
   const newResult = {
     id: "res_" + Math.random().toString(36).substring(2, 9),
     id_sorteo,
+    sorteo: sorteo || "",
+    pais: pais || "",
     fecha, // YYYY-MM-DD
     numero_ganador,
     timestamp: new Date().toISOString()
@@ -1039,7 +1041,7 @@ app.post("/api/resultados", (req, res) => {
 
 app.put("/api/resultados/:id", (req, res) => {
   const { id } = req.params;
-  const { id_sorteo, fecha, numero_ganador } = req.body;
+  const { id_sorteo, fecha, numero_ganador, sorteo, pais } = req.body;
   if (!id_sorteo || !fecha || !numero_ganador) {
     return res.status(400).json({ error: "Sorteo, Fecha y Número ganador son requeridos." });
   }
@@ -1051,6 +1053,8 @@ app.put("/api/resultados/:id", (req, res) => {
   }
 
   db.configuracion.resultados[idx].id_sorteo = id_sorteo;
+  db.configuracion.resultados[idx].sorteo = sorteo || "";
+  db.configuracion.resultados[idx].pais = pais || "";
   db.configuracion.resultados[idx].fecha = fecha;
   db.configuracion.resultados[idx].numero_ganador = numero_ganador;
 

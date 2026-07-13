@@ -36,7 +36,7 @@ import FacturacionVendedorCard from "./FacturacionVendedorCard";
 import { collection, addDoc, serverTimestamp, query, where, getDocs, doc, updateDoc, getDoc } from "firebase/firestore";
 import { firestore, auth } from "../lib/firebase";
 import { BluetoothPrinterService, PrinterStatus } from "../services/BluetoothPrinterService";
-import { buildTicketBuffer, ticketDataFromVenta } from "../services/escpos-builder";
+import { buildTicketBuffer, ticketDataFromVenta, loadLogoBitmap } from "../services/escpos-builder";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -169,6 +169,15 @@ export default function VendedorInterface({
       printerRef.current?.disconnect();
       printerRef.current = undefined;
     };
+  }, []);
+
+  // Logo bytes for ESC/POS printing (loaded once)
+  const logoBytesRef = useRef<number[]>([]);
+
+  useEffect(() => {
+    loadLogoBitmap("/logo.png", 48).then((bytes) => {
+      logoBytesRef.current = bytes;
+    });
   }, []);
 
   useEffect(() => {
@@ -486,6 +495,29 @@ export default function VendedorInterface({
     }
   };
 
+  const getLocalDateStr = (dateInput: any): string => {
+    if (!dateInput) return "";
+    let date: Date;
+    if (dateInput instanceof Date) {
+      date = dateInput;
+    } else if (typeof dateInput === "string") {
+      date = new Date(dateInput);
+    } else if (dateInput && dateInput.toDate && typeof dateInput.toDate === "function") {
+      date = dateInput.toDate();
+    } else {
+      date = new Date(dateInput);
+    }
+    if (isNaN(date.getTime())) return "";
+    // Convert to CST (UTC-6)
+    const offset = -6;
+    const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
+    const localDate = new Date(utc + (3600000 * offset));
+    const year = localDate.getFullYear();
+    const month = String(localDate.getMonth() + 1).padStart(2, "0");
+    const day = String(localDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
   const getTicketTheoreticalPrize = (ticket: any): number => {
     if (ticket.estado === "anulado") return 0;
     
@@ -528,7 +560,7 @@ export default function VendedorInterface({
       }
     }
 
-    const tDate = ticket.fecha_emision_date ? (ticket.fecha_emision_date instanceof Date ? ticket.fecha_emision_date : ticket.fecha_emision_date.toDate()).toISOString().substring(0, 10) : "";
+    const tDate = getLocalDateStr(ticket.fecha_emision_date || ticket.timestamp_servidor);
     const sObj = config.sorteos?.find(d => d.nombre === draw && d.juego === game);
     const rObj = sObj
       ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
@@ -2182,22 +2214,39 @@ export default function VendedorInterface({
                         draw = parts.slice(1).join(" ");
                       }
 
+                      const ticketPrize = getTicketTheoreticalPrize(t);
+                      const isWinner = ticketPrize > 0;
+
                       return (
-                        <div key={t.id} className={`bg-white rounded-xl p-4 shadow-sm border border-gray-200 flex flex-col justify-between ${t.estado === "anulado" ? "opacity-60 bg-gray-50" : ""}`}>
-                          <div className="flex justify-between items-start mb-2">
+                        <div key={t.id} className={`bg-white rounded-xl p-4 shadow-sm border flex flex-col justify-between relative overflow-hidden ${isWinner && t.estado !== "anulado" ? "border-emerald-500 bg-emerald-50/10 shadow-md shadow-emerald-50" : "border-gray-200"} ${t.estado === "anulado" ? "opacity-60 bg-gray-50" : ""}`}>
+                          {/* Winner Watermark Stamp */}
+                          {isWinner && t.estado !== "anulado" && (
+                            <div className="absolute right-4 top-1/2 -translate-y-1/2 -rotate-12 opacity-15 border-4 border-emerald-600 text-emerald-600 rounded-2xl px-4 py-1.5 font-display font-black text-4xl tracking-widest uppercase pointer-events-none select-none">
+                              GANADOR
+                            </div>
+                          )}
+
+                          <div className="flex justify-between items-start mb-2 relative z-10">
                             <div>
                               <span className="font-bold text-gray-800 uppercase block">{user.nombre}</span>
                               <span className="text-[9px] text-gray-400 font-mono mt-0.5 block">
                                 {t.fecha_emision_date.toLocaleDateString("es-ES")} {formatTo12HourTime(t.fecha_emision_date)}
                               </span>
                             </div>
-                            <span className={`text-[9px] font-black uppercase px-2.5 py-0.5 rounded ${
-                              t.estado === "cobrado" ? "bg-emerald-100 text-emerald-800" :
-                              t.estado === "anulado" ? "bg-red-100 text-red-800" :
-                              "bg-amber-100 text-amber-800"
-                            }`}>
-                              {t.estado}
-                            </span>
+                            <div className="flex items-center space-x-2">
+                              {isWinner && t.estado !== "anulado" && (
+                                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-lg bg-emerald-600 text-white animate-pulse shadow-xs">
+                                  PREMIADO
+                                </span>
+                              )}
+                              <span className={`text-[9px] font-black uppercase px-2.5 py-0.5 rounded ${
+                                t.estado === "cobrado" ? "bg-emerald-100 text-emerald-800" :
+                                t.estado === "anulado" ? "bg-red-100 text-red-800" :
+                                "bg-amber-100 text-amber-800"
+                              }`}>
+                                {t.estado}
+                              </span>
+                            </div>
                           </div>
 
                           <div className="flex flex-wrap gap-2 mb-3">
@@ -2282,6 +2331,7 @@ export default function VendedorInterface({
                                   jugadas: t.jugadas || []
                                 };
                                 const printData = ticketDataFromVenta(tempVenta, config);
+                                printData.logo_bytes = logoBytesRef.current;
                                 const buffer = buildTicketBuffer(printData);
                                 printerRef.current.print(buffer).then((ok) => {
                                   if (ok) {
@@ -2628,6 +2678,7 @@ export default function VendedorInterface({
           serverTime={serverTime}
           onPrint={printerRef.current && printerStatus === "connected" ? () => {
             const printData = ticketDataFromVenta(activeTicket, config);
+            printData.logo_bytes = logoBytesRef.current;
             const buffer = buildTicketBuffer(printData);
             printerRef.current.print(buffer).then((ok) => {
               if (ok) {

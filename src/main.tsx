@@ -3,12 +3,13 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx'
 
 import { auth } from './lib/firebase';
+import './index.css';
 
 // ──────────────────────────────────────────────────────
 // APP_VERSION — must match CACHE_NAME in public/sw.js
 // Increment on every deploy that changes frontend assets.
 // ──────────────────────────────────────────────────────
-const APP_VERSION = "loto-pos-cache-v8";
+const APP_VERSION = "v9";
 const VERSION_KEY = "sw_version";
 
 // ──────────────────────────────────────────────────────
@@ -37,16 +38,9 @@ const runKillSwitch = async (): Promise<boolean> => {
   }
 
   localStorage.setItem(VERSION_KEY, APP_VERSION);
-  // Hard reload: bypass browser cache entirely
   window.location.reload();
-  return true; // page will reload, nothing after this runs
+  return true;
 };
-
-// Run kill switch immediately, before anything else
-let killSwitchDone = false;
-runKillSwitch().then((reloaded) => {
-  killSwitchDone = reloaded;
-});
 
 // ──────────────────────────────────────────────────────
 // FETCH INTERCEPTOR — inject Firebase token into /api/ calls
@@ -80,13 +74,12 @@ window.fetch = async (input, init) => {
   }
   return originalFetch(input, init);
 };
-import './index.css';
 
 // ──────────────────────────────────────────────────────
 // SERVICE WORKER REGISTRATION + AUTO-UPDATE
 // ──────────────────────────────────────────────────────
 const registerServiceWorker = () => {
-  if (!("serviceWorker" in navigator) || killSwitchDone) return;
+  if (!("serviceWorker" in navigator)) return;
 
   let refreshing = false;
 
@@ -100,7 +93,6 @@ const registerServiceWorker = () => {
   navigator.serviceWorker.register("/sw.js").then((reg) => {
     console.log("Service Worker registrado:", reg.scope);
 
-    // If a new SW is already waiting, force it to activate
     if (reg.waiting) {
       console.log("SW en espera detectado. Forzando activación...");
       reg.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -118,7 +110,6 @@ const registerServiceWorker = () => {
       });
     });
 
-    // Listen for version messages from SW
     navigator.serviceWorker.addEventListener("message", (e) => {
       if (e.data?.type === "SW_ACTIVATED" && e.data?.version !== APP_VERSION) {
         console.log(`[SW] Versión ${e.data.version} activa, esperaba ${APP_VERSION}. Recargando...`);
@@ -127,10 +118,6 @@ const registerServiceWorker = () => {
     });
   }).catch((err) => console.error("Error al registrar SW:", err));
 };
-
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => registerServiceWorker());
-}
 
 // ──────────────────────────────────────────────────────
 // PWA INSTALL PROMPT
@@ -151,12 +138,23 @@ window.addEventListener("appinstalled", () => {
 });
 
 // ──────────────────────────────────────────────────────
-// RENDER
+// BOOT: Kill Switch → SW Registration → Render
 // ──────────────────────────────────────────────────────
-if (!killSwitchDone) {
+(async () => {
+  const reloaded = await runKillSwitch();
+  if (reloaded) return;
+
+  if ("serviceWorker" in navigator) {
+    if (document.readyState === "complete") {
+      registerServiceWorker();
+    } else {
+      window.addEventListener("load", () => registerServiceWorker());
+    }
+  }
+
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <App />
     </StrictMode>,
   );
-}
+})();

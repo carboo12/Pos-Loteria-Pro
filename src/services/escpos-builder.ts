@@ -25,6 +25,7 @@ export const ESCPOS = {
 
   CUT_PARTIAL: [0x1D, 0x56, 0x00],
   CUT_FULL: [0x1D, 0x56, 0x01],
+  CUT_FEED_3: [0x1D, 0x56, 0x42, 0x03],
 
   CODE_PAGE: [0x1B, 0x74, 0x02],
 
@@ -147,8 +148,58 @@ const emptyLine = (): number[] => {
 };
 
 const cut = (): number[] => {
-  return [...ESCPOS.FEED_5, ...ESCPOS.CUT_PARTIAL];
+  return [...ESCPOS.CUT_FEED_3];
 };
+
+export async function loadLogoBitmap(url: string, maxWidthBytes: number = 48): Promise<number[]> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { resolve([]); return; }
+
+      const maxDots = maxWidthBytes * 8;
+      const ratio = Math.min(maxDots / img.width, 1);
+      const w = Math.floor(img.width * ratio);
+      const h = Math.floor(img.height * ratio);
+
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const px = imageData.data;
+      const widthBytes = Math.ceil(w / 8);
+      const bitmap: number[] = [];
+
+      for (let y = 0; y < h; y++) {
+        for (let bx = 0; bx < widthBytes; bx++) {
+          let byte = 0;
+          for (let bit = 0; bit < 8; bit++) {
+            const col = bx * 8 + bit;
+            if (col < w) {
+              const idx = (y * w + col) * 4;
+              const gray = px[idx] * 0.299 + px[idx + 1] * 0.587 + px[idx + 2] * 0.114;
+              if (gray < 128) byte |= (1 << (7 - bit));
+            }
+          }
+          bitmap.push(byte);
+        }
+      }
+
+      const xL = widthBytes & 0xFF;
+      const xH = (widthBytes >> 8) & 0xFF;
+      const yL = h & 0xFF;
+      const yH = (h >> 8) & 0xFF;
+
+      resolve([0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH, ...bitmap]);
+    };
+    img.onerror = () => resolve([]);
+    img.src = url;
+  });
+}
 
 export interface TicketPrintData {
   negocio: string;
@@ -167,6 +218,7 @@ export interface TicketPrintData {
   firma_digital: string;
   mensaje_pie: string;
   qr_url: string;
+  logo_bytes?: number[];
 }
 
 export function buildTicketBuffer(data: TicketPrintData): Uint8Array {
@@ -178,7 +230,9 @@ export function buildTicketBuffer(data: TicketPrintData): Uint8Array {
 
   // Cabecera del negocio (Logo y Nombre)
   bytes.push(...ESCPOS.ALIGN_CENTER);
-  bytes.push(0x1C, 0x70, 0x01, 0x00); // FS p 1 0: Prints NV bit image #1 (Logo)
+  if (data.logo_bytes && data.logo_bytes.length > 0) {
+    bytes.push(...data.logo_bytes);
+  }
   bytes.push(...emptyLine());
   bytes.push(...doubleLine(data.negocio));
   bytes.push(...line(data.ruc, "C", true));
@@ -240,6 +294,7 @@ export function buildTicketBuffer(data: TicketPrintData): Uint8Array {
   bytes.push(...ESCPOS.ALIGN_CENTER);
   bytes.push(...qrCode(data.qr_url));
   bytes.push(...line("Verificacion Digital QR", "C", true));
+  bytes.push(...emptyLine());
   bytes.push(...emptyLine());
 
   bytes.push(...cut());
