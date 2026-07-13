@@ -297,7 +297,12 @@ ${config.formato_ticket.mensaje_pie}
         pixelRatio: 2,
         cacheBust: true,
         skipAutoScale: true,
-        style: { backgroundColor: '#ffffff' },
+        style: { 
+          backgroundColor: '#ffffff',
+          overflow: 'visible',
+        },
+        height: el.scrollHeight,
+        width: el.offsetWidth,
       });
       if (!blob) throw new Error("No se pudo generar la imagen");
 

@@ -183,25 +183,25 @@ export function buildTicketBuffer(data: TicketPrintData): Uint8Array {
   bytes.push(...separator("="));
 
   // Datos del ticket justificados
-  bytes.push(...line(justifyLine("Nº TICKET:", `#${data.numero_ticket}`), "L", true));
+  bytes.push(...line(justifyLine("NO. TICKET:", `#${data.numero_ticket}`), "L", true));
   
   // Imprimir fecha en múltiples líneas justificadas si es necesario
   bytes.push(...line("FECHA:", "L", true));
   bytes.push(...line(data.fecha_completa, "L"));
   
-  bytes.push(...line(justifyLine("VENDEDOR:", data.vendedor.toUpperCase()), "L", true));
+  bytes.push(...line(justifyLine("VENDEDOR:", data.vendedor), "L", true));
   if (data.cliente) {
-    bytes.push(...line(justifyLine("CLIENTE:", data.cliente.toUpperCase()), "L", true));
+    bytes.push(...line(justifyLine("CLIENTE:", data.cliente), "L", true));
   }
   bytes.push(...separator("-"));
 
   // Juego y sorteo
-  bytes.push(...line(data.juego.toUpperCase(), "C", true));
+  bytes.push(...line(data.juego, "C", true));
   bytes.push(...line(data.sorteo, "C", true));
   bytes.push(...separator("-"));
 
   // Encabezado de la tabla de jugadas
-  bytes.push(...line(justify3Columns("NÚM.", "MONTO", "PREMIO"), "L", true));
+  bytes.push(...line(justify3Columns("NUM.", "MONTO", "PREMIO"), "L", true));
   bytes.push(...separator("-"));
 
   // Lista de jugadas (3 columnas)
@@ -236,13 +236,21 @@ export function buildTicketBuffer(data: TicketPrintData): Uint8Array {
   // Código QR nativo
   bytes.push(...ESCPOS.ALIGN_CENTER);
   bytes.push(...qrCode(data.qr_url));
-  bytes.push(...line("Verificación Digital QR", "C", true));
+  bytes.push(...line("Verificacion Digital QR", "C", true));
   bytes.push(...emptyLine());
 
   bytes.push(...cut());
 
   return new Uint8Array(bytes);
 }
+
+const sanitizeText = (text: string): string => {
+  return (text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove accents
+    .replace(/[^\x20-\x7E]/g, "") // remove non-ASCII
+    .toUpperCase();
+};
 
 export function ticketDataFromVenta(venta: Venta, config: Configuracion): TicketPrintData {
   const multiplier = (() => {
@@ -279,22 +287,23 @@ export function ticketDataFromVenta(venta: Venta, config: Configuracion): Ticket
   const numTicket = venta.numero_ticket || venta.id.substring(0, 7).toUpperCase();
 
   return {
-    negocio: config.formato_ticket?.titulo || "LA NUEVA ERA",
-    ruc: config.formato_ticket?.ruc || "",
+    negocio: sanitizeText(config.formato_ticket?.titulo || "LA NUEVA ERA"),
+    ruc: sanitizeText(config.formato_ticket?.ruc || ""),
+    direccion: undefined,
     numero_ticket: numTicket,
-    fecha_completa: venta.timestamp_servidor
+    fecha_completa: sanitizeText(venta.timestamp_servidor
       ? formatTicketDate(venta.timestamp_servidor)
-      : formatTicketDate(new Date().toISOString()),
-    vendedor: venta.nombre_vendedor || "",
-    cliente: venta.nombre_cliente || "Genérico",
-    juego: venta.juego,
-    sorteo: venta.sorteo,
-    moneda: venta.moneda,
+      : formatTicketDate(new Date().toISOString())),
+    vendedor: sanitizeText(venta.nombre_vendedor || ""),
+    cliente: sanitizeText(venta.nombre_cliente || "GENERICO"),
+    juego: sanitizeText(venta.juego),
+    sorteo: sanitizeText(venta.sorteo),
+    moneda: sanitizeText(venta.moneda),
     jugadas: jugadasFromVenta,
     total_apostado: venta.monto_pago,
     total_premio: potentialPrizeCs,
     firma_digital: venta.firma_digital || "",
-    mensaje_pie: config.formato_ticket?.mensaje_pie || "Gracias por su compra",
-    qr_url: `${origin}/verificar?ticket=${numTicket}&firma=${venta.firma_digital || ""}`
+    mensaje_pie: sanitizeText(config.formato_ticket?.mensaje_pie || "Gracias por su compra"),
+    qr_url: numTicket
   };
 }

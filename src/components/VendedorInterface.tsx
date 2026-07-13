@@ -277,82 +277,12 @@ export default function VendedorInterface({
 
   // QR Scanner Effect
 
+  // QR Scanner Effect is now handled dynamically through QrScannerModal without auto-activating camera on tab change.
   useEffect(() => {
     if (activeTab !== "pagos") {
       setPaymentResult(null);
-      setCameraStatus('idle');
-      return;
     }
-
-    let scanner: Html5QrcodeScanner | null = null;
-    let isMounted = true;
-    let localStream: MediaStream | null = null;
-
-    const initializeCamera = async () => {
-      setCameraStatus('loading');
-      try {
-        if (!window.isSecureContext) {
-          setCameraStatus('error');
-          return;
-        }
-
-        // 1. Solicitar permisos explicitamente primero (forzando cámara trasera)
-        localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        
-        if (!isMounted) {
-          // Si el usuario cambió de pestaña rápido, apagar la cámara de inmediato
-          localStream.getTracks().forEach(track => track.stop());
-          return;
-        }
-        
-        setCameraStatus('ready');
-        
-        // 2. Montar el escáner si hay permisos
-        scanner = new Html5QrcodeScanner(
-          "reader",
-          { 
-            fps: 10, 
-            qrbox: { width: 250, height: 250 },
-            videoConstraints: { facingMode: "environment" } 
-          },
-          false
-        );
-
-        scanner.render(
-          (decodedText) => {
-            scanner?.pause(true);
-            processPayment(decodedText);
-          },
-          (error) => {} // ignorar errores de frame vacío
-        );
-      } catch (err: any) {
-        console.error("Camera error:", err);
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          setCameraStatus('denied');
-        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-          setCameraStatus('error');
-        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-          setCameraStatus('error');
-        } else {
-          setCameraStatus('error');
-        }
-      }
-    };
-
-    initializeCamera();
-
-    // 3. Limpieza Segura (Evitar fugas de memoria y batería)
-    return () => {
-      isMounted = false;
-      if (scanner) {
-        scanner.clear().catch(e => console.error("Error clearing scanner", e));
-      }
-      if (localStream) {
-        // Force stop all hardware tracks immediately
-        localStream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [activeTab, cameraRetry]);
+  }, [activeTab]);
 
 
   const processPayment = async (queryStr: string) => {
@@ -631,21 +561,27 @@ export default function VendedorInterface({
     try {
       const startDate = new Date(reportFilterFechaInicio + "T00:00:00");
       const endDate = new Date(reportFilterFechaFin + "T23:59:59");
+      
+      // Query only by id_vendedor to avoid requiring composite indexes in Firestore
       const q = query(
         collection(firestore, "tickets"),
-        where("id_vendedor", "==", user.id),
-        where("fecha_emision", ">=", startDate),
-        where("fecha_emision", "<=", endDate)
+        where("id_vendedor", "==", user.id)
       );
       const querySnapshot = await getDocs(q);
-      const tickets = querySnapshot.docs.map(docVal => {
-        const data = docVal.data();
-        return {
-          id: docVal.id,
-          ...data,
-          fecha_emision_date: data.fecha_emision?.toDate() || new Date()
-        };
-      });
+      const tickets = querySnapshot.docs
+        .map(docVal => {
+          const data = docVal.data();
+          return {
+            id: docVal.id,
+            ...data,
+            fecha_emision_date: data.fecha_emision?.toDate() || new Date()
+          };
+        })
+        .filter(t => {
+          const time = t.fecha_emision_date.getTime();
+          return time >= startDate.getTime() && time <= endDate.getTime();
+        });
+        
       // Sort descending
       tickets.sort((a, b) => b.fecha_emision_date.getTime() - a.fecha_emision_date.getTime());
       setReportTickets(tickets);
@@ -842,17 +778,14 @@ export default function VendedorInterface({
     }
   };
 
-  const handleTicketQrSearch = async (e: FormEvent) => {
-    e.preventDefault();
+  const executeTicketSearch = async (queryVal: string) => {
     setQrSearchError(null);
-    const query = qrSearchInput.trim();
+    const query = queryVal.trim();
     if (!query) return;
 
     let targetNum = query;
     let targetFirma = "";
 
-    // Parse URL verification pattern if scanned or pasted:
-    // https://lanuevaera.net/verificar?ticket=00001&firma=ABC
     if (query.includes("ticket=")) {
       try {
         const urlObj = new URL(query);
@@ -870,7 +803,6 @@ export default function VendedorInterface({
 
     const cleanNum = targetNum.replace(/^#/, "").trim();
 
-    // Look up in global sales list
     const found = sales.find(s => 
       s.id === cleanNum || 
       s.numero_ticket === cleanNum ||
@@ -897,6 +829,11 @@ export default function VendedorInterface({
         setQrSearchError(`No se encontró ningún ticket con ID, número o firma: "${query}"`);
       }
     }
+  };
+
+  const handleTicketQrSearch = async (e: FormEvent) => {
+    e.preventDefault();
+    executeTicketSearch(qrSearchInput);
   };
 
   // Mappings of games by country
@@ -1569,23 +1506,13 @@ export default function VendedorInterface({
               />
               <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
             </div>
-            <button
-              type="submit"
+             <button
+              type="button"
+              onClick={() => setIsQrScannerOpen(true)}
               className="px-3 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-display font-black tracking-wider uppercase transition-colors flex items-center space-x-1 cursor-pointer shrink-0"
             >
               <QrCode className="w-3.5 h-3.5" />
               <span>Buscar QR</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsQrScannerOpen(true)}
-              className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-xl text-xs font-display font-black tracking-wider uppercase transition-colors flex items-center space-x-1 cursor-pointer shrink-0"
-              title="Escanear con cámara"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9V7a2 2 0 012-2h2M3 15v2a2 2 0 002 2h2M21 9V7a2 2 0 00-2-2h-2M21 15v2a2 2 0 01-2 2h-2" />
-              </svg>
-              <span>Cámara</span>
             </button>
           </form>
           {qrSearchError && (
@@ -2144,16 +2071,7 @@ export default function VendedorInterface({
                 pagado={pagado}
                 total={total}
               />
-              <FacturacionVendedorCard
-                nombreVendedor={user.nombre}
-                vendido={facturado}
-                pagado={pagado}
-                ingresos={ingresos}
-                totalAPagar={aPagar}
-                cobrado={cobro}
-                ganancia={ganancia}
-                total={total}
-              />
+
 
               {/* Lista de Boletos (UI Stitch) */}
               <div className="space-y-3">
@@ -2252,7 +2170,6 @@ export default function VendedorInterface({
             </div>
           );
         })()}
-
         {/* TAB 3: PAGOS (QR SCANNERS) */}
         {activeTab === "pagos" && (
           <div className="space-y-4 animate-fade-in">
@@ -2261,61 +2178,36 @@ export default function VendedorInterface({
               <p className="text-[10px] text-gray-400 font-sans mt-0.5">Escanea el código QR del ticket o ingresa el ID manualmente.</p>
             </div>
 
-            {/* QR Scanner Section */}
-            <div className="bg-white rounded-2xl p-4 border border-gray-300 shadow-sm flex flex-col items-center">
 
-              {cameraStatus === 'loading' && (
-                <div className="w-full h-48 flex flex-col items-center justify-center bg-gray-50 rounded-xl border border-gray-200">
-                  <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-900 rounded-full animate-spin mb-2"></div>
-                  <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Iniciando Cámara...</p>
-                </div>
-              )}
-              
-              {cameraStatus === 'denied' && (
-                <div className="w-full p-4 bg-red-50 text-red-700 rounded-xl border border-red-200 text-center mb-4">
-                  <AlertTriangle className="w-6 h-6 mx-auto mb-1 opacity-80" />
-                  <p className="text-[11px] font-bold uppercase">Acceso Denegado</p>
-                  <p className="text-[10px] mt-1">Ve a Configuración del navegador &gt; Cámara y permite el acceso. Luego presiona Reintentar.</p>
-                  <button onClick={() => { setCameraStatus('loading'); setCameraRetry(c => c + 1); }} className="mt-2 px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer">
-                    Reintentar
-                  </button>
-                </div>
-              )}
-              
-              {cameraStatus === 'error' && (
-                <div className="w-full p-4 bg-orange-50 text-orange-700 rounded-xl border border-orange-200 text-center mb-4">
-                  <AlertTriangle className="w-6 h-6 mx-auto mb-1 opacity-80" />
-                  <p className="text-[11px] font-bold uppercase">Error de Cámara</p>
-                  <p className="text-[10px] mt-1">No se pudo acceder a la cámara. Verifica que no esté siendo usada por otra app o que el dispositivo tenga cámara trasera disponible.</p>
-                  <button onClick={() => { setCameraStatus('loading'); setCameraRetry(c => c + 1); }} className="mt-2 px-4 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer">
-                    Reintentar
-                  </button>
-                </div>
-              )}
+            {/* QR Scanner Activation */}
+            <button
+              onClick={() => setIsQrScannerOpen(true)}
+              className="w-full py-4 bg-blue-900 hover:bg-blue-800 text-white rounded-2xl flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-md"
+            >
+              <QrCode className="w-5 h-5" />
+              <span className="text-xs font-black uppercase tracking-wider">Abrir Escáner de Cámara</span>
+            </button>
 
-              <div className={`w-full max-w-sm overflow-hidden rounded-xl ${cameraStatus === 'ready' ? 'border border-gray-200' : 'hidden'}`} id="reader"></div>
-
-              
-              <div className="mt-4 w-full">
-                <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">O ingresar ID manualmente</label>
-                <div className="flex space-x-2">
+            {/* Manual ID Input Section */}
+            <div className="bg-white rounded-2xl p-4 border border-gray-300 shadow-sm">
+              <div className="w-full">
+                <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Ingresar ID del Ticket</label>
+                <form onSubmit={(e) => { e.preventDefault(); processPayment(qrSearchInput); }} className="flex space-x-2">
                   <input
                     type="text"
-                    placeholder="Ej. A9X-2M o 0001045"
                     value={qrSearchInput}
                     onChange={(e) => setQrSearchInput(e.target.value)}
-                    className="flex-1 text-sm p-2.5 border border-gray-300 rounded-lg font-mono font-bold text-gray-800 focus:outline-none focus:border-[#1E3A8A]"
+                    placeholder="ID del ticket (ej: ZNH9H02)..."
+                    className="flex-1 p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
                   />
                   <button
-                    onClick={() => {
-                      if(qrSearchInput) processPayment(qrSearchInput);
-                    }}
+                    type="submit"
                     disabled={loading || !qrSearchInput}
                     className="px-4 bg-[#1E3A8A] hover:bg-blue-800 text-white rounded-lg font-bold flex items-center justify-center cursor-pointer disabled:opacity-50"
                   >
                     Validar
                   </button>
-                </div>
+                </form>
               </div>
             </div>
             
@@ -2563,19 +2455,12 @@ export default function VendedorInterface({
       {isQrScannerOpen && (
         <QrScannerModal
           onScan={(data) => {
-            setQrSearchInput(data);
             setIsQrScannerOpen(false);
-            // Trigger search with scanned data
-            const fakeEvent = { preventDefault: () => {} } as FormEvent;
-            setQrSearchInput(data);
-            setTimeout(() => {
-              const input = document.querySelector<HTMLInputElement>('input[placeholder*="ID del Ticket"]');
-              if (input) {
-                input.value = data;
-                const form = input.closest('form');
-                if (form) form.requestSubmit();
-              }
-            }, 100);
+            if (activeTab === "pagos") {
+              processPayment(data);
+            } else {
+              executeTicketSearch(data);
+            }
           }}
           onClose={() => setIsQrScannerOpen(false)}
         />

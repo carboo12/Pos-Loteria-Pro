@@ -153,7 +153,7 @@ export class BluetoothPrinterService {
     this.setStatus("printing", "Imprimiendo...");
 
     try {
-      const mtu = 512;
+      const mtu = 64;
       for (let i = 0; i < data.length; i += mtu) {
         const chunk = data.slice(i, Math.min(i + mtu, data.length));
         if (this.characteristic?.properties.writeWithoutResponse) {
@@ -161,10 +161,11 @@ export class BluetoothPrinterService {
         } else if (this.characteristic?.properties.write) {
           await this.characteristic.writeValueWithResponse(chunk);
         } else {
-          throw new Error("La característica no soporta escritura");
+          // fallback if writeValue exists but writeWithoutResponse is not set explicitly
+          await (this.characteristic as any).writeValue(chunk);
         }
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
-
       this.setStatus("connected", "Impresión completada");
       return true;
     } catch (err: any) {
