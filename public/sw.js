@@ -1,4 +1,4 @@
-const CACHE_NAME = "loto-pos-cache-v7";
+const CACHE_NAME = "loto-pos-cache-v8";
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
@@ -22,7 +22,20 @@ self.addEventListener("activate", (e) => {
         keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
       );
     }).then(() => self.clients.claim())
+    .then(() => {
+      self.clients.matchAll().then((clients) => {
+        for (const client of clients) {
+          client.postMessage({ type: "SW_ACTIVATED", version: CACHE_NAME });
+        }
+      });
+    })
   );
+});
+
+self.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("fetch", (e) => {

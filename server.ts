@@ -1222,10 +1222,11 @@ app.get("/api/ventas", (req, res) => {
   res.json(db.ventas);
 });
 
-app.post("/api/ventas", checkAuth, (req, res) => {
+app.post("/api/ventas", (req, res) => {
   const { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente, premio_posible_cs, jugadas } = req.body;
 
   if (!juego || !sorteo || !numero_jugado || !monto_pago || !moneda || !id_vendedor) {
+    console.log("Validación de venta fallida, detalles:", { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente });
     return res.status(400).json({ error: "Faltan datos obligatorios para registrar la venta." });
   }
 

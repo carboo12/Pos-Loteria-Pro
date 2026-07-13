@@ -35,6 +35,8 @@ import ResumenFacturacionCard from "./ResumenFacturacionCard";
 import FacturacionVendedorCard from "./FacturacionVendedorCard";
 import { collection, addDoc, serverTimestamp, query, where, getDocs, doc, updateDoc, getDoc } from "firebase/firestore";
 import { firestore, auth } from "../lib/firebase";
+import { BluetoothPrinterService, PrinterStatus } from "../services/BluetoothPrinterService";
+import { buildTicketBuffer, ticketDataFromVenta } from "../services/escpos-builder";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -153,6 +155,37 @@ export default function VendedorInterface({
   const [loading, setLoading] = useState(false);
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [activeTicket, setActiveTicket] = useState<Venta | null>(null);
+
+  // Bluetooth printer state
+  const [printerStatus, setPrinterStatus] = useState<PrinterStatus>("disconnected");
+  const printerRef = useRef<BluetoothPrinterService | undefined>(undefined);
+
+  if (!printerRef.current) {
+    printerRef.current = new BluetoothPrinterService((status) => setPrinterStatus(status));
+  }
+
+  useEffect(() => {
+    return () => {
+      printerRef.current?.disconnect();
+      printerRef.current = undefined;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (
+        document.visibilityState === "visible" &&
+        printerRef.current &&
+        printerStatus !== "connected" &&
+        printerStatus !== "connecting" &&
+        printerStatus !== "printing"
+      ) {
+        printerRef.current.connect();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [printerStatus]);
 
   // Ticket QR/ID Search states
   // Hardware and Permission states
@@ -1317,6 +1350,25 @@ export default function VendedorInterface({
       setSuccessMessage(`Ticket #${syncedTicket.numero_ticket} emitido con éxito en Firestore.`);
       toast.success(`Ticket #${syncedTicket.numero_ticket} emitido con éxito`, { position: 'top-center' });
 
+      // Bluetooth ESC/POS printing (non-blocking)
+      if (printerRef.current && printerStatus === "connected") {
+        const printData = ticketDataFromVenta(syncedTicket, config);
+        const buffer = buildTicketBuffer(printData);
+        printerRef.current.print(buffer).then((ok) => {
+          if (ok) {
+            toast.success("Ticket impreso en Bluetooth", { position: 'top-center', duration: 2000 });
+          } else {
+            toast.error("No se pudo imprimir el ticket. Verifique la impresora.", {
+              position: 'top-center',
+              duration: 4000
+            });
+          }
+        }).catch((err) => {
+          console.error("Bluetooth print error:", err);
+          toast.error("Error inesperado al imprimir", { position: 'top-center', duration: 4000 });
+        });
+      }
+
       // Full cleanup: cart + form + nombre
       setJugadas([]);
       setNumeroJugado("");
@@ -1446,6 +1498,35 @@ export default function VendedorInterface({
           </div>
 
           <div className="flex items-center space-x-2">
+            {/* Bluetooth Printer Button */}
+            <button
+              id="printer-connect-btn"
+              onClick={() => {
+                if (printerStatus === "connected") {
+                  printerRef.current?.disconnect();
+                } else {
+                  printerRef.current?.connect();
+                }
+              }}
+              className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all shadow-inner border cursor-pointer ${
+                printerStatus === "connected"
+                  ? "bg-[#10B981] border-[#0F9F6F] text-white"
+                  : printerStatus === "connecting" || printerStatus === "printing"
+                  ? "bg-[#F59E0B] border-[#D97706] text-white animate-pulse"
+                  : printerStatus === "error"
+                  ? "bg-[#EF4444] border-[#D83A3A] text-white"
+                  : "bg-gray-600 border-gray-500 text-white"
+              }`}
+            >
+              <Printer className="w-3 h-3" />
+              <span>
+                {printerStatus === "connected" ? "Impresora" :
+                 printerStatus === "connecting" ? "Conectando..." :
+                 printerStatus === "printing" ? "Imprimiendo..." :
+                 printerStatus === "error" ? "Error BT" :
+                 "BT Off"}
+              </span>
+            </button>
             {/* Live simulator connection switch */}
             <button
               id="conn-toggle"
