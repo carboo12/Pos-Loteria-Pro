@@ -269,18 +269,23 @@ export function ticketDataFromVenta(venta: Venta, config: Configuracion): Ticket
     }
     return 80;
   })();
-
-  const montoInCs = venta.moneda === "USD"
-    ? venta.monto_pago * (config.tasa_cambio || 36.50)
-    : venta.monto_pago;
-  const potentialPrizeCs = venta.premio_posible_cs ?? (montoInCs * multiplier);
-
   const jugadasFromVenta = venta.jugadas && venta.jugadas.length > 0
-    ? venta.jugadas.map(j => ({
-        numero: j.numero,
-        monto: j.monto,
-        premio_posible: j.premio_posible || 0
-      }))
+    ? venta.jugadas.map((j) => {
+        const amtInCs = venta.moneda === "USD" ? j.monto * (config.tasa_cambio || 36.50) : j.monto;
+        return {
+          numero: j.numero,
+          monto: j.monto,
+          premio_posible: j.premio_posible || (amtInCs * multiplier)
+        };
+      })
+    : [];
+
+  const potentialPrizeCs = jugadasFromVenta.length > 0
+    ? jugadasFromVenta.reduce((acc, j) => acc + j.premio_posible, 0)
+    : (venta.premio_posible_cs || (venta.monto_pago * multiplier * (venta.moneda === "USD" ? (config.tasa_cambio || 36.5) : 1)));
+
+  const finalJugadas = jugadasFromVenta.length > 0
+    ? jugadasFromVenta
     : [{ numero: venta.numero_jugado || "?", monto: venta.monto_pago || 0, premio_posible: potentialPrizeCs }];
 
   const origin = typeof window !== "undefined" ? window.location.origin : "https://loteria-pro.web.app";
@@ -299,7 +304,7 @@ export function ticketDataFromVenta(venta: Venta, config: Configuracion): Ticket
     juego: sanitizeText(venta.juego),
     sorteo: sanitizeText(venta.sorteo),
     moneda: sanitizeText(venta.moneda),
-    jugadas: jugadasFromVenta,
+    jugadas: finalJugadas,
     total_apostado: venta.monto_pago,
     total_premio: potentialPrizeCs,
     firma_digital: venta.firma_digital || "",
