@@ -79,6 +79,23 @@ function calculatePrizeMultiplier(juego: string, sorteo: string): number {
   return 80;
 }
 
+const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+function fechaVentaToDateStr(fecha: { dia: string; mes: string; anio: number }): string {
+  const monthIdx = MESES.indexOf(fecha.mes);
+  if (monthIdx === -1) return `${fecha.anio}-01-01`;
+  return `${fecha.anio}-${String(monthIdx + 1).padStart(2, "0")}-${fecha.dia.padStart(2, "0")}`;
+}
+
+function parseDateStrToFechaVenta(dateStr: string): { dia: string; mes: string; anio: number } {
+  const d = new Date(dateStr + "T12:00:00");
+  return {
+    dia: String(d.getDate()).padStart(2, "0"),
+    mes: MESES[d.getMonth()],
+    anio: d.getFullYear()
+  };
+}
+
 export default function VendedorInterface({
   user,
   config,
@@ -107,7 +124,10 @@ export default function VendedorInterface({
   const [activeField, setActiveField] = useState<'numero' | 'monto'>('numero');
   const [moneda, setMoneda] = useState<"C$" | "USD">("C$");
   const [nombreCliente, setNombreCliente] = useState("Genérico");
-  const [fechaVenta, setFechaVenta] = useState(() => new Date().toISOString().split("T")[0]); // YYYY-MM-DD
+  const [fechaVenta, setFechaVenta] = useState<{ dia: string; mes: string; anio: number }>(() => {
+    const now = new Date();
+    return { dia: String(now.getDate()).padStart(2, "0"), mes: MESES[now.getMonth()], anio: now.getFullYear() };
+  });
   
   // Connection state
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -263,8 +283,8 @@ export default function VendedorInterface({
       return;
     }
 
-    if (matchingSorteo && !isDateValidForSorteo(matchingSorteo, fechaVenta)) {
-      setErrorMessage(`FECHA INVÁLIDA: ${selectedSorteo} no opera el ${fechaVenta}. ${getDiasHabilitadosShortLabel(matchingSorteo)}.`);
+    if (matchingSorteo && !isDateValidForSorteo(matchingSorteo, fechaVentaToDateStr(fechaVenta))) {
+      setErrorMessage(`FECHA INVÁLIDA: ${selectedSorteo} no opera el ${fechaVentaToDateStr(fechaVenta)}. ${getDiasHabilitadosShortLabel(matchingSorteo)}.`);
       return;
     }
 
@@ -276,7 +296,7 @@ export default function VendedorInterface({
       numero: numeroJugado,
       monto: numericAmount,
       premio_posible: premioPosibleCs,
-      fecha_venta: fechaVenta
+      fecha_venta: fechaVentaToDateStr(fechaVenta)
     };
 
     setJugadas([...jugadas, nuevaJugada]);
@@ -293,7 +313,8 @@ export default function VendedorInterface({
   const clearForm = () => {
     setNumeroJugado("");
     setMontoPago("");
-    setFechaVenta(new Date().toISOString().split("T")[0]);
+    const now = new Date();
+    setFechaVenta({ dia: String(now.getDate()).padStart(2, "0"), mes: MESES[now.getMonth()], anio: now.getFullYear() });
     setErrorMessage(null);
     setSuccessMessage(null);
     setActiveField("numero");
@@ -1036,18 +1057,18 @@ export default function VendedorInterface({
     // Reset fecha to valid date for the selected sorteo
     const newActiveDraw = getSorteosByGame(selectedJuego).find(s => !isSorteoCerrado(s)) || getSorteosByGame(selectedJuego)[0];
     if (newActiveDraw) {
-      setFechaVenta(getNextValidDate(newActiveDraw, new Date()));
+      setFechaVenta(parseDateStrToFechaVenta(getNextValidDate(newActiveDraw, new Date())));
     } else {
-      setFechaVenta(new Date().toISOString().split("T")[0]);
+      const now = new Date();
+      setFechaVenta({ dia: String(now.getDate()).padStart(2, "0"), mes: MESES[now.getMonth()], anio: now.getFullYear() });
     }
     
     // Set default value for Fechas
     if (selectedJuego === "Fechas") {
-      const defaultDate = newActiveDraw ? getNextValidDate(newActiveDraw, new Date()) : new Date().toISOString().split("T")[0];
-      const d = new Date(defaultDate + "T12:00:00");
-      const dia = String(d.getDate()).padStart(2, "0");
-      const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-      setNumeroJugado(`${dia}-${meses[d.getMonth()]}`);
+      const fechaStr = newActiveDraw ? getNextValidDate(newActiveDraw, new Date()) : new Date().toISOString().split("T")[0];
+      const d = new Date(fechaStr + "T12:00:00");
+      const diaF = String(d.getDate()).padStart(2, "0");
+      setNumeroJugado(`${diaF}-${MESES[d.getMonth()]}`);
     } else {
       setNumeroJugado("");
     }
@@ -1300,8 +1321,8 @@ export default function VendedorInterface({
     }
 
     // 3c. Validate fecha_venta matches sorteo day restriction
-    if (matchingSorteo && !isDateValidForSorteo(matchingSorteo, fechaVenta)) {
-      toast.error(`FECHA INVÁLIDA: ${selectedSorteo} no opera el ${fechaVenta}. ${getDiasHabilitadosShortLabel(matchingSorteo)}.`, { duration: 4000, position: 'top-center' });
+    if (matchingSorteo && !isDateValidForSorteo(matchingSorteo, fechaVentaToDateStr(fechaVenta))) {
+      toast.error(`FECHA INVÁLIDA: ${selectedSorteo} no opera el ${fechaVentaToDateStr(fechaVenta)}. ${getDiasHabilitadosShortLabel(matchingSorteo)}.`, { duration: 4000, position: 'top-center' });
       return;
     }
 
@@ -1360,7 +1381,7 @@ export default function VendedorInterface({
       const ticketData = {
         id_vendedor: user.id,
         fecha_emision: serverTimestamp(),
-        fecha_venta: fechaVenta,
+        fecha_venta: fechaVentaToDateStr(fechaVenta),
         id_juego: selectedJuego,
         id_sorteo: selectedSorteo,
         juego_sorteo: `${selectedJuego} ${selectedSorteo}`,
@@ -1384,7 +1405,7 @@ export default function VendedorInterface({
         id: id_ticket,
         numero_ticket: id_ticket.substring(0, 7).toUpperCase(),
         timestamp_servidor: new Date().toISOString(),
-        fecha_venta: fechaVenta,
+        fecha_venta: fechaVentaToDateStr(fechaVenta),
         juego: selectedJuego,
         sorteo: selectedSorteo,
         numero_jugado: jugadas[0].numero,
@@ -1397,7 +1418,7 @@ export default function VendedorInterface({
         firma_digital: id_ticket.substring(0, 7).toUpperCase(),
         anulado: false,
         estado: "pendiente",
-        jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto, premio_posible: j.premio_posible, fecha_venta: j.fecha_venta }))
+        jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto, premio_posible: j.premio_posible, fecha_venta: j.fecha_venta || fechaVentaToDateStr(fechaVenta) }))
       };
 
       // Background sync to local server REST API (so supervisor dashboard still works)
@@ -1868,45 +1889,77 @@ export default function VendedorInterface({
                 />
               </div>
 
-              {/* FECHA DEL SORTEO */}
+              {/* FECHA DEL SORTEO — Día + Mes calculator-style */}
               {(() => {
                 const currentSorteo = config.sorteos.find(s => s.nombre === selectedSorteo);
                 const hasDiasRestriction = currentSorteo?.dias_habilitados && currentSorteo.dias_habilitados.length > 0;
+                const diaNum = parseInt(fechaVenta.dia, 10);
+                const isInvalidDay = fechaVenta.dia.length > 0 && (isNaN(diaNum) || diaNum < 1 || diaNum > 31);
                 return (
-                  <div className="w-[115px] flex-shrink-0">
-                    <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">FECHA</label>
-                    <div className="relative">
+                  <div className="flex gap-1 flex-shrink-0">
+                    {/* DÍA */}
+                    <div className="w-12">
+                      <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">DÍA</label>
                       <input
-                        id="fecha-venta-input"
-                        type="date"
-                        value={fechaVenta}
+                        id="fecha-dia-input"
+                        type="number"
+                        inputMode="numeric"
+                        min="1"
+                        max="31"
+                        placeholder="DD"
+                        value={fechaVenta.dia}
                         onChange={(e) => {
-                          const newDate = e.target.value;
-                          if (currentSorteo && !isDateValidForSorteo(currentSorteo, newDate)) {
-                            toast.error(`Fecha inválida para este sorteo. ${getDiasHabilitadosShortLabel(currentSorteo)}.`, { duration: 2500, position: 'top-center' });
-                            return;
-                          }
-                          setFechaVenta(newDate);
-                          if (selectedJuego === "Fechas") {
-                            const d = new Date(newDate + "T12:00:00");
-                            const dia = String(d.getDate()).padStart(2, "0");
-                            const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-                            setNumeroJugado(`${dia}-${meses[d.getMonth()]}`);
+                          const val = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
+                          setFechaVenta(prev => ({ ...prev, dia: val }));
+                          if (val.length === 2 && parseInt(val, 10) >= 1 && parseInt(val, 10) <= 31) {
+                            const mesSelect = document.getElementById("fecha-mes-select") as HTMLSelectElement;
+                            if (mesSelect) mesSelect.focus();
                           }
                         }}
-                        className={`w-full h-12 px-2 rounded-xl border-2 text-sm font-bold text-center shadow-inner transition-colors focus:outline-none cursor-pointer ${
-                          activeField === "fecha"
+                        onFocus={() => setActiveField("fecha")}
+                        className={`w-full h-12 px-1 rounded-xl border-2 font-mono text-lg font-black text-center shadow-inner transition-colors focus:outline-none ${
+                          isInvalidDay
+                            ? "border-[#EF4444] text-[#EF4444] bg-red-50"
+                            : activeField === "fecha"
                             ? "border-blue-500 text-blue-900 bg-blue-50 shadow-md focus:border-blue-600"
                             : "border-gray-300 text-gray-900 bg-white focus:border-blue-500"
                         }`}
-                        style={{ colorScheme: "light" }}
                       />
                     </div>
-                    {hasDiasRestriction && (
-                      <div className="text-[8px] font-black text-orange-600 text-center mt-0.5 leading-tight">
-                        {getDiasHabilitadosShortLabel(currentSorteo!)}
-                      </div>
-                    )}
+
+                    {/* MES */}
+                    <div className="w-[72px]">
+                      <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">MES</label>
+                      <select
+                        id="fecha-mes-select"
+                        value={fechaVenta.mes}
+                        onChange={(e) => {
+                          setFechaVenta(prev => ({ ...prev, mes: e.target.value }));
+                          if (selectedJuego === "Fechas") {
+                            setNumeroJugado(`${fechaVenta.dia.padStart(2, "0")}-${e.target.value}`);
+                          }
+                          const montoInput = document.getElementById("monto-input") as HTMLInputElement;
+                          if (montoInput) montoInput.focus();
+                        }}
+                        onFocus={() => setActiveField("fecha")}
+                        className="w-full h-12 px-0.5 rounded-xl border-2 border-gray-300 bg-white font-sans text-[11px] font-bold text-gray-900 text-center focus:outline-none focus:border-blue-500 cursor-pointer transition-colors"
+                      >
+                        {MESES.map(m => (
+                          <option key={m} value={m}>{m.slice(0, 3).toUpperCase()}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Year badge + restriction hint */}
+                    <div className="flex flex-col items-center justify-end pb-1 gap-0.5">
+                      <span className="text-[10px] font-mono font-black text-gray-400">{String(fechaVenta.anio).slice(2)}</span>
+                      {isInvalidDay && (
+                        <span className="text-[8px] font-black text-red-500">1-31</span>
+                      )}
+                      {hasDiasRestriction && !isInvalidDay && (
+                        <span className="text-[7px] font-black text-orange-600 leading-tight text-center">{getDiasHabilitadosShortLabel(currentSorteo!).replace("SOLO ", "")}</span>
+                      )}
+                    </div>
                   </div>
                 );
               })()}
