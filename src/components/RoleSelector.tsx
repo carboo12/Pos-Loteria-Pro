@@ -35,10 +35,7 @@ export default function RoleSelector({ currentUser, onLogout, config }: RoleSele
             <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider">
               {currentUser.rol === "administrador" ? "Administrador" : isSupervisor ? "Supervisor" : "Vendedor"} • {currentUser.region}
             </span>
-          </div>          {/* Notification Portal Slot */}
-          <div id="navbar-notification-slot" className="flex items-center mx-2 z-[100] relative"></div>
-
-          <div className="bg-slate-800 p-1.5 rounded-xl border border-slate-700 flex items-center justify-center">
+          </div>          <div className="bg-slate-800 p-1.5 rounded-xl border border-slate-700 flex items-center justify-center">
             {isVendedor ? (
               <Smartphone className="w-4 h-4 text-emerald-400" />
             ) : isSupervisor ? (
@@ -47,6 +44,9 @@ export default function RoleSelector({ currentUser, onLogout, config }: RoleSele
               <Shield className="w-4 h-4 text-amber-400" />
             )}
           </div>
+
+          {/* Notification Portal Slot - Placed next to logout button */}
+          <div id="navbar-notification-slot" className="flex items-center mx-2 z-[100] relative"></div>
 
           {onLogout && (
             <button
