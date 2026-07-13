@@ -438,60 +438,6 @@ ${config.formato_ticket.mensaje_pie}
               })()}
             </div>
 
-            {/* Winner Evaluation Result (Monochrome Flat Layout) */}
-            {(() => {
-              const sorteoObj = config.sorteos?.find(s => s.nombre === ticket.sorteo);
-              const ticketDate = ticket.timestamp_servidor.substring(0, 10);
-              const resultObj = sorteoObj 
-                ? (config.resultados || []).find((r: any) => r.id_sorteo === sorteoObj.id && r.fecha === ticketDate)
-                : null;
-
-              if (ticket.anulado) {
-                return (
-                  <div className="my-3 p-3 border-2 border-black rounded-xl text-center text-black">
-                    <span className="text-xs font-black uppercase block">ESTADO DEL TICKET</span>
-                    <span className="text-sm font-black uppercase tracking-wider block mt-0.5">ANULADO</span>
-                  </div>
-                );
-              }
-
-              if (!resultObj) {
-                return (
-                  <div className="my-3 p-3 border-2 border-black border-dotted rounded-xl text-center text-black">
-                    <span className="text-xs font-black uppercase block">ESTADO DEL TICKET</span>
-                    <span className="text-sm font-black uppercase tracking-wider block mt-0.5">⏳ PENDIENTE DE JUGAR</span>
-                    <span className="text-[10px] block mt-1 leading-normal font-sans font-bold">El número ganador para este sorteo del {ticketDate} aún no ha sido registrado.</span>
-                  </div>
-                );
-              }
-
-              const cleanJugado = ticket.numero_jugado.trim().toLowerCase();
-              const cleanGanador = resultObj.numero_ganador.trim().toLowerCase();
-              const isWinner = cleanJugado === cleanGanador;
-
-              if (isWinner) {
-                return (
-                  <div className="my-3 p-4 border-4 border-black rounded-xl text-center text-black">
-                    <span className="text-xs font-bold uppercase block">RESULTADO: {cleanGanador}</span>
-                    <span className="text-base font-black uppercase tracking-widest block mt-0.5">🎉 ¡BOLETO PREMIADO!</span>
-                    <div className="mt-2.5 pt-2 border-t-2 border-black">
-                      <span className="text-xs font-black uppercase block">PAGAR AL CLIENTE</span>
-                      <span className="text-lg font-mono font-black block mt-1">
-                        C$ {potentialPrizeCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                  </div>
-                );
-              } else {
-                return (
-                  <div className="my-3 p-3 border-2 border-black rounded-xl text-center text-black">
-                    <span className="text-xs font-bold uppercase block">RESULTADO: {cleanGanador}</span>
-                    <span className="text-sm font-black uppercase tracking-wider block mt-0.5">❌ NO PREMIADO</span>
-                  </div>
-                );
-              }
-            })()}
-
             <div className="border-t-2 border-black border-dotted my-2" />
 
             {/* Digital Anti-Photoshop Signature */}
