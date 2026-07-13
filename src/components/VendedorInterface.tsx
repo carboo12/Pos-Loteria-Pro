@@ -1349,26 +1349,6 @@ export default function VendedorInterface({
       setActiveTicket(syncedTicket);
       setSuccessMessage(`Ticket #${syncedTicket.numero_ticket} emitido con éxito en Firestore.`);
       toast.success(`Ticket #${syncedTicket.numero_ticket} emitido con éxito`, { position: 'top-center' });
-
-      // Bluetooth ESC/POS printing (non-blocking)
-      if (printerRef.current && printerStatus === "connected") {
-        const printData = ticketDataFromVenta(syncedTicket, config);
-        const buffer = buildTicketBuffer(printData);
-        printerRef.current.print(buffer).then((ok) => {
-          if (ok) {
-            toast.success("Ticket impreso en Bluetooth", { position: 'top-center', duration: 2000 });
-          } else {
-            toast.error("No se pudo imprimir el ticket. Verifique la impresora.", {
-              position: 'top-center',
-              duration: 4000
-            });
-          }
-        }).catch((err) => {
-          console.error("Bluetooth print error:", err);
-          toast.error("Error inesperado al imprimir", { position: 'top-center', duration: 4000 });
-        });
-      }
-
       // Full cleanup: cart + form + nombre
       setJugadas([]);
       setNumeroJugado("");
@@ -2559,6 +2539,23 @@ export default function VendedorInterface({
           onClose={() => setActiveTicket(null)} 
           userRole={user.rol}
           serverTime={serverTime}
+          onPrint={printerRef.current && printerStatus === "connected" ? () => {
+            const printData = ticketDataFromVenta(activeTicket, config);
+            const buffer = buildTicketBuffer(printData);
+            printerRef.current.print(buffer).then((ok) => {
+              if (ok) {
+                toast.success("Ticket impreso en Bluetooth", { position: 'top-center', duration: 2000 });
+              } else {
+                toast.error("No se pudo imprimir el ticket. Verifique la impresora.", {
+                  position: 'top-center',
+                  duration: 4000
+                });
+              }
+            }).catch((err) => {
+              console.error("Bluetooth print error:", err);
+              toast.error("Error inesperado al imprimir", { position: 'top-center', duration: 4000 });
+            });
+          } : undefined}
         />
       )}
 

@@ -67,6 +67,7 @@ interface TicketPreviewModalProps {
   onClose: () => void;
   userRole?: string;
   serverTime?: string;
+  onPrint?: () => void;
 }
 
 function calculatePrizeMultiplier(juego: string, sorteo: string): number {
@@ -86,7 +87,7 @@ function calculatePrizeMultiplier(juego: string, sorteo: string): number {
   return 80;
 }
 
-export default function TicketPreviewModal({ ticket, config, onClose, userRole = "vendedor", serverTime }: TicketPreviewModalProps) {
+export default function TicketPreviewModal({ ticket, config, onClose, userRole = "vendedor", serverTime, onPrint }: TicketPreviewModalProps) {
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
   const ticketRenderRef = useRef<HTMLDivElement>(null);
@@ -540,8 +541,7 @@ ${config.formato_ticket.mensaje_pie}
         <div className="p-4 bg-white grid grid-cols-2 gap-3 border-t border-gray-100">
           <button
             id="print-ticket-btn"
-            onClick={handlePrintRaw}
-            disabled={isBlocked || sharing}
+            onClick={onPrint ? onPrint : handlePrintRaw}
             className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center cursor-pointer shadow-sm border-b-2 ${
               isBlocked || sharing
                 ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed border-b-0" 
