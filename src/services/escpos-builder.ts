@@ -176,7 +176,10 @@ export function buildTicketBuffer(data: TicketPrintData): Uint8Array {
   bytes.push(...ESCPOS.CODE_PAGE);
   bytes.push(...emptyLine());
 
-  // Cabecera del negocio
+  // Cabecera del negocio (Logo y Nombre)
+  bytes.push(...ESCPOS.ALIGN_CENTER);
+  bytes.push(0x1C, 0x70, 0x01, 0x00); // FS p 1 0: Prints NV bit image #1 (Logo)
+  bytes.push(...emptyLine());
   bytes.push(...doubleLine(data.negocio));
   bytes.push(...line(data.ruc, "C", true));
   if (data.direccion) bytes.push(...line(data.direccion, "C"));
