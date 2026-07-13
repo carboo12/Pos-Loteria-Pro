@@ -12,6 +12,31 @@
     <link rel="icon" type="image/png" href="/icon-192.png" />
     <meta name="description" content="Sistema de Punto de Venta para Loterías de Nicaragua y Honduras" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
+    <script>
+      (function() {
+        var KEY = "sw_rl_v9";
+        if (sessionStorage.getItem(KEY)) { sessionStorage.removeItem(KEY); return; }
+        window.addEventListener("error", function(e) {
+          var t = e.target;
+          if (!t) return;
+          var tag = t.tagName;
+          if (tag === "SCRIPT" || tag === "LINK") {
+            var url = t.src || t.href || "";
+            if (/\.(js|css)(\?|$)/.test(url)) {
+              sessionStorage.setItem(KEY, "1");
+              location.reload();
+            }
+          }
+        }, true);
+        window.addEventListener("unhandledrejection", function(e) {
+          var msg = (e.reason && e.reason.message) || "";
+          if (/ChunkLoad|Loading chunk|Loading CSS chunk|Importing a module script/.test(msg)) {
+            sessionStorage.setItem(KEY, "1");
+            location.reload();
+          }
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

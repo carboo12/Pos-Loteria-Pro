@@ -116,6 +116,13 @@ const registerServiceWorker = () => {
         window.location.reload();
       }
     });
+
+    // Periodic update check: every 60 minutes, ask the SW to check for updates
+    setInterval(() => {
+      if (navigator.serviceWorker.controller) {
+        reg.update().catch(() => {});
+      }
+    }, 60 * 60 * 1000);
   }).catch((err) => console.error("Error al registrar SW:", err));
 };
 
