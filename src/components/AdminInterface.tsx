@@ -494,7 +494,20 @@ export default function AdminInterface({
 
   useEffect(() => {
     const el = document.getElementById("navbar-notification-slot");
-    if (el) setPortalTarget(el);
+    if (el) {
+      setPortalTarget(el);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const targetEl = document.getElementById("navbar-notification-slot");
+      if (targetEl) {
+        setPortalTarget(targetEl);
+        clearInterval(interval);
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Load Notification Permission State
