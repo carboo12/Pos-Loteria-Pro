@@ -241,11 +241,11 @@ export function buildTicketBuffer(data: TicketPrintData): Uint8Array {
 
   // Datos del ticket justificados
   bytes.push(...line(justifyLine("NO. TICKET:", `#${data.numero_ticket}`), "L", true));
-  
+
   // Imprimir fecha en múltiples líneas justificadas si es necesario
   bytes.push(...line("FECHA:", "L", true));
   bytes.push(...line(data.fecha_completa, "L"));
-  
+
   bytes.push(...line(justifyLine("VENDEDOR:", data.vendedor), "L", true));
   if (data.cliente) {
     bytes.push(...line(justifyLine("CLIENTE:", data.cliente), "L", true));
@@ -277,7 +277,7 @@ export function buildTicketBuffer(data: TicketPrintData): Uint8Array {
 
   // Totales
   bytes.push(...line(justifyLine("TOTAL:", `${data.moneda} ${data.total_apostado.toFixed(2)}`), "L", true));
-  bytes.push(...line(justifyLine("PREMIO POSIBLE:", `C$ ${data.total_premio.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`), "L", true));
+  //no queremos eso de premio posible nunca asi que no lo ponemos
   bytes.push(...separator("="));
 
   // Firma
@@ -329,13 +329,13 @@ export function ticketDataFromVenta(venta: Venta, config: Configuracion): Ticket
   })();
   const jugadasFromVenta = venta.jugadas && venta.jugadas.length > 0
     ? venta.jugadas.map((j) => {
-        const amtInCs = venta.moneda === "USD" ? j.monto * (config.tasa_cambio || 36.50) : j.monto;
-        return {
-          numero: j.numero,
-          monto: j.monto,
-          premio_posible: j.premio_posible || (amtInCs * multiplier)
-        };
-      })
+      const amtInCs = venta.moneda === "USD" ? j.monto * (config.tasa_cambio || 36.50) : j.monto;
+      return {
+        numero: j.numero,
+        monto: j.monto,
+        premio_posible: j.premio_posible || (amtInCs * multiplier)
+      };
+    })
     : [];
 
   const potentialPrizeCs = jugadasFromVenta.length > 0

@@ -1,4 +1,6 @@
 import { useState, useEffect, FormEvent } from "react";
+import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp } from "firebase/firestore";
+import { firestore } from "../lib/firebase";
 import { 
   LayoutDashboard, 
   Users, 
@@ -199,6 +201,7 @@ export default function AdminInterface({
   const [newSorteoHourCierre, setNewSorteoHourCierre] = useState("10");
   const [newSorteoMinCierre, setNewSorteoMinCierre] = useState("55");
   const [newSorteoAmPmCierre, setNewSorteoAmPmCierre] = useState("AM");
+  const [newSorteoDias, setNewSorteoDias] = useState<number[]>([]);
   const [sorteoEditando, setSorteoEditando] = useState<any>(null);
 
   // Results (Resultados) Section States
@@ -244,15 +247,15 @@ export default function AdminInterface({
   const [historialCobros, setHistorialCobros] = useState<any[]>([]);
 
   // Fetch lists
+  // Fetch results from Firestore directly (not backend API)
   const fetchResultsList = async () => {
     try {
-      const res = await fetch("/api/resultados");
-      if (res.ok) {
-        const data = await res.json();
-        setResultsList(data);
-      }
+      const q = query(collection(firestore, "resultados"), orderBy("timestamp", "desc"));
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setResultsList(data);
     } catch (e) {
-      console.error("Error loading results", e);
+      console.error("Error loading results from Firestore", e);
     }
   };
 
@@ -1055,6 +1058,7 @@ export default function AdminInterface({
     setNewSorteoHourCierre(isCPM && chNum > 12 ? String(chNum - 12) : isCPM && chNum === 12 ? "12" : chNum === 0 ? "12" : String(chNum));
     setNewSorteoMinCierre(cmStr.padStart(2, "0"));
     setNewSorteoAmPmCierre(isCPM ? "PM" : "AM");
+    setNewSorteoDias(sorteo.dias_habilitados || []);
   };
 
   const cancelEditSorteo = () => {
@@ -1066,6 +1070,7 @@ export default function AdminInterface({
     setNewSorteoHourCierre("10");
     setNewSorteoMinCierre("55");
     setNewSorteoAmPmCierre("AM");
+    setNewSorteoDias([]);
   };
 
   // Add or update draw schedule
@@ -1105,7 +1110,8 @@ export default function AdminInterface({
             juego: newSorteoJuego,
             nombre: `${newSorteoJuego} ${newSorteoNombre} ${suffix}`,
             hora_sorteo: horaSorteo24,
-            hora_cierre: horaCierre24
+            hora_cierre: horaCierre24,
+            dias_habilitados: newSorteoDias.length > 0 ? newSorteoDias : undefined
           };
         }
         return s;
@@ -1126,7 +1132,8 @@ export default function AdminInterface({
         juego: newSorteoJuego,
         nombre: `${newSorteoJuego} ${newSorteoNombre} ${suffix}`,
         hora_sorteo: horaSorteo24,
-        hora_cierre: horaCierre24
+        hora_cierre: horaCierre24,
+        ...(newSorteoDias.length > 0 ? { dias_habilitados: newSorteoDias } : {})
       };
 
       const updatedSorteos = [...config.sorteos, newSorteoObj];
@@ -1229,51 +1236,39 @@ export default function AdminInterface({
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/resultados", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id_sorteo: selectedSorteoResultados,
-          sorteo: matchedSorteo ? matchedSorteo.nombre : "",
-          pais: selectedPaisResultados,
-          fecha: fechaResultadosInput,
-          numero_ganador: winningNum
-        })
+      const docRef = await addDoc(collection(firestore, "resultados"), {
+        id_sorteo: selectedSorteoResultados,
+        sorteo: matchedSorteo ? matchedSorteo.nombre : "",
+        pais: selectedPaisResultados,
+        fecha: fechaResultadosInput,
+        numero_ganador: winningNum,
+        timestamp: new Date().toISOString()
       });
-
-      if (res.ok) {
-        setSuccessText("Resultado del sorteo guardado y publicado exitosamente.");
-        setWinningNumberInput("");
-        await fetchResultsList();
-      } else {
-        const data = await res.json();
-        setAlertText(data.error || "Error al guardar el resultado.");
-      }
+      console.log("Resultado guardado en Firestore:", docRef.id);
+      setSuccessText("Resultado del sorteo guardado y publicado exitosamente.");
+      setWinningNumberInput("");
+      await fetchResultsList();
     } catch (err) {
-      setAlertText("Error de red al guardar el resultado.");
+      console.error("Error guardando resultado en Firestore:", err);
+      setAlertText("Error al guardar el resultado en la nube.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Delete winning number (Resultado)
+  // Delete winning number from Firestore directly
   const handleDeleteResultado = async (resId: string) => {
     setAlertText(null);
     setSuccessText(null);
 
     try {
-      const res = await fetch(`/api/resultados/${resId}`, {
-        method: "DELETE"
-      });
-
-      if (res.ok) {
-        setSuccessText("Resultado eliminado correctamente.");
-        await fetchResultsList();
-      } else {
-        setAlertText("Error al eliminar el resultado.");
-      }
+      await deleteDoc(doc(firestore, "resultados", resId));
+      console.log("Resultado eliminado de Firestore:", resId);
+      setSuccessText("Resultado eliminado correctamente.");
+      await fetchResultsList();
     } catch (err) {
-      setAlertText("Error de red al eliminar el resultado.");
+      console.error("Error eliminando resultado de Firestore:", err);
+      setAlertText("Error al eliminar el resultado.");
     }
   };
 
@@ -2315,6 +2310,26 @@ export default function AdminInterface({
                         <option value="PM">PM</option>
                       </select>
                     </div>
+                  </div>
+                </div>
+
+                <div className="mt-2">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Días Habilitados (vacío = todos)</label>
+                  <div className="flex flex-wrap gap-1">
+                    {["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"].map((dia, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setNewSorteoDias(prev => prev.includes(idx) ? prev.filter(d => d !== idx) : [...prev, idx])}
+                        className={`px-2 py-1 min-h-[32px] text-[10px] font-bold rounded-lg border transition-all ${
+                          newSorteoDias.includes(idx)
+                            ? "bg-indigo-600 text-white border-indigo-700"
+                            : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                        }`}
+                      >
+                        {dia}
+                      </button>
+                    ))}
                   </div>
                 </div>
 

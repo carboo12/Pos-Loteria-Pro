@@ -1266,6 +1266,18 @@ app.post("/api/ventas", (req, res) => {
         error: `VENTA RECHAZADA (ANTI-FRAUDE): El sorteo ${sorteo} cerró a las ${selectedSorteo.hora_cierre} (Hora Servidor: ${now.toLocaleTimeString("es-ES")}).`
       });
     }
+
+    // Check day-of-week restriction
+    if (selectedSorteo.dias_habilitados && selectedSorteo.dias_habilitados.length > 0) {
+      const currentDay = now.getDay(); // 0=Sun..6=Sat
+      if (!selectedSorteo.dias_habilitados.includes(currentDay)) {
+        const diasNames = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+        const diasStr = selectedSorteo.dias_habilitados.map((d: number) => diasNames[d]).join(", ");
+        return res.status(400).json({
+          error: `VENTA RECHAZADA: El sorteo ${sorteo} solo está habilitado los días ${diasStr}.`
+        });
+      }
+    }
   }
 
   // 2.5 LIMIT CHECK (Techo de venta granular)
@@ -1492,7 +1504,7 @@ app.post("/api/ventas/:id/anular", (req, res) => {
 });
 
 // Validación y Pago de Tickets con QR
-app.post("/api/ventas/:id/pagar", (req, res) => {
+app.post("/api/ventas/:id/pagar", async (req, res) => {
   const { id } = req.params;
 
   if (activePaymentLocks.has(id)) {
@@ -1520,11 +1532,32 @@ app.post("/api/ventas/:id/pagar", (req, res) => {
     }
 
     const saleDateStr = sale.timestamp_servidor.split("T")[0];
-    const resultado = (db.configuracion.resultados || []).find((r: any) => {
+
+    // Find resultado: first try in-memory cache, then Firestore
+    let resultado = (db.configuracion.resultados || []).find((r: any) => {
       if (r.fecha !== saleDateStr) return false;
       const sorteoObj = db.configuracion.sorteos.find((s: any) => s.id === r.id_sorteo);
       return sorteoObj && sorteoObj.nombre === sale.sorteo && sorteoObj.juego === sale.juego;
     });
+
+    if (!resultado && initFirebaseAdmin()) {
+      try {
+        const firestoreDb = getFirestoreInstance();
+        const snap = await firestoreDb.collection("resultados")
+          .where("fecha", "==", saleDateStr)
+          .get();
+        for (const d of snap.docs) {
+          const r = d.data();
+          const sorteoObj = db.configuracion.sorteos.find((s: any) => s.id === r.id_sorteo);
+          if (sorteoObj && sorteoObj.nombre === sale.sorteo && sorteoObj.juego === sale.juego) {
+            resultado = r;
+            break;
+          }
+        }
+      } catch (err) {
+        console.error("[Escrutinio] Error leyendo resultados de Firestore:", err);
+      }
+    }
 
     if (!resultado) {
       return res.status(400).json({ error: "Aún no hay resultados registrados para este sorteo." });

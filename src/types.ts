@@ -17,6 +17,7 @@ export interface Jugada {
   numero: string;          // El número apostado
   monto: number;           // Monto apostado en la moneda del ticket
   premio_posible: number;  // Premio posible en C$ (ya convertido)
+  fecha_venta?: string;    // YYYY-MM-DD — fecha del sorteo para el que se apuesta
 }
 
 export interface FormatoTicket {
@@ -31,6 +32,7 @@ export interface Sorteo {
   hora_sorteo: string; // "11:00", "15:00", "21:00"
   hora_cierre: string; // "10:55", "14:55", "20:55"
   nombre: string; // e.g. "Diaria 11:00 AM (NI)"
+  dias_habilitados?: number[]; // [0-6] 0=Dom,2=Mar. Undefined = todos los días
 }
 
 export interface SorteoResultado {
@@ -85,6 +87,7 @@ export interface Venta {
   id: string;
   numero_ticket: string; // e.g. "0001045"
   timestamp_servidor: string; // ISO String
+  fecha_venta?: string; // YYYY-MM-DD — fecha del sorteo
   juego: string; // "Diaria", "Premia2", etc.
   sorteo: string; // Name of the draw
   numero_jugado: string; // Primera jugada (backward compat) o resumen
