@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Camera, AlertTriangle, Loader2 } from "lucide-react";
+import { X, Camera, AlertTriangle, Loader2, Zap, ZapOff } from "lucide-react";
 import jsQR from "jsqr";
 
 interface QrScannerModalProps {
@@ -14,6 +14,8 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
+  const [hasTorch, setHasTorch] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
   const requestRef = useRef<number>();
 
@@ -38,6 +40,22 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
         }
 
         streamRef.current = stream;
+
+        // Detect if device camera supports flashlight/torch
+        const track = stream.getVideoTracks()[0];
+        if (track) {
+          setTimeout(() => {
+            try {
+              const capabilities = track.getCapabilities() as any;
+              if (capabilities && capabilities.torch) {
+                setHasTorch(true);
+              }
+            } catch (capErr) {
+              console.warn("Could not check torch capabilities:", capErr);
+            }
+          }, 500);
+        }
+
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.setAttribute("playsinline", "true");
@@ -103,6 +121,21 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
     };
   }, [onScan, retryCount]);
 
+  const toggleTorch = async () => {
+    try {
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (track) {
+        const nextState = !torchOn;
+        await track.applyConstraints({
+          advanced: [{ torch: nextState }]
+        } as any);
+        setTorchOn(nextState);
+      }
+    } catch (err) {
+      console.error("Failed to toggle flashlight:", err);
+    }
+  };
+
   return (
     <AnimatePresence>
       <motion.div
@@ -123,12 +156,23 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
               <Camera className="w-5 h-5" />
               <span className="font-display font-bold tracking-wide text-sm">Escáner Activo</span>
             </div>
-            <button
-              onClick={onClose}
-              className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center space-x-2">
+              {hasTorch && (
+                <button
+                  onClick={toggleTorch}
+                  className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors focus:outline-none"
+                  title={torchOn ? "Apagar linterna" : "Encender linterna"}
+                >
+                  {torchOn ? <Zap className="w-5 h-5 text-yellow-400 fill-yellow-400" /> : <ZapOff className="w-5 h-5 text-white/70" />}
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* Camera Viewport */}

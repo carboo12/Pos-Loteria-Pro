@@ -212,6 +212,10 @@ export default function VendedorInterface({
   const totalTicketMonto = jugadas.reduce((acc, j) => acc + j.monto, 0);
   const totalTicketPremio = jugadas.reduce((acc, j) => acc + j.premio_posible, 0);
 
+  // Pre-declared variables to avoid temporal dead zone compile errors
+  let limitCheckResult: any = null;
+  let isLimitBlocked = false;
+
 
 
   const addJugadaAlCarrito = () => {
@@ -552,8 +556,58 @@ export default function VendedorInterface({
         prize += p;
       }
     }
-
     return prize;
+  };
+
+  const isSorteoPasado = (ticket: any): boolean => {
+    let game = ticket.id_juego || "";
+    let draw = ticket.id_sorteo || "";
+    if (!game || !draw) {
+      const js = ticket.juego_sorteo || "";
+      if (js.startsWith("La Diaria")) {
+        game = "La Diaria";
+        draw = js.substring("La Diaria".length).trim();
+      } else if (js.startsWith("Premia2")) {
+        game = "Premia2";
+        draw = js.substring("Premia2".length).trim();
+      } else if (js.startsWith("Pega 3")) {
+        game = "Pega 3";
+        draw = js.substring("Pega 3".length).trim();
+      } else if (js.startsWith("Jugá 3")) {
+        game = "Jugá 3";
+        draw = js.substring("Jugá 3".length).trim();
+      } else if (js.startsWith("Diaria")) {
+        game = "Diaria";
+        draw = js.substring("Diaria".length).trim();
+      } else if (js.startsWith("Fechas")) {
+        game = "Fechas";
+        draw = js.substring("Fechas".length).trim();
+      } else if (js.startsWith("Terminación 2")) {
+        game = "Terminación 2";
+        draw = js.substring("Terminación 2".length).trim();
+      } else if (js.startsWith("Súper Premio")) {
+        game = "Súper Premio";
+        draw = js.substring("Súper Premio".length).trim();
+      } else if (js.startsWith("3 Monazos")) {
+        game = "3 Monazos";
+        draw = js.substring("3 Monazos".length).trim();
+      }
+    }
+    const ticketDate = ticket.timestamp_servidor ? ticket.timestamp_servidor.substring(0, 10) : new Date().toISOString().substring(0, 10);
+    const sObj = config.sorteos?.find(s => s.nombre === draw && s.juego === game);
+    if (!sObj) return true;
+
+    const rObj = sObj
+      ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === ticketDate)
+      : null;
+    if (rObj) return true;
+
+    const todayStr = getSyncedNow().toISOString().substring(0, 10);
+    if (ticketDate < todayStr) return true;
+    if (ticketDate === todayStr) {
+      return isSorteoCerrado(sObj);
+    }
+    return false;
   };
 
   const fetchReportTickets = async () => {
@@ -861,7 +915,7 @@ export default function VendedorInterface({
   };
 
   // Helper to check if a draw is closed based on serverTime or local clock
-  const isSorteoCerrado = (s: Sorteo) => {
+  function isSorteoCerrado(s: Sorteo) {
     try {
       const now = getSyncedNow();
       const [cierreHour, cierreMin] = s.hora_cierre.split(":").map(Number);
@@ -986,7 +1040,7 @@ export default function VendedorInterface({
   };
 
   // Perform granular limit check in real-time
-  const getRealTimeLimitCheck = () => {
+  function getRealTimeLimitCheck() {
     if (!numeroJugado || !selectedSorteo) return null;
 
     const limits = config?.limites_numeros || [];
@@ -1093,8 +1147,8 @@ export default function VendedorInterface({
     };
   };
 
-  const limitCheckResult = getRealTimeLimitCheck();
-  const isLimitBlocked = limitCheckResult?.isExceeded || false;
+  limitCheckResult = getRealTimeLimitCheck();
+  isLimitBlocked = limitCheckResult?.isExceeded || false;
 
   // Numeric keyboard handler
   const handleKeypadPress = (val: string) => {
@@ -2160,6 +2214,147 @@ export default function VendedorInterface({
                             <span className="font-mono font-black text-gray-900 text-sm">
                               C$ {(t.total_apostado || 0).toFixed(2)}
                             </span>
+                          </div>
+
+                          {/* Action Options Group */}
+                          <div className="border-t border-gray-100 pt-3 mt-3 grid grid-cols-4 gap-1">
+                            <button
+                              onClick={() => {
+                                if (isSorteoPasado(t)) {
+                                  toast.error("No se puede visualizar el ticket porque el sorteo ya se realizó.", { position: 'top-center' });
+                                } else {
+                                  const tempVenta: Venta = {
+                                    id: t.id,
+                                    numero_ticket: t.numero_ticket || t.id_ticket || t.id.substring(0, 7).toUpperCase(),
+                                    timestamp_servidor: t.fecha_emision_date ? t.fecha_emision_date.toISOString() : new Date().toISOString(),
+                                    juego: game,
+                                    sorteo: draw,
+                                    numero_jugado: t.jugadas && t.jugadas[0] ? t.jugadas[0].numero : (t.numero_jugado || "?"),
+                                    monto_pago: t.total_apostado,
+                                    moneda: t.moneda || "C$",
+                                    id_vendedor: t.id_vendedor,
+                                    nombre_vendedor: user.nombre,
+                                    nombre_cliente: t.nombre_cliente || "Genérico",
+                                    premio_posible_cs: t.total_premio || 0,
+                                    firma_digital: t.firma_digital || t.id.substring(0, 7).toUpperCase(),
+                                    anulado: t.estado === "anulado",
+                                    estado: t.estado,
+                                    jugadas: t.jugadas || []
+                                  };
+                                  setActiveTicket(tempVenta);
+                                }
+                              }}
+                              className={`py-1.5 px-0.5 rounded-lg text-[9px] font-black uppercase transition-all border text-center flex items-center justify-center cursor-pointer ${
+                                isSorteoPasado(t)
+                                  ? "bg-gray-100 text-gray-400 border-gray-200"
+                                  : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                              }`}
+                            >
+                              Visualizar
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                if (t.estado === "anulado") {
+                                  toast.error("No se puede reimprimir un ticket anulado.", { position: 'top-center' });
+                                  return;
+                                }
+                                if (printerStatus !== "connected" || !printerRef.current) {
+                                  toast.error("La impresora Bluetooth no está conectada.", { position: 'top-center' });
+                                  return;
+                                }
+                                const tempVenta: Venta = {
+                                  id: t.id,
+                                  numero_ticket: t.numero_ticket || t.id_ticket || t.id.substring(0, 7).toUpperCase(),
+                                  timestamp_servidor: t.fecha_emision_date ? t.fecha_emision_date.toISOString() : new Date().toISOString(),
+                                  juego: game,
+                                  sorteo: draw,
+                                  numero_jugado: t.jugadas && t.jugadas[0] ? t.jugadas[0].numero : (t.numero_jugado || "?"),
+                                  monto_pago: t.total_apostado,
+                                  moneda: t.moneda || "C$",
+                                  id_vendedor: t.id_vendedor,
+                                  nombre_vendedor: user.nombre,
+                                  nombre_cliente: t.nombre_cliente || "Genérico",
+                                  premio_posible_cs: t.total_premio || 0,
+                                  firma_digital: t.firma_digital || t.id.substring(0, 7).toUpperCase(),
+                                  anulado: t.estado === "anulado",
+                                  estado: t.estado,
+                                  jugadas: t.jugadas || []
+                                };
+                                const printData = ticketDataFromVenta(tempVenta, config);
+                                const buffer = buildTicketBuffer(printData);
+                                printerRef.current.print(buffer).then((ok) => {
+                                  if (ok) {
+                                    toast.success("Ticket reimpreso", { position: 'top-center' });
+                                  } else {
+                                    toast.error("Error al reimprimir", { position: 'top-center' });
+                                  }
+                                }).catch((err) => {
+                                  console.error("Print error:", err);
+                                  toast.error("Error inesperado al imprimir", { position: 'top-center' });
+                                });
+                              }}
+                              className={`py-1.5 px-0.5 rounded-lg text-[9px] font-black uppercase transition-all border text-center flex items-center justify-center cursor-pointer ${
+                                t.estado === "anulado"
+                                  ? "bg-gray-100 text-gray-400 border-gray-200"
+                                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                              }`}
+                            >
+                              Imprimir
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                if (t.estado === "anulado") {
+                                  toast.error("El ticket ya está anulado.", { position: 'top-center' });
+                                  return;
+                                }
+                                // Client side validation: 5-minute void time limit
+                                const createdTime = t.fecha_emision_date ? t.fecha_emision_date.getTime() : new Date().toISOString();
+                                const elapsedMin = (Date.now() - new Date(createdTime).getTime()) / (60 * 1000);
+                                if (elapsedMin > 5) {
+                                  toast.error("Solo se pueden anular boletos dentro de los primeros 5 minutos de su emisión.", { position: 'top-center', duration: 4000 });
+                                  return;
+                                }
+                                handleAnularTicket(t.id);
+                              }}
+                              className={`py-1.5 px-0.5 rounded-lg text-[9px] font-black uppercase transition-all border text-center flex items-center justify-center cursor-pointer ${
+                                t.estado === "anulado"
+                                  ? "bg-gray-100 text-gray-400 border-gray-200"
+                                  : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                              }`}
+                            >
+                              Anular
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                // Repeat logic
+                                setSelectedJuego(game);
+                                setSelectedSorteo(draw);
+                                setMoneda(t.moneda || "C$");
+                                if (t.jugadas && t.jugadas.length > 0) {
+                                  setJugadas(t.jugadas.map((j: any) => ({
+                                    numero: j.numero,
+                                    monto: j.monto,
+                                    premio_posible: j.premio_posible || (j.monto * calculatePrizeMultiplier(game, draw))
+                                  })));
+                                } else if (t.numero_jugado) {
+                                  const mult = calculatePrizeMultiplier(game, draw);
+                                  const amtInCs = t.moneda === "USD" ? t.monto_pago * (config.tasa_cambio || 36.50) : t.monto_pago;
+                                  setJugadas([{
+                                    numero: t.numero_jugado,
+                                    monto: t.monto_pago,
+                                    premio_posible: amtInCs * mult
+                                  }]);
+                                }
+                                setActiveTab("venta");
+                                toast.success("Jugada repetida cargada en el formulario", { position: 'top-center' });
+                              }}
+                              className="py-1.5 px-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[9px] font-black uppercase transition-all text-center flex items-center justify-center cursor-pointer"
+                            >
+                              Repetir
+                            </button>
                           </div>
                         </div>
                       );
