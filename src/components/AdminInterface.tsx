@@ -36,6 +36,7 @@ import {
   EyeOff
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
+import { createPortal } from "react-dom";
 import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
 import { motion, AnimatePresence } from "framer-motion";
@@ -488,6 +489,13 @@ export default function AdminInterface({
   const [unseenCount, setUnseenCount] = useState(0);
   const [activeToast, setActiveToast] = useState<any | null>(null);
   const [notifPermission, setNotifPermission] = useState<string>("default");
+
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const el = document.getElementById("navbar-notification-slot");
+    if (el) setPortalTarget(el);
+  }, []);
 
   // Load Notification Permission State
   useEffect(() => {
