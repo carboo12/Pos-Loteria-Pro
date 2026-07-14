@@ -154,10 +154,10 @@ export default function TicketPreviewModal({ ticket, config, onClose, userRole =
 
   const totalLine = padLeft(`TOTAL: ${ticket.moneda} ${(Number(ticket.monto_pago) || 0).toFixed(2)}`, 32);
 
+  const hasTitulo = config.formato_ticket.titulo && config.formato_ticket.titulo.trim() !== "";
   const ticketText = `
 --------------------------------
-${config.formato_ticket.titulo}
-${config.formato_ticket.ruc}
+${hasTitulo ? config.formato_ticket.titulo + "\n" : ""}${config.formato_ticket.ruc}
 --------------------------------
   TICKET: #${ticket.numero_ticket}
   FECHA: ${formatTicketDate(ticket.timestamp_servidor)}
@@ -219,7 +219,7 @@ ${config.formato_ticket.mensaje_pie}
     t += "[C]--------------------------------\n";
     
     // Código QR nativo de RawBT con sintaxis <qrcode>
-    t += `\n[C]<qrcode size='8'>${ticket.numero_ticket || ticket.id}</qrcode>\n`;
+    t += `\n[C]<qrcode size='12'>${ticket.numero_ticket || ticket.id}</qrcode>\n`;
     
     t += "[C]ESTADO DEL TICKET\n";
     
@@ -350,9 +350,11 @@ ${config.formato_ticket.mensaje_pie}
                 className="h-12 w-auto object-contain"
               />
             </div>
-            <div className="text-center font-black text-black text-sm uppercase tracking-wide mb-0.5">
-              {config.formato_ticket.titulo}
-            </div>
+            {config.formato_ticket.titulo && config.formato_ticket.titulo.trim() !== "" && (
+              <div className="text-center font-black text-black text-sm uppercase tracking-wide mb-0.5">
+                {config.formato_ticket.titulo}
+              </div>
+            )}
             <div className="text-center text-xs text-black font-bold tracking-wide mb-3">
               {config.formato_ticket.ruc}
             </div>
@@ -447,12 +449,13 @@ ${config.formato_ticket.mensaje_pie}
             {/* Simulated Barcode & Real scannable QR Code */}
             <div className="mt-4 flex flex-col items-center border-t-2 border-black border-dotted pt-3 space-y-3">
               <div className="flex flex-col items-center p-2 bg-white border-2 border-black">
-                <QRCodeSVG 
+                <QRCodeSVG
                   value={ticket.numero_ticket || ticket.id}
-                  size={100}
+                  size={120}
                   level="L"
                   bgColor="#ffffff"
                   fgColor="#000000"
+                  marginSize={2}
                 />
               </div>
               <span className="text-xs text-black font-bold font-mono mt-1 uppercase tracking-wider">Verificación Digital QR</span>

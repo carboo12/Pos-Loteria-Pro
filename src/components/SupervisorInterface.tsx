@@ -26,7 +26,7 @@ import {
   WifiOff
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, CobroVendedor } from "../types";
-import { toDateStr, getTicketDate } from "../lib/date-utils";
+import { toDateStr, getTicketDate, getLocalTodayStr } from "../lib/date-utils";
 import { getTicketTheoreticalPrize } from "../lib/prize-utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
@@ -90,12 +90,13 @@ export default function SupervisorInterface({
   const [selectedVendedorFilter, setSelectedVendedorFilter] = useState("TODOS");
   const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 7); // Últimos 7 días por defecto
-    return d.toISOString().split("T")[0];
+    d.setDate(d.getDate() - 7);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
   });
-  const [reportFilterFechaFin, setReportFilterFechaFin] = useState(() => {
-    return new Date().toISOString().split("T")[0];
-  });
+  const [reportFilterFechaFin, setReportFilterFechaFin] = useState(() => getLocalTodayStr());
 
   // Form values for register cobro
   const [montoCobroCs, setMontoCobroCs] = useState("");

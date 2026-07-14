@@ -38,7 +38,7 @@ import {
   EyeOff
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
-import { toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr } from "../lib/date-utils";
+import { toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr, getNicaraguaISOString } from "../lib/date-utils";
 import { calculatePrizeMultiplier, getTicketTheoreticalPrize } from "../lib/prize-utils";
 import { createPortal } from "react-dom";
 import { jsPDF } from "jspdf";
@@ -834,8 +834,8 @@ export default function AdminInterface({
     setAlertText(null);
     setSuccessText(null);
 
-    if (!ticketTitleInput.trim() || !ticketRucInput.trim()) {
-      setAlertText("El título del ticket y las indicaciones son requeridos.");
+    if (!ticketRucInput.trim()) {
+      setAlertText("Las indicaciones del ticket son requeridas.");
       return;
     }
 
@@ -1250,7 +1250,7 @@ export default function AdminInterface({
         pais: selectedPaisResultados,
         fecha: fechaResultadosInput,
         numero_ganador: winningNum,
-        timestamp: new Date().toISOString()
+        timestamp: getNicaraguaISOString()
       });
       console.log("Resultado guardado en Firestore:", docRef.id);
 
@@ -2077,7 +2077,7 @@ export default function AdminInterface({
                 {/* Form fields */}
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Título de la Empresa</label>
+                    <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Título de la Empresa <span className="text-gray-400 normal-case">(Opcional)</span></label>
                     <input
                       id="ticket-title-config"
                       type="text"
@@ -2126,7 +2126,9 @@ export default function AdminInterface({
                     <div className="flex justify-center mb-1">
                       <img src="/logo.png" alt={config?.formato_ticket?.titulo || "Logo del Sistema"} className="h-8 w-auto object-contain" />
                     </div>
-                    <div className="text-center font-bold text-gray-950 mb-0.5 uppercase tracking-wide">{ticketTitleInput || "EMPRESA S.A."}</div>
+                    {ticketTitleInput?.trim() && (
+                      <div className="text-center font-bold text-gray-950 mb-0.5 uppercase tracking-wide">{ticketTitleInput.toUpperCase()}</div>
+                    )}
                     <div className="text-center text-[8px] text-gray-500 font-sans mb-2">{ticketRucInput || "INDICACIONES DEL TICKET"}</div>
                     <div className="border-t border-dashed border-gray-300 my-1.5"></div>
                     <div>TICKET: #0001045</div>

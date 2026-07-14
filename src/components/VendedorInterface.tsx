@@ -3,7 +3,6 @@ import toast from "react-hot-toast";
 import { 
   Gamepad2, 
   History, 
-  Calculator, 
   Wifi, 
   WifiOff, 
   DollarSign, 
@@ -38,7 +37,7 @@ import { firestore } from "../lib/firebase";
 import { BluetoothPrinterService, PrinterStatus } from "../services/BluetoothPrinterService";
 import { buildTicketBuffer, ticketDataFromVenta, loadLogoBitmap } from "../services/escpos-builder";
 import { isSorteoHabilitado, getDiasHabilitadosShortLabel, isDateValidForSorteo, getNextValidDate } from "../lib/sorteo-utils";
-import { toDateSafe, toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr } from "../lib/date-utils";
+import { toDateSafe, toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr, getNicaraguaISOString } from "../lib/date-utils";
 import { calculatePrizeMultiplier, getTicketTheoreticalPrize } from "../lib/prize-utils";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
@@ -102,8 +101,8 @@ export default function VendedorInterface({
   const [activeTab, setActiveTab] = useState<"venta" | "reportes" | "pagos">("venta");
   
   // Filtros y estados de Firestore para Reportes
-  const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => new Date().toISOString().split("T")[0]);
-  const [reportFilterFechaFin, setReportFilterFechaFin] = useState(() => new Date().toISOString().split("T")[0]);
+  const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => getLocalTodayStr());
+  const [reportFilterFechaFin, setReportFilterFechaFin] = useState(() => getLocalTodayStr());
   const [reportTickets, setReportTickets] = useState<any[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
   
@@ -236,6 +235,7 @@ export default function VendedorInterface({
   // --- NEW MULTI-NUMBER CART STATE ---
   const [jugadas, setJugadas] = useState<Jugada[]>([]);
   const montoInputRef = useRef<HTMLInputElement>(null);
+  const numeroInputRef = useRef<HTMLInputElement>(null);
   const totalTicketMonto = jugadas.reduce((acc, j) => acc + j.monto, 0);
   const totalTicketPremio = jugadas.reduce((acc, j) => acc + j.premio_posible, 0);
 
@@ -244,6 +244,14 @@ export default function VendedorInterface({
   let isLimitBlocked = false;
 
 
+
+  const getMaxLen = (juego: string): number => {
+    if (juego === "Premia2") return 4;
+    if (juego === "Jugá 3" || juego === "3 Monazos") return 3;
+    if (juego === "Pega 3") return 6;
+    if (juego === "Súper Premio") return 12;
+    return 2;
+  };
 
   const addJugadaAlCarrito = () => {
     setErrorMessage(null);
@@ -300,6 +308,7 @@ export default function VendedorInterface({
     setMontoPago("");
     setActiveField("numero");
     toast.success("¡Número añadido con éxito!", { position: 'top-center' });
+    setTimeout(() => numeroInputRef.current?.focus(), 0);
   };
 
   const removeJugada = (index: number) => {
@@ -314,6 +323,7 @@ export default function VendedorInterface({
     setErrorMessage(null);
     setSuccessMessage(null);
     setActiveField("numero");
+    setTimeout(() => numeroInputRef.current?.focus(), 0);
   };
 
 
@@ -910,7 +920,7 @@ export default function VendedorInterface({
     
     // Set default value for Fechas
     if (selectedJuego === "Fechas") {
-      const fechaStr = newActiveDraw ? getNextValidDate(newActiveDraw, new Date()) : new Date().toISOString().split("T")[0];
+      const fechaStr = newActiveDraw ? getNextValidDate(newActiveDraw, new Date()) : getLocalTodayStr();
       const d = new Date(fechaStr + "T12:00:00");
       const diaF = String(d.getDate()).padStart(2, "0");
       setNumeroJugado(`${diaF}-${MESES[d.getMonth()]}`);
@@ -1123,13 +1133,6 @@ export default function VendedorInterface({
     }
   };
 
-  // Preset Amount triggers
-  const presetAmountsCs = [10, 20, 50, 100, 200, 500];
-  const presetAmountsUsd = [1, 5, 10, 20, 50, 100];
-
-  const handlePresetAmount = (amount: number) => {
-    setMontoPago(String(amount));
-  };
 
   // --- DRAFT STATE COMMIT: Green button commits entire cart ---
   const handleGenerarTicket = async () => {
@@ -1243,6 +1246,7 @@ export default function VendedorInterface({
       setMontoPago("");
       setNombreCliente("Genérico");
       setActiveField("numero");
+      setTimeout(() => numeroInputRef.current?.focus(), 0);
       onRefreshSales();
     } catch (err: any) {
       console.error("Error al crear ticket:", err);
@@ -1651,6 +1655,91 @@ export default function VendedorInterface({
               </div>
             </div>
 
+            {/* Action Buttons — Stitch 3-Button Control Bar */}
+            <div className="flex flex-row gap-3 w-full">
+              {/* BORRAR — Stitch Red */}
+              <button
+                type="button"
+                onClick={clearForm}
+                disabled={loading}
+                className="h-14 px-4 rounded-xl bg-red-500 hover:bg-red-600 active:bg-red-700 text-white font-display font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="w-4 h-4 stroke-[2.5]" />
+                <span>Borrar</span>
+              </button>
+
+              {/* AÑADIR JUGADA — Stitch Blue */}
+              <button
+                type="button"
+                onClick={addJugadaAlCarrito}
+                disabled={loading}
+                className={`flex-1 h-14 rounded-xl flex items-center justify-center font-bold text-white shadow-sm transition-all duration-200 active:scale-95 cursor-pointer ${
+                  loading
+                    ? "bg-blue-300 cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-500 active:bg-blue-700"
+                }`}
+              >
+                <Plus className="w-6 h-6 stroke-[2.5]" />
+              </button>
+
+              {/* GENERAR TICKET — Stitch Green */}
+              <button
+                type="button"
+                id="vender-submit-btn"
+                onClick={handleGenerarTicket}
+                disabled={isSubmittingTicket}
+                className={`flex-1 h-14 rounded-xl flex items-center justify-center font-bold text-white shadow-sm transition-all duration-200 active:scale-95 cursor-pointer ${
+                  isSubmittingTicket
+                    ? "bg-emerald-300 cursor-not-allowed"
+                    : "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700"
+                }`}
+              >
+                {isSubmittingTicket ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Printer className="w-6 h-6 stroke-[2.5]" />
+                )}
+              </button>
+            </div>
+
+            {/* Cart de Jugadas Acumuladas — DRAFT STATE, scrollable */}
+            {jugadas.length > 0 && (
+              <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
+                <div className="px-3 py-2 bg-amber-50 border-b border-amber-200 flex justify-between items-center shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-display font-black text-gray-600 uppercase tracking-wider">
+                      Carrito ({jugadas.length} jugada{jugadas.length > 1 ? "s" : ""})
+                    </span>
+                    <span className="text-[9px] font-mono font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full uppercase">
+                      Preparación
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono font-black text-blue-900">
+                    Total: {moneda} {totalTicketMonto.toFixed(2)}
+                  </span>
+                </div>
+                <div className="max-h-[300px] overflow-y-auto divide-y divide-gray-100">
+                  {jugadas.map((j, i) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+                      <span className="font-mono font-black text-blue-900 w-12">{j.numero}</span>
+                      <span className="font-mono text-gray-700 flex-1 text-right">
+                        {moneda} {j.monto.toFixed(2)}
+                      </span>
+                      <span className="font-mono text-emerald-600 w-24 text-right text-[10px]">
+                        C$ {j.premio_posible.toFixed(0)}
+                      </span>
+                      <button
+                        onClick={() => removeJugada(i)}
+                        className="ml-2 p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Play Form — NÚMERO | FECHA | MONTO inline row */}
             <div className="flex gap-2 items-end">
               
@@ -1658,6 +1747,7 @@ export default function VendedorInterface({
               <div className="flex-1 min-w-0">
                 <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">NÚMERO JUGADO</label>
                 <input
+                  ref={numeroInputRef}
                   id="numero-input"
                   type="text"
                   inputMode="numeric"
@@ -1671,12 +1761,18 @@ export default function VendedorInterface({
                   value={numeroJugado}
                   onChange={(e) => {
                     const val = e.target.value.replace(/[^0-9]/g, "");
-                    const maxLen =
-                      selectedJuego === "Premia2" ? 4 :
-                      selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos" ? 3 :
-                      selectedJuego === "Pega 3" ? 6 :
-                      selectedJuego === "Súper Premio" ? 12 : 2;
-                    setNumeroJugado(val.slice(0, maxLen));
+                    const maxLen = getMaxLen(selectedJuego);
+                    const sliced = val.slice(0, maxLen);
+                    setNumeroJugado(sliced);
+                    if (sliced.length === maxLen && maxLen > 0) {
+                      setTimeout(() => montoInputRef.current?.focus(), 0);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && numeroJugado) {
+                      e.preventDefault();
+                      montoInputRef.current?.focus();
+                    }
                   }}
                   onFocus={() => setActiveField("numero")}
                   placeholder={selectedJuego === "Fechas" ? "DD-MM" : "00"}
@@ -1798,6 +1894,7 @@ export default function VendedorInterface({
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono font-bold text-gray-400 text-sm">{moneda}</span>
                   <input
+                    ref={montoInputRef}
                     id="monto-input"
                     type="number"
                     inputMode="numeric"
@@ -1806,6 +1903,12 @@ export default function VendedorInterface({
                     value={montoPago}
                     onFocus={() => setActiveField('monto')}
                     onChange={(e) => setMontoPago(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && numeroJugado && montoPago) {
+                        e.preventDefault();
+                        addJugadaAlCarrito();
+                      }
+                    }}
                     placeholder="0"
                     className={`w-full h-12 pl-10 pr-4 rounded-xl font-mono text-lg font-black shadow-inner focus:outline-none border-2 transition-colors ${
                       isLimitBlocked 
@@ -1857,109 +1960,6 @@ export default function VendedorInterface({
               </div>
             )}
 
-            {/* Quick Presets / Monedas */}
-            <div>
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-[9px] font-display font-black text-gray-500 uppercase tracking-wider">Montos Rápidos ({moneda})</span>
-              </div>
-              <div className="grid grid-cols-6 gap-1.5">
-                {(moneda === "C$" ? presetAmountsCs : presetAmountsUsd).map((amount) => (
-                  <button
-                    key={amount}
-                    id={`preset-${amount}`}
-                    onClick={() => handlePresetAmount(amount)}
-                    className="py-1.5 rounded-lg bg-gray-200 border border-gray-300 hover:bg-gray-300 font-mono font-black text-xs text-gray-800 transition-all cursor-pointer shadow-xs"
-                  >
-                    {amount}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Action Buttons — Stitch 3-Button Control Bar */}
-            <div className="flex flex-row gap-3 w-full mt-4">
-              {/* BORRAR — Stitch Red */}
-              <button
-                type="button"
-                onClick={clearForm}
-                disabled={loading}
-                className="h-14 px-4 rounded-xl bg-red-500 hover:bg-red-600 active:bg-red-700 text-white font-display font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Trash2 className="w-4 h-4 stroke-[2.5]" />
-                <span>Borrar</span>
-              </button>
-
-              {/* AÑADIR JUGADA — Stitch Blue */}
-              <button
-                type="button"
-                onClick={addJugadaAlCarrito}
-                disabled={loading}
-                className={`flex-1 h-14 rounded-xl flex items-center justify-center font-bold text-white shadow-sm transition-all duration-200 active:scale-95 cursor-pointer ${
-                  loading
-                    ? "bg-blue-300 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-500 active:bg-blue-700"
-                }`}
-              >
-                <Plus className="w-6 h-6 stroke-[2.5]" />
-              </button>
-
-              {/* GENERAR TICKET — Stitch Green */}
-              <button
-                type="button"
-                id="vender-submit-btn"
-                onClick={handleGenerarTicket}
-                disabled={isSubmittingTicket}
-                className={`flex-1 h-14 rounded-xl flex items-center justify-center font-bold text-white shadow-sm transition-all duration-200 active:scale-95 cursor-pointer ${
-                  isSubmittingTicket
-                    ? "bg-emerald-300 cursor-not-allowed"
-                    : "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700"
-                }`}
-              >
-                {isSubmittingTicket ? (
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Printer className="w-6 h-6 stroke-[2.5]" />
-                )}
-              </button>
-            </div>
-
-            {/* Cart de Jugadas Acumuladas — DRAFT STATE, scrollable */}
-            {jugadas.length > 0 && (
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
-                <div className="px-3 py-2 bg-amber-50 border-b border-amber-200 flex justify-between items-center shrink-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-display font-black text-gray-600 uppercase tracking-wider">
-                      Carrito ({jugadas.length} jugada{jugadas.length > 1 ? "s" : ""})
-                    </span>
-                    <span className="text-[9px] font-mono font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full uppercase">
-                      Preparación
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono font-black text-blue-900">
-                    Total: {moneda} {totalTicketMonto.toFixed(2)}
-                  </span>
-                </div>
-                <div className="max-h-[300px] overflow-y-auto divide-y divide-gray-100">
-                  {jugadas.map((j, i) => (
-                    <div key={i} className="flex items-center justify-between px-3 py-1.5 text-[11px]">
-                      <span className="font-mono font-black text-blue-900 w-12">{j.numero}</span>
-                      <span className="font-mono text-gray-700 flex-1 text-right">
-                        {moneda} {j.monto.toFixed(2)}
-                      </span>
-                      <span className="font-mono text-emerald-600 w-24 text-right text-[10px]">
-                        C$ {j.premio_posible.toFixed(0)}
-                      </span>
-                      <button
-                        onClick={() => removeJugada(i)}
-                        className="ml-2 p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -2180,7 +2180,7 @@ export default function VendedorInterface({
                                   const tempVenta: Venta = {
                                     id: t.id,
                                     numero_ticket: t.numero_ticket || t.id_ticket || t.id.substring(0, 7).toUpperCase(),
-                                    timestamp_servidor: t.fecha_emision_date ? t.fecha_emision_date.toISOString() : new Date().toISOString(),
+                                    timestamp_servidor: getNicaraguaISOString(t.fecha_emision_date),
                                     juego: game,
                                     sorteo: draw,
                                     numero_jugado: t.jugadas && t.jugadas[0] ? t.jugadas[0].numero : (t.numero_jugado || "?"),
@@ -2265,8 +2265,8 @@ export default function VendedorInterface({
                                   return;
                                 }
                                 // Client side validation: 5-minute void time limit
-                                const createdTime = t.fecha_emision_date ? t.fecha_emision_date.getTime() : new Date().toISOString();
-                                const elapsedMin = (Date.now() - new Date(createdTime).getTime()) / (60 * 1000);
+                                const createdTime = t.fecha_emision_date ? t.fecha_emision_date.getTime() : Date.now();
+                                const elapsedMin = (Date.now() - createdTime) / (60 * 1000);
                                 if (elapsedMin > 5) {
                                   toast.error("Solo se pueden anular boletos dentro de los primeros 5 minutos de su emisión.", { position: 'top-center', duration: 4000 });
                                   return;

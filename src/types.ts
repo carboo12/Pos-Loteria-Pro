@@ -104,6 +104,7 @@ export interface Venta {
   jugadas?: Jugada[]; // Lista de jugadas individuales (multi-número)
   es_premiado?: boolean;   // Marcado por escrutinio server-side
   monto_premio?: number;   // Monto del premio en C$ calculado por escrutinio
+  [key: string]: any; // Firma de índice para compatibilidad con funciones que reciben objetos flexibles
 }
 
 export interface CierreCaja {

@@ -1523,7 +1523,7 @@ app.get("/verificar", (req, res) => {
                   <div class="details">
                     <p><strong>Sorteo:</strong> \${ticket.sorteo}</p>
                     <p><strong>Inversión:</strong> \${ticket.moneda} \${ticket.monto_pago.toFixed(2)}</p>
-                    <p><strong>Fecha:</strong> \${new Date(ticket.timestamp_servidor).toLocaleString('es-ES')}</p>
+                    <p><strong>Fecha:</strong> \${(() => { const d = new Date(ticket.timestamp_servidor); const day = String(d.getDate()).padStart(2, '0'); const month = String(d.getMonth()+1).padStart(2, '0'); const year = d.getFullYear(); let h = d.getHours(); const ampm = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; const min = String(d.getMinutes()).padStart(2, '0'); return day + '/' + month + '/' + year + ', ' + h + ':' + min + ' ' + ampm; })()}</p>
                     <p><strong>Vendedor:</strong> \${ticket.nombre_vendedor.substring(0,15)}</p>
                   </div>
                 </div>
@@ -2161,8 +2161,7 @@ app.post("/api/admin/backfill-resumenes", requireAdmin, (req, res) => {
   const groups: Record<string, { id_vendedor: string, nombre_vendedor: string, fecha: string, vendido: number, pagado: number }> = {};
 
   ventasValidas.forEach((v: any) => {
-    const d = new Date(v.timestamp);
-    const dateStr = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, '0') + "-" + String(d.getDate()).padStart(2, '0');
+    const dateStr = getLocalDateString(new Date(v.timestamp));
     const key = `${v.id_vendedor}_${dateStr}`;
 
     if (!groups[key]) {
@@ -2270,19 +2269,14 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
     return res.status(400).json({ error: "Faltan parámetros" });
   }
 
-  const start = new Date(fecha_inicio as string).getTime();
-  const end = new Date(fecha_fin as string).getTime() + 86400000;
-
-  const ventasPeriodo = db.ventas.filter((v: any) =>
-    v.id_vendedor === id_vendedor &&
-    new Date(v.timestamp).getTime() >= start &&
-    new Date(v.timestamp).getTime() < end
-  );
+  const ventasPeriodo = db.ventas.filter((v: any) => {
+    const vDateStr = getLocalDateString(new Date(v.timestamp));
+    return v.id_vendedor === id_vendedor && vDateStr >= (fecha_inicio as string) && vDateStr <= (fecha_fin as string);
+  });
 
   const grouped: Record<string, any> = {};
   ventasPeriodo.forEach((v: any) => {
-    const d = new Date(v.timestamp);
-    const dateStr = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, '0') + "-" + String(d.getDate()).padStart(2, '0');
+    const dateStr = getLocalDateString(new Date(v.timestamp));
     if (!grouped[dateStr]) {
       grouped[dateStr] = { vendido: 0, pagado: 0 };
     }

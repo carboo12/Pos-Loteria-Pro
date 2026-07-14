@@ -1,4 +1,5 @@
 import { Venta, Configuracion } from "../types";
+import { getNicaraguaISOString } from "../lib/date-utils";
 
 export const ESCPOS = {
   INIT: [0x1B, 0x40],
@@ -232,9 +233,12 @@ export function buildTicketBuffer(data: TicketPrintData): Uint8Array {
   bytes.push(...ESCPOS.ALIGN_CENTER);
   if (data.logo_bytes && data.logo_bytes.length > 0) {
     bytes.push(...data.logo_bytes);
+    bytes.push(...emptyLine());
   }
-  bytes.push(...emptyLine());
-  bytes.push(...doubleLine(data.negocio));
+  if (data.negocio && data.negocio.trim() !== "") {
+    bytes.push(...doubleLine(data.negocio));
+    bytes.push(...emptyLine());
+  }
   bytes.push(...line(data.ruc, "C", true));
   if (data.direccion) bytes.push(...line(data.direccion, "C"));
   bytes.push(...separator("="));
@@ -356,7 +360,7 @@ export function ticketDataFromVenta(venta: Venta, config: Configuracion): Ticket
     numero_ticket: numTicket,
     fecha_completa: sanitizeText(venta.timestamp_servidor
       ? formatTicketDate(venta.timestamp_servidor)
-      : formatTicketDate(new Date().toISOString())),
+      : formatTicketDate(getNicaraguaISOString())),
     vendedor: sanitizeText(venta.nombre_vendedor || ""),
     cliente: sanitizeText(venta.nombre_cliente || "GENERICO"),
     juego: sanitizeText(venta.juego),

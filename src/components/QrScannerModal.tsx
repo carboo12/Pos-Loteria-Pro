@@ -36,6 +36,8 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
   const requestRef = useRef<number>();
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
+  const zoomAppliedRef = useRef(false);
+  const scanStartRef = useRef(0);
 
   const stopCamera = useCallback(() => {
     if (requestRef.current) cancelAnimationFrame(requestRef.current);
@@ -56,8 +58,15 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
           return;
         }
 
+        scanStartRef.current = Date.now();
+        zoomAppliedRef.current = false;
+
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
+          video: {
+            facingMode: "environment",
+            frameRate: { ideal: 30, max: 60 },
+            focusMode: "continuous",
+          },
         });
 
         if (!active) { stream.getTracks().forEach((t) => t.stop()); return; }
@@ -99,6 +108,22 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
 
       const video = videoRef.current;
       const canvas = canvasRef.current;
+
+      // Smart zoom: after 2s without detection, apply 1.3x digital zoom
+      if (!zoomAppliedRef.current && Date.now() - scanStartRef.current > 2000) {
+        zoomAppliedRef.current = true;
+        const track = streamRef.current?.getVideoTracks()[0];
+        if (track) {
+          try {
+            const caps = track.getCapabilities() as any;
+            if (caps?.zoom) {
+              const maxZoom = caps.zoom.max || 1;
+              const targetZoom = Math.min(1.3, maxZoom);
+              track.applyConstraints({ advanced: [{ zoom: targetZoom }] } as any);
+            }
+          } catch { /* ignore — not all devices support zoom */ }
+        }
+      }
 
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
         canvas.width = video.videoWidth;
