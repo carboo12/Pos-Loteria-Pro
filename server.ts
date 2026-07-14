@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
@@ -112,7 +113,48 @@ function calculatePrizeMultiplier(juego: string, sorteo: string): number {
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
 
-app.use(express.json());
+// ─── CORS: permitir frontend en desarrollo y producción ─────────────
+const ALLOWED_ORIGINS = [
+  "https://la-nueva-era-api--rapigestion-2.us-central1.hosted.app",
+  "https://rapigestion-2.web.app",
+  "https://rapigestion-2.firebaseapp.com",
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:3000",
+  "http://127.0.0.1:5173"
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Permitir requests sin origin (mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    // En producción App Hosting, permitir cualquier subdominio del proyecto
+    if (origin && origin.includes("rapigestion-2")) return callback(null, true);
+    console.warn(`[CORS] Bloqueado origin: ${origin}`);
+    callback(null, true); // Permitir en producción por ahora (cambiar a false para bloquear)
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  credentials: true,
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+// ─── PREFLIGHT para todas las rutas OPTIONS ──────────────────────────
+app.options("*", cors());
+
+app.use(express.json({ limit: "10mb" }));
+
+// ─── REQUEST LOGGER: ver TODAS las peticiones que llegan ─────────────
+app.use((req, res, next) => {
+  const origin = req.headers.origin || "no-origin";
+  const method = req.method;
+  const isPost = method === "POST";
+  if (isPost || req.path.includes("login")) {
+    process.stdout.write(`[HTTP] ${method} ${req.path} | origin=${origin} | content-type=${req.headers["content-type"] || "N/A"}\n`);
+  }
+  next();
+});
 
 // ─── FIREBASE CONFIGURATION (hardcoded — no editable) ────────────────
 const FIREBASE_PROJECT_ID = "rapigestion-2";
