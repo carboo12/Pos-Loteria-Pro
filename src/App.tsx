@@ -25,7 +25,15 @@ import { Toaster } from "react-hot-toast";
 export default function App() {
   const [users, setUsers] = useState<Usuario[]>([]);
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
-  const [config, setConfig] = useState<Configuracion | null>(null);
+  const [config, setConfig] = useState<Configuracion>({
+    tasa_cambio: 36.50,
+    contador_global_tickets: 0,
+    formato_ticket: { prefijo: "", inicio_secuencial: 1 },
+    sorteos: [],
+    limites_numeros: [],
+    resultados: [],
+    cobros: []
+  });
   const [sales, setSales] = useState<Venta[]>([]);
   const [closures, setClosures] = useState<CierreCaja[]>([]);
   const [serverTime, setServerTime] = useState("");

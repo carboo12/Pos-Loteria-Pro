@@ -268,7 +268,7 @@ export default function VendedorInterface({
       return;
     }
 
-    const matchingSorteo = config.sorteos.find(s => s.nombre === selectedSorteo);
+    const matchingSorteo = config?.sorteos?.find(s => s.nombre === selectedSorteo);
     if (matchingSorteo && isSorteoCerrado(matchingSorteo)) {
       setErrorMessage(`BLOQUEADO: El sorteo ${selectedSorteo} ya cerró.`);
       return;
@@ -442,7 +442,7 @@ export default function VendedorInterface({
       }
 
       const tDate = ticket.fecha_emision_date.toISOString().substring(0, 10);
-      const sObj = config.sorteos?.find(d => d.nombre === draw && d.juego === game);
+      const sObj = config?.sorteos?.find(d => d.nombre === draw && d.juego === game);
       const rObj = sObj
         ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
         : null;
@@ -572,7 +572,7 @@ export default function VendedorInterface({
       }
     }
     const ticketDate = ticket.timestamp_servidor ? ticket.timestamp_servidor.substring(0, 10) : new Date().toISOString().substring(0, 10);
-    const sObj = config.sorteos?.find(s => s.nombre === draw && s.juego === game);
+    const sObj = config?.sorteos?.find(s => s.nombre === draw && s.juego === game);
     if (!sObj) return true;
 
     const rObj = sObj
@@ -676,7 +676,7 @@ export default function VendedorInterface({
     }
 
     // 2. Buscar el sorteo en config para verificar si tiene resultados
-    const sorteoObj = config.sorteos.find(s => s.nombre === ticket.sorteo);
+    const sorteoObj = config?.sorteos?.find(s => s.nombre === ticket.sorteo);
     const ticketDate = toDateStr(ticket.timestamp_servidor);
 
     // 3. Buscar resultado oficial para ese sorteo y fecha
@@ -874,7 +874,7 @@ export default function VendedorInterface({
     else if (selectedPais === "La Primera") suffix = "(LP)";
     else if (selectedPais === "Costa Rica") suffix = "(CR)";
     const now = getSyncedNow();
-    return config.sorteos.filter(s =>
+    return config?.sorteos?.filter(s =>
       s.juego === game && s.nombre.includes(suffix) && isSorteoHabilitado(s, now)
     );
   };
@@ -1153,7 +1153,7 @@ export default function VendedorInterface({
     }
 
     // 3. Validate sorteo is not closed (anti-fraude)
-    const matchingSorteo = config.sorteos.find(s => s.nombre === selectedSorteo);
+    const matchingSorteo = config?.sorteos?.find(s => s.nombre === selectedSorteo);
     if (matchingSorteo && isSorteoCerrado(matchingSorteo)) {
       toast.error(`VENTA BLOQUEADA: El sorteo ${selectedSorteo} ya cerró (${formatTo12Hour(matchingSorteo.hora_cierre)}).`, { duration: 4000, position: 'top-center' });
       return;
@@ -1420,7 +1420,7 @@ export default function VendedorInterface({
 
         {/* Live Rate and clock display */}
         <div className="mt-2 pt-2 border-t border-blue-800 flex justify-between items-center text-[11px] font-mono font-bold text-blue-200">
-          <span>T. CAMBIO: C$ {config.tasa_cambio.toFixed(2)}</span>
+          <span>T. CAMBIO: C$ {(config?.tasa_cambio ?? 36.50).toFixed(2)}</span>
           <span className="bg-blue-950 px-2 py-0.5 rounded text-white animate-pulse">Reloj: {timeText}</span>
         </div>
       </div>
@@ -1691,7 +1691,7 @@ export default function VendedorInterface({
 
               {/* FECHA DEL SORTEO — Día + Mes calculator-style (solo para juego Fechas) */}
               {selectedJuego === "Fechas" && (() => {
-                const currentSorteo = config.sorteos.find(s => s.nombre === selectedSorteo);
+                const currentSorteo = config?.sorteos?.find(s => s.nombre === selectedSorteo);
                 const hasDiasRestriction = currentSorteo?.dias_habilitados && currentSorteo.dias_habilitados.length > 0;
                 const diaNum = parseInt(fechaVenta.dia, 10);
                 const isInvalidDay = fechaVenta.dia.length > 0 && (isNaN(diaNum) || diaNum < 1 || diaNum > 31);
