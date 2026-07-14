@@ -14,7 +14,7 @@ Este documento detalla la arquitectura completa, el stack tecnológico y las fun
     *   Local: Archivo JSON (`data-store.json`) para operaciones rápidas.
     *   Nube: Firebase Auth (Autenticación), Firestore (Sincronización de datos), Firebase Cloud Messaging (Notificaciones).
 
----
+---c
 
 ## 2. Arquitectura del Sistema
 
