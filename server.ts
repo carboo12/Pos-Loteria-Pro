@@ -384,38 +384,31 @@ async function syncFromFirestore() {
 // Live real-time notification subscribers (SSE)
 let sseClients: any[] = [];
 
-// ─── FIREBASE ADMIN INITIALIZATION (eager at startup) ───────────────
-const configJson = process.env.FIREBASE_CONFIG_JSON;
-
-if (configJson) {
+// ─── FIREBASE ADMIN INITIALIZATION ──────────────────────────────────
+// No applicationDefault(), no file fallback. FIREBASE_CONFIG_JSON only.
+if (!firebaseAdmin.apps.length) {
   try {
-    const serviceAccount = JSON.parse(configJson);
+    const configJson = process.env.FIREBASE_CONFIG_JSON;
 
+    if (!configJson) {
+      throw new Error("FIREBASE_CONFIG_JSON no está definida en el entorno.");
+    }
+
+    const serviceAccount = JSON.parse(configJson);
     firebaseAdmin.initializeApp({
       credential: firebaseAdmin.cert(serviceAccount),
       projectId: FIREBASE_PROJECT_ID
     });
 
-    console.log(`[Firebase Admin] OK → Inicializado con FIREBASE_CONFIG_JSON | Proyecto: ${serviceAccount.project_id} | Database: ${FIRESTORE_DATABASE_ID}`);
+    console.log(`[Firebase Admin] OK → Inicializado correctamente desde Secret Manager. Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
   } catch (error: any) {
-    console.error(`[Firebase Admin] ERROR al parsear FIREBASE_CONFIG_JSON:`, error.message || error);
-    console.error(`[Firebase Admin] La variable FIREBASE_CONFIG_JSON tiene longitud: ${configJson.length} chars. Primeros 100: "${configJson.substring(0, 100)}..."`);
+    console.error(`[Firebase Admin] ERROR CRÍTICO: ${error.message}`);
   }
-} else {
-  console.error("[Firebase Admin] ERROR CRÍTICO: La variable FIREBASE_CONFIG_JSON no está definida en el entorno.");
-  console.error("[Firebase Admin] Configure FIREBASE_CONFIG_JSON con el contenido JSON de su service account en las variables de entorno de App Hosting.");
 }
 
-// Lazy init wrapper — returns true if already initialized above, tries again if not
-let isFirebaseAdminInitialized = false;
-
+// Lazy check — returns true if initialized above
 function initFirebaseAdmin(): boolean {
-  if (isFirebaseAdminInitialized) return true;
-  if (firebaseAdmin.apps && firebaseAdmin.apps.length > 0) {
-    isFirebaseAdminInitialized = true;
-    return true;
-  }
-  console.error("[Firebase Admin] No inicializado. Todas las operaciones Firestore/FCM estarán deshabilitadas.");
+  if (firebaseAdmin.apps && firebaseAdmin.apps.length > 0) return true;
   return false;
 }
 

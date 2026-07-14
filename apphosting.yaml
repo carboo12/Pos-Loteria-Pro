@@ -16,3 +16,5 @@ env:
     value: production
     availability:
       - RUNTIME
+  - variable: FIREBASE_CONFIG_JSON
+    secret: FIREBASE_SERVICE_ACCOUNT_SECRET
