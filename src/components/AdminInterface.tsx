@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from "react";
-import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
 import { 
   LayoutDashboard, 
@@ -38,6 +38,8 @@ import {
   EyeOff
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
+import { toDateStr, getTicketDate, getTicketAmount } from "../lib/date-utils";
+import { calculatePrizeMultiplier, getTicketTheoreticalPrize } from "../lib/prize-utils";
 import { createPortal } from "react-dom";
 import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
@@ -69,22 +71,6 @@ const formatTo12Hour = (time24: string): string => {
   return `${hourStr}:${min} ${ampm}`;
 };
 
-function calculatePrizeMultiplier(juego: string, sorteo: string): number {
-  const cleanJuego = juego.trim();
-  if (cleanJuego === "Premia2" && sorteo.includes("(NI)")) {
-    return 4000;
-  }
-  if (cleanJuego === "Jugá 3") {
-    return 600;
-  }
-  if (cleanJuego === "Fechas") {
-    return 210;
-  }
-  if (cleanJuego === "3 Monazos") {
-    return 650;
-  }
-  return 80;
-}
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -247,17 +233,25 @@ export default function AdminInterface({
   const [historialCobros, setHistorialCobros] = useState<any[]>([]);
 
   // Fetch lists
-  // Fetch results from Firestore directly (not backend API)
-  const fetchResultsList = async () => {
-    try {
-      const q = query(collection(firestore, "resultados"), orderBy("timestamp", "desc"));
-      const snapshot = await getDocs(q);
-      const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setResultsList(data);
-    } catch (e) {
-      console.error("Error loading results from Firestore", e);
-    }
-  };
+  // Real-time Firestore listener for resultados (handles added/modified/removed)
+  useEffect(() => {
+    const q = query(collection(firestore, "resultados"), orderBy("timestamp", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      let changed = false;
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === "added" || change.type === "modified" || change.type === "removed") {
+          changed = true;
+        }
+      });
+      if (changed) {
+        const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setResultsList(data);
+      }
+    }, (err) => {
+      console.error("[onSnapshot resultados] Error:", err);
+    });
+    return () => unsubscribe();
+  }, []);
 
 
   const fetchHistorialCobros = async () => {
@@ -410,7 +404,6 @@ export default function AdminInterface({
   };
 
   useEffect(() => {
-    fetchResultsList();
     fetchLimitsList();
   }, []);
 
@@ -878,6 +871,21 @@ export default function AdminInterface({
     setIsUserModalOpen(true);
   };
 
+  // Open Create Modal pre-filled for Admin
+  const openCreateAdminModal = () => {
+    setEditingUser(null);
+    setUserFormName("");
+    setUserFormEmail("");
+    setUserFormUsername("");
+    setUserFormPassword("");
+    setShowUserFormPassword(false);
+    setUserFormRole("administrador");
+    setUserFormStatus("activo");
+    setUserFormRegion("Nicaragua");
+    setUserFormVendedoresAsignados([]);
+    setIsUserModalOpen(true);
+  };
+
   // Open Edit Modal
   const openEditUserModal = (targetUser: Usuario) => {
     setEditingUser(targetUser);
@@ -1245,9 +1253,26 @@ export default function AdminInterface({
         timestamp: new Date().toISOString()
       });
       console.log("Resultado guardado en Firestore:", docRef.id);
+
+      // Background sync to server API — triggers server-side escrutinio automatically
+      try {
+        await fetch("/api/resultados", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id_sorteo: selectedSorteoResultados,
+            sorteo: matchedSorteo ? matchedSorteo.nombre : "",
+            pais: selectedPaisResultados,
+            fecha: fechaResultadosInput,
+            numero_ganador: winningNum
+          })
+        });
+      } catch (errSync) {
+        console.warn("Server escrutinio sync failed:", errSync);
+      }
+
       setSuccessText("Resultado del sorteo guardado y publicado exitosamente.");
       setWinningNumberInput("");
-      await fetchResultsList();
     } catch (err) {
       console.error("Error guardando resultado en Firestore:", err);
       setAlertText("Error al guardar el resultado en la nube.");
@@ -1265,7 +1290,6 @@ export default function AdminInterface({
       await deleteDoc(doc(firestore, "resultados", resId));
       console.log("Resultado eliminado de Firestore:", resId);
       setSuccessText("Resultado eliminado correctamente.");
-      await fetchResultsList();
     } catch (err) {
       console.error("Error eliminando resultado de Firestore:", err);
       setAlertText("Error al eliminar el resultado.");
@@ -2397,15 +2421,24 @@ export default function AdminInterface({
                 </div>
               </div>
 
-              {/* Add User Button */}
-              <button
-                id="open-create-user-modal-btn"
-                onClick={openCreateUserModal}
-                className="w-full md:w-auto px-5 py-3 min-h-[44px] bg-[#10B981] hover:bg-emerald-500 text-white font-display font-black text-xs uppercase tracking-wider rounded-xl border-b-2 border-emerald-700 shadow-xs flex items-center justify-center space-x-2 cursor-pointer transition-all active:translate-y-0.5 font-bold"
-              >
-                <UserPlus className="w-4 h-4 stroke-[2.5]" />
-                <span>Registrar Nuevo Usuario</span>
-              </button>
+              {/* Add User Buttons */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <button
+                  id="open-create-user-modal-btn"
+                  onClick={openCreateUserModal}
+                  className="w-full sm:w-auto px-5 py-3 min-h-[44px] bg-[#10B981] hover:bg-emerald-500 text-white font-display font-black text-xs uppercase tracking-wider rounded-xl border-b-2 border-emerald-700 shadow-xs flex items-center justify-center space-x-2 cursor-pointer transition-all active:translate-y-0.5 font-bold"
+                >
+                  <UserPlus className="w-4 h-4 stroke-[2.5]" />
+                  <span>Registrar Nuevo Usuario</span>
+                </button>
+                <button
+                  onClick={openCreateAdminModal}
+                  className="w-full sm:w-auto px-5 py-3 min-h-[44px] bg-blue-600 hover:bg-blue-500 text-white font-display font-black text-xs uppercase tracking-wider rounded-xl border-b-2 border-blue-800 shadow-xs flex items-center justify-center space-x-2 cursor-pointer transition-all active:translate-y-0.5 font-bold"
+                >
+                  <Shield className="w-4 h-4 stroke-[2.5]" />
+                  <span>Crear Nuevo Admin</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -2514,7 +2547,7 @@ export default function AdminInterface({
                             )}
 
                             {/* Active/Inactive Status Switch */}
-                            {u.rol !== "administrador" && u.rol !== "admin" && (
+                            {u.id !== user.id && (
                               <button
                                 onClick={() => handleToggleUserActive(u)}
                                 className={`px-3 py-1.5 min-h-[44px] flex items-center justify-center rounded-lg text-[10px] font-display font-black uppercase tracking-wider transition-all cursor-pointer space-x-1.5 border shadow-xs ${
@@ -2547,7 +2580,7 @@ export default function AdminInterface({
                             </button>
 
                             {/* Delete Button */}
-                            {u.rol !== "administrador" && u.rol !== "admin" && (
+                            {u.id !== user.id && (
                               <button
                                 onClick={() => setDeletingUser(u)}
                                 className="w-11 h-11 flex items-center justify-center bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-lg transition-colors cursor-pointer shrink-0"
@@ -3147,7 +3180,7 @@ export default function AdminInterface({
                   .filter(u => reportFilterVendedor === "TODOS" || u.id === reportFilterVendedor)
                   .map(seller => {
                     const sellerSales = sales.filter(s => {
-                      const saleDateStr = s.timestamp_servidor.substring(0, 10);
+                      const saleDateStr = getTicketDate(s);
                       const dateMatch = saleDateStr >= reportFilterFechaInicio && saleDateStr <= reportFilterFechaFin;
                       const activeMatch = !s.anulado;
                       const sellerMatch = s.id_vendedor === seller.id;
@@ -3161,25 +3194,17 @@ export default function AdminInterface({
                     // Total a Pagar: premios teóricos de tickets vendidos por este vendedor en el rango
                     let totalAPagarCs = 0;
                     sellerSales.forEach(s => {
-                      const tDate = s.timestamp_servidor.substring(0, 10);
-                      const sObj = config.sorteos?.find(draw => draw.nombre === s.sorteo);
-                      const rObj = sObj
-                        ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
-                        : null;
-                      
-                      if (rObj && s.numero_jugado.trim().toLowerCase() === rObj.numero_ganador.trim().toLowerCase()) {
-                        const multiplier = calculatePrizeMultiplier(s.juego, s.sorteo);
-                        const prizeCs = s.moneda === "C$" 
-                          ? (s.monto_pago * multiplier)
-                          : (s.monto_pago * multiplier * config.tasa_cambio);
-                        totalAPagarCs += prizeCs;
+                      // Use shared prize logic — handles multi-jugada + single-number tickets
+                      const theoreticalPrize = getTicketTheoreticalPrize(s, config);
+                      if (theoreticalPrize > 0) {
+                        totalAPagarCs += theoreticalPrize;
                       }
                     });
 
                     // Pagado Real: suma de premios efectivamente pagados por este vendedor en el rango
                     const totalPagadoRealCs = sellerSales
                       .filter(s => s.estado === 'pagado')
-                      .reduce((sum, s) => sum + (s.premio_posible_cs || 0), 0);
+                      .reduce((sum, s) => sum + ((typeof s.monto_premio === "number" && s.es_premiado) ? s.monto_premio : getTicketTheoreticalPrize(s, config)), 0);
 
                     // Ingresos: inyecciones de caja del supervisor/administrador
                     const sellerIngresos = ((config as any).ingresos || []).filter((i: any) => {
@@ -3281,7 +3306,7 @@ export default function AdminInterface({
                       {(() => {
                         // Group active sales of chosen date & user by number and game
                         const filteredDaySales = sales.filter(s => {
-                          const saleDateStr = s.timestamp_servidor.substring(0, 10);
+                          const saleDateStr = getTicketDate(s);
                           const dateMatch = saleDateStr >= reportFilterFechaInicio && saleDateStr <= reportFilterFechaFin;
                           const sellerMatch = reportFilterVendedor === "TODOS" || s.id_vendedor === reportFilterVendedor;
                           const activeMatch = !s.anulado;
@@ -3346,7 +3371,7 @@ export default function AdminInterface({
 
                 {(() => {
                   const filteredDaySales = sales.filter(s => {
-                    const saleDateStr = s.timestamp_servidor.substring(0, 10);
+                    const saleDateStr = getTicketDate(s);
                     const dateMatch = saleDateStr >= reportFilterFechaInicio && saleDateStr <= reportFilterFechaFin;
                     const sellerMatch = reportFilterVendedor === "TODOS" || s.id_vendedor === reportFilterVendedor;
                     const activeMatch = !s.anulado;

@@ -16,8 +16,9 @@ const SuspenseLoader = () => (
   </div>
 );
 
-import { auth } from "./lib/firebase";
+import { auth, firestore } from "./lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
+import { collection, doc, onSnapshot } from "firebase/firestore";
 import { AlertTriangle, Lock, Sun } from "lucide-react";
 import { Toaster } from "react-hot-toast";
 
@@ -151,13 +152,83 @@ export default function App() {
     return () => unsubscribe();
   }, [users]);
 
-  // Periodic polling for real-time presence, sales synchronization and drawer locks
+  // ─── FIRESTORE REAL-TIME LISTENERS (reemplaza polling de 4s) ────────
+
+  // Listener 1: Tickets en tiempo real → setSales (handles added/modified/removed)
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchSales();
-      fetchClosures();
-      fetchClock();
-    }, 4000);
+    const unsubscribe = onSnapshot(
+      collection(firestore, "tickets"),
+      (snapshot) => {
+        // Process only what actually changed — prevents re-inserting deleted tickets
+        let hasChanges = false;
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === "added" || change.type === "modified") {
+            hasChanges = true;
+          }
+          if (change.type === "removed") {
+            hasChanges = true;
+          }
+        });
+        // Rebuild full list from current snapshot (excludes deleted docs)
+        if (hasChanges) {
+          const ticketsList = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Venta));
+          setSales(ticketsList);
+        }
+      },
+      (err) => console.error("[onSnapshot tickets] Error:", err)
+    );
+    return () => unsubscribe();
+  }, []);
+
+  // Listener 2: Cierres de caja en tiempo real → setClosures
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(firestore, "cierres_caja"),
+      (snapshot) => {
+        const closuresList = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as CierreCaja));
+        setClosures(closuresList);
+      },
+      (err) => console.error("[onSnapshot cierres] Error:", err)
+    );
+    return () => unsubscribe();
+  }, []);
+
+  // Listener 3: Usuarios en tiempo real → setUsers
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(firestore, "usuarios"),
+      (snapshot) => {
+        const usersList = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Usuario));
+        setUsers(usersList);
+        setCurrentUser(prev => {
+          if (!prev) return null;
+          const updated = usersList.find((u: Usuario) => u.id === prev.id);
+          return updated || prev;
+        });
+      },
+      (err) => console.error("[onSnapshot usuarios] Error:", err)
+    );
+    return () => unsubscribe();
+  }, []);
+
+  // Listener 4: Configuración en tiempo real → setConfig
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(firestore, "configuracion", "general"),
+      (snap) => {
+        if (snap.exists()) {
+          setConfig(snap.data() as Configuracion);
+        }
+      },
+      (err) => console.error("[onSnapshot configuracion] Error:", err)
+    );
+    return () => unsubscribe();
+  }, []);
+
+  // Clock sync: solo para precisión de reloj, cada 30s (no crítico en tiempo real)
+  useEffect(() => {
+    fetchClock();
+    const interval = setInterval(fetchClock, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -251,13 +322,13 @@ export default function App() {
   };
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-6 text-white font-sans">
-        <div className="relative flex items-center justify-center">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-          <Sun className="w-6 h-6 text-yellow-400 absolute animate-pulse" />
+      <div className="min-h-screen bg-[#F3F4F6] flex flex-col items-center justify-center p-6 text-gray-900 font-sans overflow-hidden">
+        <div className="relative flex items-center justify-center animate-coin-drop">
+          <img src="/logo.png" alt="Logo" className="w-56 h-56 object-contain drop-shadow-2xl" />
         </div>
-        <h2 className="text-xl font-display font-black uppercase tracking-widest mt-6">Cargando Sistema POS...</h2>
-        <p className="text-xs text-gray-400 mt-2 font-mono">Conectando con base de datos NoSQL simulada de Lotería</p>
+        <h2 className="text-5xl md:text-6xl font-display font-black mt-8 text-3d-green animate-fade-in-delayed z-10 text-center">
+          Rutas DSD.
+        </h2>
       </div>
     );
   }

@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent, useRef } from "react";
+import { useState, useEffect, FormEvent, useRef, useMemo } from "react";
 import toast from "react-hot-toast";
 import { 
   Gamepad2, 
@@ -33,11 +33,13 @@ import TicketPreviewModal from "./TicketPreviewModal";
 import { QrScannerModal } from "./QrScannerModal";
 import ResumenFacturacionCard from "./ResumenFacturacionCard";
 import FacturacionVendedorCard from "./FacturacionVendedorCard";
-import { collection, addDoc, serverTimestamp, query, where, getDocs, doc, updateDoc, getDoc } from "firebase/firestore";
-import { firestore, auth } from "../lib/firebase";
+import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy } from "firebase/firestore";
+import { firestore } from "../lib/firebase";
 import { BluetoothPrinterService, PrinterStatus } from "../services/BluetoothPrinterService";
 import { buildTicketBuffer, ticketDataFromVenta, loadLogoBitmap } from "../services/escpos-builder";
 import { isSorteoHabilitado, getDiasHabilitadosShortLabel, isDateValidForSorteo, getNextValidDate } from "../lib/sorteo-utils";
+import { toDateSafe, toDateStr, getTicketDate, getTicketAmount } from "../lib/date-utils";
+import { calculatePrizeMultiplier, getTicketTheoreticalPrize } from "../lib/prize-utils";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -70,14 +72,6 @@ interface VendedorInterfaceProps {
   serverTime: string;
 }
 
-function calculatePrizeMultiplier(juego: string, sorteo: string): number {
-  const cleanJuego = juego.trim();
-  if (cleanJuego === "Premia2" && sorteo.includes("(NI)")) return 4000;
-  if (cleanJuego === "Jugá 3") return 600;
-  if (cleanJuego === "Fechas") return 210;
-  if (cleanJuego === "3 Monazos") return 650;
-  return 80;
-}
 
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
@@ -154,6 +148,8 @@ export default function VendedorInterface({
       clearInterval(pingInterval);
     };
   }, []);
+
+  // (diagnostic U-001 test removed — system is production-ready)
 
   // Time synchronization offset
   const [clockOffset, setClockOffset] = useState(0);
@@ -345,16 +341,27 @@ export default function VendedorInterface({
       
       const cleanNum = targetNum.replace(/^#/, "").trim();
       
-      // 1. Fetch from Firestore tickets collection
+      // 1. Fetch from Firestore tickets collection (multi-strategy legacy lookup)
       const docRef = doc(firestore, "tickets", cleanNum);
       let docSnap = await getDoc(docRef);
       let ticketId = cleanNum;
       
+      // 2. Fallback: query by id_ticket field (old tickets)
       if (!docSnap.exists()) {
         const q = query(collection(firestore, "tickets"), where("id_ticket", "==", cleanNum));
         const qSnap = await getDocs(q);
         if (!qSnap.empty) {
           docSnap = qSnap.docs[0];
+          ticketId = docSnap.id;
+        }
+      }
+
+      // 3. Fallback: query by numero_ticket field (legacy server-created tickets)
+      if (!docSnap.exists()) {
+        const q2 = query(collection(firestore, "tickets"), where("numero_ticket", "==", cleanNum));
+        const q2Snap = await getDocs(q2);
+        if (!q2Snap.empty) {
+          docSnap = q2Snap.docs[0];
           ticketId = docSnap.id;
         }
       }
@@ -371,7 +378,7 @@ export default function VendedorInterface({
 
       const ticket = docSnap.data() as any;
       ticket.id = ticketId;
-      ticket.fecha_emision_date = ticket.fecha_emision?.toDate() || new Date();
+      ticket.fecha_emision_date = toDateSafe(ticket.fecha_emision);
 
       // 2. Check if already cobrado or anulado
       if (ticket.estado === "anulado") {
@@ -530,102 +537,6 @@ export default function VendedorInterface({
     }
   };
 
-  const getLocalDateStr = (dateInput: any): string => {
-    if (!dateInput) return "";
-    let date: Date;
-    if (dateInput instanceof Date) {
-      date = dateInput;
-    } else if (typeof dateInput === "string") {
-      date = new Date(dateInput);
-    } else if (dateInput && dateInput.toDate && typeof dateInput.toDate === "function") {
-      date = dateInput.toDate();
-    } else {
-      date = new Date(dateInput);
-    }
-    if (isNaN(date.getTime())) return "";
-    // Convert to CST (UTC-6)
-    const offset = -6;
-    const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
-    const localDate = new Date(utc + (3600000 * offset));
-    const year = localDate.getFullYear();
-    const month = String(localDate.getMonth() + 1).padStart(2, "0");
-    const day = String(localDate.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-
-  const getTicketTheoreticalPrize = (ticket: any): number => {
-    if (ticket.estado === "anulado") return 0;
-    
-    // Parse game and draw (new fields or legacy fallback)
-    let game = ticket.id_juego || "";
-    let draw = ticket.id_sorteo || "";
-    if (!game || !draw) {
-      const js = ticket.juego_sorteo || "";
-      if (js.startsWith("La Diaria")) {
-        game = "La Diaria";
-        draw = js.substring("La Diaria".length).trim();
-      } else if (js.startsWith("Premia2")) {
-        game = "Premia2";
-        draw = js.substring("Premia2".length).trim();
-      } else if (js.startsWith("Pega 3")) {
-        game = "Pega 3";
-        draw = js.substring("Pega 3".length).trim();
-      } else if (js.startsWith("Jugá 3")) {
-        game = "Jugá 3";
-        draw = js.substring("Jugá 3".length).trim();
-      } else if (js.startsWith("Diaria")) {
-        game = "Diaria";
-        draw = js.substring("Diaria".length).trim();
-      } else if (js.startsWith("Fechas")) {
-        game = "Fechas";
-        draw = js.substring("Fechas".length).trim();
-      } else if (js.startsWith("Terminación 2")) {
-        game = "Terminación 2";
-        draw = js.substring("Terminación 2".length).trim();
-      } else if (js.startsWith("Súper Premio")) {
-        game = "Súper Premio";
-        draw = js.substring("Súper Premio".length).trim();
-      } else if (js.startsWith("3 Monazos")) {
-        game = "3 Monazos";
-        draw = js.substring("3 Monazos".length).trim();
-      } else {
-        const parts = js.split(" ");
-        game = parts[0] || "";
-        draw = parts.slice(1).join(" ");
-      }
-    }
-
-    const tDate = getLocalDateStr(ticket.fecha_emision_date || ticket.timestamp_servidor);
-    const sObj = config.sorteos?.find(d => d.nombre === draw && d.juego === game);
-    const rObj = sObj
-      ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
-      : null;
-
-    if (!rObj) return 0;
-    
-    let prize = 0;
-    const winnerNum = rObj.numero_ganador.trim().toLowerCase();
-    
-    if (ticket.jugadas && ticket.jugadas.length > 0) {
-      ticket.jugadas.forEach((j: any) => {
-        if (j.numero.trim().toLowerCase() === winnerNum) {
-          const multiplier = calculatePrizeMultiplier(game, draw);
-          let p = j.monto * multiplier;
-          if (ticket.moneda === "USD") p *= (config.tasa_cambio || 36.50);
-          prize += p;
-        }
-      });
-    } else if (ticket.numero_jugado) {
-      if (ticket.numero_jugado.trim().toLowerCase() === winnerNum) {
-        const multiplier = calculatePrizeMultiplier(game, draw);
-        let p = (ticket.monto_pago || 0) * multiplier;
-        if (ticket.moneda === "USD") p *= (config.tasa_cambio || 36.50);
-        prize += p;
-      }
-    }
-    return prize;
-  };
-
   const isSorteoPasado = (ticket: any): boolean => {
     let game = ticket.id_juego || "";
     let draw = ticket.id_sorteo || "";
@@ -677,136 +588,70 @@ export default function VendedorInterface({
     return false;
   };
 
-  const fetchReportTickets = async () => {
+  // Real-time Firestore listener for this vendor's tickets (replaces one-shot fetchReportTickets)
+  // This ensures the "A Pagar" total updates instantly when the server runs escrutinio after
+  // the admin publishes a winning number.
+  useEffect(() => {
     setReportLoading(true);
-    try {
-      const startDate = new Date(reportFilterFechaInicio + "T00:00:00");
-      const endDate = new Date(reportFilterFechaFin + "T23:59:59");
-      
-      // Query only by id_vendedor to avoid requiring composite indexes in Firestore
-      const q = query(
-        collection(firestore, "tickets"),
-        where("id_vendedor", "==", user.id)
-      );
-      const querySnapshot = await getDocs(q);
-      const tickets = querySnapshot.docs
-        .map(docVal => {
+    const q = query(
+      collection(firestore, "tickets"),
+      where("id_vendedor", "==", user.id)
+    );
+
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      // Process docChanges to handle added/modified/removed correctly
+      let changed = false;
+      querySnapshot.docChanges().forEach((change) => {
+        if (change.type === "added" || change.type === "modified") {
+          changed = true;
+        }
+        if (change.type === "removed") {
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        // Rebuild full list from current snapshot (excludes deleted docs)
+        const tickets = querySnapshot.docs.map(docVal => {
           const data = docVal.data();
           return {
             id: docVal.id,
             ...data,
-            fecha_emision_date: data.fecha_emision?.toDate() || new Date()
+            fecha_emision_date: toDateSafe(data.fecha_emision)
           };
-        })
-        .filter(t => {
-          const time = t.fecha_emision_date.getTime();
-          return time >= startDate.getTime() && time <= endDate.getTime();
         });
-        
-      // Sort descending
-      tickets.sort((a, b) => b.fecha_emision_date.getTime() - a.fecha_emision_date.getTime());
-      setReportTickets(tickets);
-    } catch (err) {
-      console.error("Error loading tickets from Firestore:", err);
-      toast.error("Error al cargar reportes desde Firestore");
-    } finally {
-      setReportLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (activeTab === "reportes") {
-      fetchReportTickets();
-    }
-  }, [activeTab]);
-
-  // 🔌 AUTENTICACIÓN DE EMERGENCIA: Fallback anónimo cuando Firebase Admin falla
-  const ensureFirebaseAuth = async (): Promise<boolean> => {
-    // Paso 1: Ya autenticado
-    if (auth.currentUser) {
-      console.log("✅ Firebase Auth ya sincronizado:", auth.currentUser.uid);
-      return true;
-    }
-
-    // Paso 2: Intentar custom token desde backend
-    console.log("🔄 Intentando re-sincronizar con custom token...");
-    try {
-      const res = await fetch("/api/resync-auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, email: user.email })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.customToken) {
-          const { signInWithCustomToken } = await import("firebase/auth");
-          await signInWithCustomToken(auth, data.customToken);
-          if (auth.currentUser) {
-            console.log("✅ Firebase Auth con custom token exitoso:", auth.currentUser.uid);
-            return true;
-          }
-        }
+        // Sort descending by emission date
+        tickets.sort((a, b) => b.fecha_emision_date.getTime() - a.fecha_emision_date.getTime());
+        setReportTickets(tickets);
       }
-    } catch (err: any) {
-      console.warn("⚠️ Custom token falló:", err.message);
-    }
+      setReportLoading(false);
+    }, (err) => {
+      console.error("Error in onSnapshot tickets:", err);
+      toast.error("Error de conexión en tiempo real con Firestore");
+      setReportLoading(false);
+    });
 
-    // Paso 3: Fallback a autenticación anónima (Firebase Admin no disponible)
-    console.log("🔄 Intentando signInAnonymously como fallback...");
-    try {
-      const { signInAnonymously } = await import("firebase/auth");
-      const cred = await signInAnonymously(auth);
-      console.log("✅ Firebase Auth anónimo exitoso. UID:", cred.user?.uid);
-      toast.success("Conectado a Firebase en modo de respaldo", { position: 'top-center', duration: 2000 });
-      return true;
-    } catch (err: any) {
-      console.error("❌ signInAnonymously también falló:", err.message);
-      return false;
-    }
-  };
+    return () => unsubscribe();
+  }, [user.id]);
 
-  const resyncFirebaseAuth = ensureFirebaseAuth;
+  // Reactive "A Pagar" total computed from real-time ticket data
+  const liveAPagar = useMemo(() => {
+    const now = new Date();
+    return reportTickets
+      .filter(t => t.estado !== "anulado")
+      .reduce((acc, t) => {
+        return acc + ((typeof t.monto_premio === "number" && t.es_premiado) ? t.monto_premio : getTicketTheoreticalPrize(t, config));
+      }, 0);
+  }, [reportTickets]);
 
-  // 🔍 FUNCIÓN DE DIAGNÓSTICO: Verificar estado de conexión Firebase
-  const checkFirebaseConnection = async () => {
-    console.group("🔍 DIAGNÓSTICO FIREBASE");
-    console.log("1. ProjectId:", (firestore as any).app?.options?.projectId);
-    console.log("2. auth.currentUser:", auth.currentUser ? {
-      uid: auth.currentUser.uid,
-      email: auth.currentUser.email,
-      isAnonymous: auth.currentUser.isAnonymous
-    } : "NULL");
-    console.log("3. user.id (local):", user.id);
-    console.log("4. localStorage.localToken:", localStorage.getItem("localToken") ? "EXISTS" : "MISSING");
-    console.log("5. localStorage.currentUser:", localStorage.getItem("currentUser") ? "EXISTS" : "MISSING");
-    
-    // Test de lectura
-    try {
-      const testSnap = await getDocs(query(collection(firestore, "configuracion")));
-      console.log("6. Test lectura /configuracion:", testSnap.empty ? "EMPTY" : `${testSnap.size} docs`);
-    } catch (err: any) {
-      console.error("6. Test lectura FALLÓ:", err.message);
-    }
-    
-    console.groupEnd();
-  };
-
-  // Sincronizar al montar el componente
+  // Toast notification when totalAPagar transitions from 0 to >0
+  const prevAPagarRef = useRef(0);
   useEffect(() => {
-    // Exponer funciones de debug en window para acceso desde consola
-    (window as any).checkFirebase = checkFirebaseConnection;
-    (window as any).resyncFirebase = ensureFirebaseAuth;
-    
-    console.log("💡 Funciones de debug disponibles en consola:");
-    console.log("  - window.checkFirebase() - Diagnóstico completo");
-    console.log("  - window.resyncFirebase() - Re-sincronizar sesión");
-    
-    // Autenticación automática al montar el componente
-    if (!auth.currentUser) {
-      console.warn("⚠️ auth.currentUser es NULL. Iniciando autenticación automática...");
-      ensureFirebaseAuth();
+    if (liveAPagar > 0 && prevAPagarRef.current === 0) {
+      toast.success("¡Tienes tickets premiados! Revisa tu reporte de caja.", { duration: 6000, position: "top-center" });
     }
-  }, []);
+    prevAPagarRef.current = liveAPagar;
+  }, [liveAPagar]);
 
   // Verificar premio de un ticket contra resultados oficiales
   const verificarPremioTicket = async (ticket: Venta) => {
@@ -832,7 +677,7 @@ export default function VendedorInterface({
 
     // 2. Buscar el sorteo en config para verificar si tiene resultados
     const sorteoObj = config.sorteos.find(s => s.nombre === ticket.sorteo);
-    const ticketDate = ticket.timestamp_servidor.substring(0, 10);
+    const ticketDate = toDateStr(ticket.timestamp_servidor);
 
     // 3. Buscar resultado oficial para ese sorteo y fecha
     const resultado = (config.resultados || []).find(r =>
@@ -1091,7 +936,7 @@ export default function VendedorInterface({
   // Filtered list based on Search and Date
   const displayedSales = allMySales.filter(s => {
     // Check Date match
-    const saleDateStr = s.timestamp_servidor.substring(0, 10); // YYYY-MM-DD
+    const saleDateStr = getTicketDate(s); // YYYY-MM-DD
     const dateMatches = filterDate ? (saleDateStr === filterDate) : true;
     
     // Check search query (by Ticket # or Number played or Game)
@@ -1104,7 +949,7 @@ export default function VendedorInterface({
   });
 
   // Calculations for current cashier (based on today's active sales)
-  const myTodaySales = allMySales.filter(s => s.timestamp_servidor.substring(0, 10) === getTodayString());
+  const myTodaySales = allMySales.filter(s => getTicketDate(s) === getTodayString());
   const systemCs = myTodaySales.filter(s => !s.anulado && s.moneda === "C$").reduce((sum, s) => sum + s.monto_pago, 0);
   const systemUsd = myTodaySales.filter(s => !s.anulado && s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0);
 
@@ -1338,103 +1183,58 @@ export default function VendedorInterface({
     }, 0);
     const totalPremioCs = jugadas.reduce((sum, j) => sum + j.premio_posible, 0);
 
-    // 6. Online/Offline Firestore document creation
-    setIsSubmittingTicket(true);
-    try {
-      // 🔍 DEBUGGING BLOCK - AUDITORÍA DE CONEXIÓN FIREBASE
-      console.group("🔥 AUDITORÍA FIREBASE - handleGenerarTicket");
-      console.log("📦 ProjectId:", (firestore as any).app?.options?.projectId || "NO DISPONIBLE");
-      console.log("👤 auth.currentUser:", auth.currentUser ? {
-        uid: auth.currentUser.uid,
-        email: auth.currentUser.email,
-        isAnonymous: auth.currentUser.isAnonymous,
-        emailVerified: auth.currentUser.emailVerified
-      } : "⚠️ NULL - USUARIO NO AUTENTICADO EN FIREBASE");
-      console.log("🆔 user.id (local):", user.id);
-      console.log("📋 ticketData.id_vendedor:", user.id);
-      
-      // Verificar si auth.currentUser coincide con user.id
-      if (auth.currentUser && auth.currentUser.uid !== user.id) {
-        console.warn("⚠️ DISCREPANCIA: auth.currentUser.uid NO coincide con user.id");
-        console.warn("  auth.currentUser.uid:", auth.currentUser.uid);
-        console.warn("  user.id:", user.id);
-      }
-      
-      if (!auth.currentUser) {
-        console.warn("🚨 auth.currentUser es NULL. Intentando autenticación automática...");
-        await ensureFirebaseAuth();
-      }
-      
-      // Test de lectura previa a colección pública
+    // 6. Server-side atomic ticket creation (sequential ID via Firestore transaction)
+      setIsSubmittingTicket(true);
       try {
-        console.log("🧪 Test: Leyendo colección 'configuracion'...");
-        const testQuery = query(collection(firestore, "configuracion"), where("__name__", "==", "test-nonexistent"));
-        await getDocs(testQuery);
-        console.log("✅ Test de lectura EXITOSO - Conexión a Firestore funciona");
-      } catch (testErr: any) {
-        console.error("❌ Test de lectura FALLÓ:", testErr.message);
-        console.error("💡 Esto confirma que hay un problema de permisos o conexión");
+        // Send ticket data to server — server creates atomically in Firestore + local DB
+      const response = await fetch("/api/ventas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          juego: selectedJuego,
+          sorteo: selectedSorteo,
+          numero_jugado: jugadas[0].numero,
+          monto_pago: totalMontoCs,
+          moneda,
+          id_vendedor: user.id,
+          nombre_cliente: nombreCliente.trim() || "Genérico",
+          premio_posible_cs: totalPremioCs,
+          jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto })),
+          fecha_venta: fechaVentaToDateStr(fechaVenta),
+          pais: ""
+        })
+      });
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody.error || `Error del servidor (HTTP ${response.status})`);
       }
-      console.groupEnd();
-      // 🔍 FIN DEBUGGING BLOCK
 
-      const ticketData = {
-        id_vendedor: user.id,
-        fecha_emision: serverTimestamp(),
-        fecha_venta: fechaVentaToDateStr(fechaVenta),
-        id_juego: selectedJuego,
-        id_sorteo: selectedSorteo,
-        juego_sorteo: `${selectedJuego} ${selectedSorteo}`,
-        jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto })),
-        estado: "pendiente",
-        total_apostado: totalMontoCs
-      };
-
-      console.log("📝 Intentando addDoc en /tickets con data:", ticketData);
-      const docRef = await addDoc(collection(firestore, "tickets"), ticketData);
-      const id_ticket = docRef.id;
-      console.log("✅ addDoc exitoso. ID generado:", id_ticket);
-
-      // Update the document to include the generated id_ticket
-      console.log("📝 Intentando updateDoc en /tickets/" + id_ticket);
-      await updateDoc(docRef, { id_ticket });
-      console.log("✅ updateDoc exitoso");
-
-      // Create a compatible Venta object for preview and printing
+      const createdSale = await response.json();
       const syncedTicket: Venta = {
-        id: id_ticket,
-        numero_ticket: id_ticket.substring(0, 7).toUpperCase(),
-        timestamp_servidor: new Date().toISOString(),
-        fecha_venta: fechaVentaToDateStr(fechaVenta),
+        id: createdSale.id,
+        id_ticket: createdSale.numero_ticket,
+        numero_ticket: createdSale.numero_ticket,
+        timestamp_servidor: createdSale.timestamp_servidor,
+        fecha_venta: createdSale.fecha_venta || fechaVentaToDateStr(fechaVenta),
         juego: selectedJuego,
         sorteo: selectedSorteo,
         numero_jugado: jugadas[0].numero,
         monto_pago: totalMontoCs,
-        moneda: moneda,
+        moneda,
         id_vendedor: user.id,
         nombre_vendedor: user.nombre,
         nombre_cliente: nombreCliente.trim() || "Genérico",
         premio_posible_cs: totalPremioCs,
-        firma_digital: id_ticket.substring(0, 7).toUpperCase(),
+        firma_digital: createdSale.firma_digital,
         anulado: false,
         estado: "pendiente",
         jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto, premio_posible: j.premio_posible, fecha_venta: j.fecha_venta || fechaVentaToDateStr(fechaVenta) }))
       };
 
-      // Background sync to local server REST API (so supervisor dashboard still works)
-      try {
-        await fetch("/api/ventas", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(syncedTicket)
-        });
-      } catch (errSync) {
-        console.warn("REST API sync failed (possibly offline). Ticket is safe in Firestore.", errSync);
-      }
-
       onNewSaleCreated(syncedTicket);
       setActiveTicket(syncedTicket);
-      setSuccessMessage(`Ticket #${syncedTicket.numero_ticket} emitido con éxito en Firestore.`);
+      setSuccessMessage(`Ticket #${syncedTicket.numero_ticket} emitido con éxito.`);
       toast.success(`Ticket #${syncedTicket.numero_ticket} emitido con éxito`, { position: 'top-center' });
       // Full cleanup: cart + form + nombre
       setJugadas([]);
@@ -1444,9 +1244,9 @@ export default function VendedorInterface({
       setActiveField("numero");
       onRefreshSales();
     } catch (err: any) {
-      console.error("Error crítico al guardar ticket en Firestore:", err);
-      toast.error(err.message || "Error al guardar el ticket en la nube", { duration: 5000, position: 'top-center' });
-      setErrorMessage(err.message || "Ocurrió un error al guardar el ticket en Firestore.");
+      console.error("Error al crear ticket:", err);
+      toast.error(err.message || "Error al crear el ticket", { duration: 5000, position: 'top-center' });
+      setErrorMessage(err.message || "Ocurrió un error al crear el ticket.");
     } finally {
       setIsSubmittingTicket(false);
     }
@@ -1889,8 +1689,8 @@ export default function VendedorInterface({
                 />
               </div>
 
-              {/* FECHA DEL SORTEO — Día + Mes calculator-style */}
-              {(() => {
+              {/* FECHA DEL SORTEO — Día + Mes calculator-style (solo para juego Fechas) */}
+              {selectedJuego === "Fechas" && (() => {
                 const currentSorteo = config.sorteos.find(s => s.nombre === selectedSorteo);
                 const hasDiasRestriction = currentSorteo?.dias_habilitados && currentSorteo.dias_habilitados.length > 0;
                 const diaNum = parseInt(fechaVenta.dia, 10);
@@ -1935,9 +1735,7 @@ export default function VendedorInterface({
                         value={fechaVenta.mes}
                         onChange={(e) => {
                           setFechaVenta(prev => ({ ...prev, mes: e.target.value }));
-                          if (selectedJuego === "Fechas") {
-                            setNumeroJugado(`${fechaVenta.dia.padStart(2, "0")}-${e.target.value}`);
-                          }
+                          setNumeroJugado(`${fechaVenta.dia.padStart(2, "0")}-${e.target.value}`);
                           const montoInput = document.getElementById("monto-input") as HTMLInputElement;
                           if (montoInput) montoInput.focus();
                         }}
@@ -2166,18 +1964,14 @@ export default function VendedorInterface({
 
         {/* TAB 2: REPORTES */}
         {activeTab === "reportes" && (() => {
-          // Parse start and end date boundaries
-          const start = new Date(reportFilterFechaInicio + "T00:00:00");
-          const end = new Date(reportFilterFechaFin + "T23:59:59");
-          
-          // Filter tickets locally
+          // Filter tickets by fecha_venta string (YYYY-MM-DD) — String vs String
           const rangeTickets = reportTickets.filter(t => {
-            const d = t.fecha_emision_date;
-            return d >= start && d <= end;
+            const ticketDateStr = getTicketDate(t);
+            return ticketDateStr >= reportFilterFechaInicio && ticketDateStr <= reportFilterFechaFin;
           });
 
-          // Calculate totals
-          const facturado = rangeTickets.filter(t => t.estado !== "anulado").reduce((sum, t) => sum + (t.total_apostado || 0), 0);
+          // Calculate totals (normalize field names: total_apostado or monto_pago)
+          const facturado = rangeTickets.filter(t => t.estado !== "anulado").reduce((sum, t) => sum + getTicketAmount(t), 0);
           const sellerIngresos = ((config as any).ingresos || []).filter((i: any) => {
             const isSeller = i.id_vendedor === user.id;
             const inRange = i.fecha >= reportFilterFechaInicio && i.fecha <= reportFilterFechaFin;
@@ -2185,16 +1979,16 @@ export default function VendedorInterface({
           });
           const ingresos = sellerIngresos.reduce((sum: number, i: any) => sum + i.monto_cs + (i.monto_usd * config.tasa_cambio), 0);
           
-          // Calculate theoretical prizes (A Pagar)
+          // Calculate theoretical prizes (A Pagar) — prefer persisted monto_premio from escrutinio
           let aPagar = 0;
           rangeTickets.forEach(t => {
-            aPagar += getTicketTheoreticalPrize(t);
+            aPagar += (typeof t.monto_premio === "number" && t.es_premiado) ? t.monto_premio : getTicketTheoreticalPrize(t, config);
           });
 
           // Calculate actually paid/cobrado prizes (Pagado)
           const pagado = rangeTickets
             .filter(t => t.estado === "cobrado")
-            .reduce((sum, t) => sum + getTicketTheoreticalPrize(t), 0);
+            .reduce((sum, t) => sum + ((typeof t.monto_premio === "number" && t.es_premiado) ? t.monto_premio : getTicketTheoreticalPrize(t, config)), 0);
 
           // Calculate withdrawals made by supervisor (Cobro)
           const sellerCobros = (config.cobros || []).filter(c => {
@@ -2219,15 +2013,10 @@ export default function VendedorInterface({
                   <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider">Reporte de Caja</h3>
                   <p className="text-[10px] text-gray-400 font-sans mt-0.5">Consulta tu arqueo de caja y boletos emitidos.</p>
                 </div>
-                <button
-                  id="refresh-report-btn"
-                  onClick={fetchReportTickets}
-                  disabled={reportLoading}
-                  className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-600 flex items-center space-x-1 text-xs font-bold transition-colors cursor-pointer"
-                >
-                  <RotateCcw className={`w-3.5 h-3.5 ${reportLoading ? "animate-spin" : ""}`} />
-                  <span>Actualizar</span>
-                </button>
+                <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="text-[9px] font-black text-emerald-700 uppercase tracking-wider">EN VIVO</span>
+                </div>
               </div>
 
               {/* Rango de Fechas */}
@@ -2317,28 +2106,31 @@ export default function VendedorInterface({
                         draw = parts.slice(1).join(" ");
                       }
 
-                      const ticketPrize = getTicketTheoreticalPrize(t);
-                      const isWinner = ticketPrize > 0;
+                      const ticketPrize = (typeof t.monto_premio === "number" && t.es_premiado) ? t.monto_premio : getTicketTheoreticalPrize(t, config);
+                      const isWinner = t.es_premiado === true || ticketPrize > 0;
 
                       return (
-                        <div key={t.id} className={`bg-white rounded-xl p-4 shadow-sm border flex flex-col justify-between relative overflow-hidden ${isWinner && t.estado !== "anulado" ? "border-emerald-500 bg-emerald-50/10 shadow-md shadow-emerald-50" : "border-gray-200"} ${t.estado === "anulado" ? "opacity-60 bg-gray-50" : ""}`}>
+                        <div key={t.id} className={`bg-white rounded-xl p-4 shadow-sm border flex flex-col justify-between relative overflow-hidden ${isWinner && t.estado !== "anulado" ? "border-amber-400 bg-gradient-to-br from-amber-50/40 to-yellow-50/30 shadow-md shadow-amber-200/50" : "border-gray-200"} ${t.estado === "anulado" ? "opacity-60 bg-gray-50" : ""}`}>
                           {/* Winner Watermark Stamp */}
                           {isWinner && t.estado !== "anulado" && (
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 -rotate-12 opacity-15 border-4 border-emerald-600 text-emerald-600 rounded-2xl px-4 py-1.5 font-display font-black text-4xl tracking-widest uppercase pointer-events-none select-none">
-                              GANADOR
+                            <div className="absolute right-4 top-1/2 -translate-y-1/2 -rotate-12 opacity-10 border-4 border-amber-500 text-amber-600 rounded-2xl px-4 py-1.5 font-display font-black text-4xl tracking-widest uppercase pointer-events-none select-none">
+                              PREMIADO
                             </div>
                           )}
 
                           <div className="flex justify-between items-start mb-2 relative z-10">
                             <div>
                               <span className="font-bold text-gray-800 uppercase block">{user.nombre}</span>
+                              <span className="text-[10px] text-blue-600 font-mono font-black mt-0.5 block">
+                                #{t.numero_ticket || t.id_ticket || 'N/A'}
+                              </span>
                               <span className="text-[9px] text-gray-400 font-mono mt-0.5 block">
                                 {t.fecha_emision_date.toLocaleDateString("es-ES")} {formatTo12HourTime(t.fecha_emision_date)}
                               </span>
                             </div>
                             <div className="flex items-center space-x-2">
                               {isWinner && t.estado !== "anulado" && (
-                                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-lg bg-emerald-600 text-white animate-pulse shadow-xs">
+                                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-lg bg-amber-500 text-white animate-pulse shadow-xs">
                                   PREMIADO
                                 </span>
                               )}
@@ -2364,9 +2156,18 @@ export default function VendedorInterface({
                           <div className="border-t border-gray-100 pt-2.5 flex justify-between items-center text-xs">
                             <span className="text-gray-500 font-medium">Total Apostado:</span>
                             <span className="font-mono font-black text-gray-900 text-sm">
-                              C$ {(t.total_apostado || 0).toFixed(2)}
+                              C$ {getTicketAmount(t).toFixed(2)}
                             </span>
                           </div>
+
+                          {isWinner && t.estado !== "anulado" && ticketPrize > 0 && (
+                            <div className="flex justify-between items-center text-xs mt-1.5 bg-amber-50 -mx-4 px-4 py-1.5 border-t border-amber-100">
+                              <span className="text-amber-700 font-bold uppercase">A Pagar:</span>
+                              <span className="font-mono font-black text-amber-600 text-sm">
+                                C$ {ticketPrize.toFixed(2)}
+                              </span>
+                            </div>
+                          )}
 
                           {/* Action Options Group */}
                           <div className="border-t border-gray-100 pt-3 mt-3 grid grid-cols-4 gap-1">
@@ -2382,12 +2183,12 @@ export default function VendedorInterface({
                                     juego: game,
                                     sorteo: draw,
                                     numero_jugado: t.jugadas && t.jugadas[0] ? t.jugadas[0].numero : (t.numero_jugado || "?"),
-                                    monto_pago: t.total_apostado,
+                                    monto_pago: getTicketAmount(t),
                                     moneda: t.moneda || "C$",
                                     id_vendedor: t.id_vendedor,
                                     nombre_vendedor: user.nombre,
                                     nombre_cliente: t.nombre_cliente || "Genérico",
-                                    premio_posible_cs: t.total_premio || 0,
+                                    premio_posible_cs: t.total_premio || t.premio_posible_cs || 0,
                                     firma_digital: t.firma_digital || t.id.substring(0, 7).toUpperCase(),
                                     anulado: t.estado === "anulado",
                                     estado: t.estado,
@@ -2422,7 +2223,7 @@ export default function VendedorInterface({
                                   juego: game,
                                   sorteo: draw,
                                   numero_jugado: t.jugadas && t.jugadas[0] ? t.jugadas[0].numero : (t.numero_jugado || "?"),
-                                  monto_pago: t.total_apostado,
+                                  monto_pago: getTicketAmount(t),
                                   moneda: t.moneda || "C$",
                                   id_vendedor: t.id_vendedor,
                                   nombre_vendedor: user.nombre,
@@ -2761,7 +2562,7 @@ export default function VendedorInterface({
           <Gamepad2 className={`w-5 h-5 stroke-[2.5] ${activeTab === "venta" ? "text-[#1E3A8A]" : ""}`} />
           <span className="text-[9px] font-display font-black uppercase tracking-wider mt-0.5">Venta</span>
         </button>
-        <button id="nav-reportes" onClick={() => { setActiveTab("reportes"); setErrorMessage(null); setSuccessMessage(null); fetchReportTickets(); }} className={`flex flex-col items-center flex-1 py-1 px-1 text-center transition-all cursor-pointer ${activeTab === "reportes" ? "text-[#1E3A8A] scale-105" : "text-gray-400 hover:text-gray-600"}`}>
+        <button id="nav-reportes" onClick={() => { setActiveTab("reportes"); setErrorMessage(null); setSuccessMessage(null); }} className={`flex flex-col items-center flex-1 py-1 px-1 text-center transition-all cursor-pointer ${activeTab === "reportes" ? "text-[#1E3A8A] scale-105" : "text-gray-400 hover:text-gray-600"}`}>
           <History className={`w-5 h-5 stroke-[2.5] ${activeTab === "reportes" ? "text-[#1E3A8A]" : ""}`} />
           <span className="text-[9px] font-display font-black uppercase tracking-wider mt-0.5">Reportes</span>
         </button>

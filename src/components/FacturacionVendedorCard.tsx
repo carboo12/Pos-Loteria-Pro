@@ -5,6 +5,7 @@ export interface FacturacionVendedorCardProps {
   pagado: number;
   ingresos: number;
   totalAPagar: number;
+  totalPremios?: number;
   cobrado: number;
   vendido: number;
   ganancia: number;
@@ -18,6 +19,7 @@ export const FacturacionVendedorCard: React.FC<FacturacionVendedorCardProps> = (
   pagado,
   ingresos,
   totalAPagar,
+  totalPremios,
   cobrado,
   vendido,
   ganancia,
@@ -65,6 +67,12 @@ export const FacturacionVendedorCard: React.FC<FacturacionVendedorCardProps> = (
             <span className="text-gray-600 font-medium">Total a pagar:</span>
             <span className="font-bold text-gray-800">{formatCurrency(totalAPagar)}</span>
           </div>
+          {typeof totalPremios === "number" && totalPremios > 0 && (
+            <div className="flex justify-between text-sm bg-amber-50 -mx-1 px-1 py-0.5 rounded">
+              <span className="text-amber-700 font-bold">Premios:</span>
+              <span className="font-black text-amber-600">{formatCurrency(totalPremios)}</span>
+            </div>
+          )}
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Cobrado:</span>
             <span className="font-semibold text-gray-700">{formatCurrency(cobrado)}</span>

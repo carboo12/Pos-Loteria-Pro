@@ -1,8 +1,8 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import * as adminNamespace from "firebase-admin";
-import { getAuth } from "firebase-admin/auth";
 import bcrypt from "bcryptjs";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
@@ -10,40 +10,94 @@ const firebaseAdmin = ((adminNamespace as any).default || adminNamespace) as any
 
 const app = express();
 const activePaymentLocks = new Set<string>();
-const localSessions = new Map<string, any>(); // Fallback session storage para cuando falla Firebase Auth (adblockers/offline)
 
-const checkAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "No token provided." });
+// ─── SESIONES SEGURAS (crypto + TTL) ──────────────────────────────────
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
+const sessions = new Map<string, { user: any; createdAt: number }>();
+
+function generateSessionToken(): string {
+  return "sess_" + crypto.randomBytes(32).toString("hex");
+}
+
+function createSession(user: any): string {
+  const token = generateSessionToken();
+  sessions.set(token, { user, createdAt: Date.now() });
+  return token;
+}
+
+function validateSession(token: string): any | null {
+  const session = sessions.get(token);
+  if (!session) return null;
+  if (Date.now() - session.createdAt > SESSION_TTL_MS) {
+    sessions.delete(token);
+    return null;
   }
-  try {
-    const token = authHeader.split(" ")[1];
+  return session.user;
+}
 
-    // 🛑 BYPASS DE DESARROLLO PARA ADMIN
-    if (token === 'bypass-dev-admin-token') {
-      (req as any).user = {
-        uid: 'admin_1',
-        email: 'carboo12@gmail.com',
-        rol: 'administrador'
-      };
-      return next();
+function destroySession(token: string): void {
+  sessions.delete(token);
+}
+
+// Limpieza periódica de sesiones expiradas (cada 30 min)
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, session] of sessions.entries()) {
+    if (now - session.createdAt > SESSION_TTL_MS) {
+      sessions.delete(token);
     }
-
-    // 1. Fallback local: Si el token existe en sesiones locales, permitir acceso
-    if (localSessions.has(token)) {
-      (req as any).user = localSessions.get(token);
-      return next();
-    }
-
-    // 2. Firebase ID Token original
-    const decoded = await getAuth().verifyIdToken(token);
-    (req as any).user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: "Invalid token." });
   }
-};
+}, 30 * 60 * 1000);
+
+// ─── MIDDLEWARE checkAuth (con soporte de roles) ───────────────────────
+function checkAuth(allowedRoles?: string[]) {
+  return async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const authHeader = req.headers.authorization;
+    const routeLabel = `${req.method} ${req.path}`;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.log(`[Auth] 401 → ${routeLabel} — No Bearer token. Headers: ${JSON.stringify(Object.keys(req.headers))}`);
+      return res.status(401).json({ error: "No token provided." });
+    }
+    try {
+      const token = authHeader.split(" ")[1];
+      const sessionUser = validateSession(token);
+
+      console.log(`[Auth] Token "${token.substring(0, 16)}..." → ${routeLabel} | Sesiones activas: ${sessions.size} | Resultado: ${sessionUser ? "VALID (" + sessionUser.rol + ")" : "INVALID"}`);
+
+      if (!sessionUser) {
+        return res.status(401).json({ error: "Sesión inválida o expirada. Por favor inicie sesión nuevamente." });
+      }
+
+      // Re-validar que el usuario sigue existiendo y activo en la DB
+      const freshUser = db.usuarios.find((u: any) => u.id === sessionUser.id);
+      if (!freshUser) {
+        destroySession(token);
+        return res.status(401).json({ error: "Usuario no encontrado. Sesión cerrada." });
+      }
+      if (!freshUser.activo) {
+        destroySession(token);
+        return res.status(403).json({ error: "Cuenta desactivada. Sesión cerrada." });
+      }
+
+      // Verificación de roles
+      if (allowedRoles && allowedRoles.length > 0) {
+        const userRole = freshUser.rol;
+        if (!allowedRoles.includes(userRole)) {
+          return res.status(403).json({ error: `Acceso denegado. Se requiere uno de estos roles: ${allowedRoles.join(", ")}.` });
+        }
+      }
+
+      // Inyectar datos frescos del usuario en la request
+      (req as any).user = { ...freshUser, password: undefined };
+      return next();
+    } catch (err) {
+      console.error("[Auth] Error verificando sesión:", err);
+      return res.status(401).json({ error: "Invalid token." });
+    }
+  };
+}
+
+const requireAdmin = checkAuth(["administrador"]);
 
 
 
@@ -57,35 +111,16 @@ function calculatePrizeMultiplier(juego: string, sorteo: string): number {
 }
 
 const PORT = parseInt(process.env.PORT || "3000", 10);
-const DB_PATH = path.join(process.cwd(), "data-store.json");
 
 app.use(express.json());
 
-let firestoreDbId = "";
-try {
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    const configData = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    if (configData.firestoreDatabaseId) {
-      firestoreDbId = configData.firestoreDatabaseId;
-      console.log(`[Firebase Configuration] Base de datos Firestore detectada: ${firestoreDbId}`);
-    }
-  }
-} catch (e) {
-  console.error("Error reading firebase-applet-config.json:", e);
-}
+// ─── FIREBASE CONFIGURATION (hardcoded — no editable) ────────────────
+const FIREBASE_PROJECT_ID = "rapigestion-2";
+const FIRESTORE_DATABASE_ID = "ai-studio-puntodeventadelo-99bc134f-793f-40a0-acdb-49f626766fdc";
+console.log(`[Firebase] Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
 
 function getFirestoreInstance() {
-  const settings = {
-    // KeepAlive settings para evitar drops de conexion de gRPC
-    grpc: {
-      "grpc.keepalive_time_ms": 30000,
-      "grpc.keepalive_timeout_ms": 10000
-    }
-  };
-
-  const firestoreDb = firestoreDbId ? getFirestore(firestoreDbId) : getFirestore();
-  firestoreDb.settings(settings);
+  const firestoreDb = getFirestore(FIRESTORE_DATABASE_ID);
   return firestoreDb;
 }
 
@@ -100,81 +135,8 @@ function getLocalDateString(date = new Date()): string {
 }
 
 
-// Initialize database file if it doesn't exist
+// In-memory defaults — all persistence is in Firestore. No local file I/O.
 function initDatabase() {
-  if (fs.existsSync(DB_PATH)) {
-    try {
-      const content = fs.readFileSync(DB_PATH, "utf-8").trim();
-      if (content) {
-        const parsed = JSON.parse(content);
-        // Ensure backward compatibility on existing databases
-        if (!parsed.configuracion) parsed.configuracion = {};
-        if (!parsed.configuracion.limites_numeros) parsed.configuracion.limites_numeros = [];
-        if (!parsed.configuracion.resultados) parsed.configuracion.resultados = [];
-        if (!parsed.configuracion.cobros) parsed.configuracion.cobros = [];
-
-        // Migrate old default "Indicaciones del Ticket" value
-        if (parsed.configuracion.formato_ticket?.ruc === "RUC-J0310000123456") {
-          parsed.configuracion.formato_ticket.ruc = "exiga su ticket en su compra de su numero.";
-        }
-
-        if (!parsed.usuarios) parsed.usuarios = [];
-
-        // Migrate existing users to the full schema
-        parsed.usuarios = parsed.usuarios.map((u: any) => {
-          const isOnline = u.estado === "online" || u.conexion === "online";
-          const isActivo = u.activo !== false && u.estado !== "inactivo";
-          return {
-            id: u.id,
-            nombre: u.nombre,
-            usuario: u.usuario || u.nombre.toLowerCase().replace(/\s+/g, "").normalize("NFD").replace(/[\u0300-\u036f]/g, ""),
-            rol: u.rol === "administrador" || u.rol === "admin" ? "administrador" : (u.rol === "supervisor" ? "supervisor" : "vendedor"),
-            estado: isActivo ? "activo" : "inactivo",
-            conexion: isOnline ? "online" : "offline",
-            activo: isActivo,
-            region: u.region || "Nicaragua",
-            email: u.email || `${u.nombre.toLowerCase().replace(/\s+/g, "")}@loteria.com`,
-            id_supervisor: u.id_supervisor || "",
-            vendedoresAsignados: u.vendedoresAsignados || [],
-            password: u.password // <-- ACCIÓN CRÍTICA: Conservar el password intacto
-          };
-        });
-
-        // Sync supervisor vendedoresAsignados
-        parsed.usuarios.forEach((u: any) => {
-          if (u.rol === "supervisor") {
-            u.vendedoresAsignados = parsed.usuarios
-              .filter((v: any) => v.rol === "vendedor" && v.id_supervisor === u.id)
-              .map((v: any) => v.id);
-          }
-        });
-
-        if (!parsed.usuarios.some((u: any) => u.rol === "supervisor")) {
-          parsed.usuarios.push({
-            id: "super_1",
-            nombre: "Supervisor Managua",
-            usuario: "supermanagua",
-            rol: "supervisor",
-            estado: "activo",
-            conexion: "online",
-            activo: true,
-            region: "Nicaragua",
-            email: "supervisor@loteria.com",
-            id_supervisor: "",
-            vendedoresAsignados: ["vend_1", "vend_2"]
-          });
-          const vend1 = parsed.usuarios.find((u: any) => u.id === "vend_1");
-          if (vend1) vend1.id_supervisor = "super_1";
-          const vend2 = parsed.usuarios.find((u: any) => u.id === "vend_2");
-          if (vend2) vend2.id_supervisor = "super_1";
-        }
-        return parsed;
-      }
-    } catch (e) {
-      console.error("Error reading database, resetting...", e);
-    }
-  }
-
   const initialDB = {
     usuarios: [
       {
@@ -231,11 +193,6 @@ function initDatabase() {
     pagos_comision: []
   };
 
-  const dataDir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-  fs.writeFileSync(DB_PATH, JSON.stringify(initialDB, null, 2), "utf-8");
   return initialDB;
 }
 
@@ -247,12 +204,6 @@ db.cobros_admin = db.cobros_admin || [];
 db.pagos_comision = db.pagos_comision || [];
 
 async function saveToDB() {
-  try {
-    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf-8");
-  } catch (err) {
-    console.error("[Local Backup] Error al escribir copia de seguridad local:", err);
-  }
-
   const isReady = initFirebaseAdmin();
   if (isReady) {
     try {
@@ -269,10 +220,11 @@ async function saveToDB() {
         await firestoreDb.collection("usuarios").doc(id).set(userData);
       }
 
-      for (const v of db.ventas) {
-        const { id, ...saleData } = v;
-        await firestoreDb.collection("ventas").doc(id).set(saleData);
-      }
+      // NOTE: tickets (db.ventas) are NO longer bulk-written here.
+      // Each endpoint (POST /api/ventas, POST /api/ventas/:id/pagar, etc.)
+      // writes directly to Firestore "tickets" collection atomically.
+      // This prevents deleted tickets from being re-inserted by residual
+      // in-memory state during unrelated saves (config, users, closures).
 
       for (const c of db.cierres_caja) {
         const { id, ...closureData } = c;
@@ -321,13 +273,13 @@ async function syncFromFirestore() {
         }
       }
 
-      const salesSnapshot = await firestoreDb.collection("ventas").get();
+      const salesSnapshot = await firestoreDb.collection("tickets").get();
       const salesList: any[] = [];
       salesSnapshot.forEach((doc: any) => {
         salesList.push({ id: doc.id, ...doc.data() });
       });
       db.ventas = salesList;
-      console.log(`[Firestore Sync] ${salesList.length} ventas cargadas desde Firestore.`);
+      console.log(`[Firestore Sync] ${salesList.length} ventas cargadas desde Firestore (tickets).`);
 
       const closuresSnapshot = await firestoreDb.collection("cierres_caja").get();
       const closuresList: any[] = [];
@@ -371,19 +323,25 @@ let isFirebaseAdminInitialized = false;
 function findServiceAccountPath(): string | null {
   const envPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
   if (envPath && fs.existsSync(envPath)) {
+    console.log(`[Firebase Admin] Usando service account desde env: ${envPath}`);
     return envPath;
   }
 
   try {
     const files = fs.readdirSync(process.cwd());
-    const svcFile = files.find(f => f.includes("firebase-adminsdk") && f.endsWith(".json"));
-    if (svcFile) {
-      const fullPath = path.join(process.cwd(), svcFile);
-      console.log(`[Firebase Admin] Archivo de credenciales detectado dinámicamente: ${svcFile}`);
-      return fullPath;
+    const candidates = [
+      "service-account.json",
+      ...files.filter(f => f.includes("firebase-adminsdk") && f.endsWith(".json"))
+    ];
+    for (const name of candidates) {
+      const fullPath = path.join(process.cwd(), name);
+      if (fs.existsSync(fullPath)) {
+        console.log(`[Firebase Admin] Service account detectado: ${name}`);
+        return fullPath;
+      }
     }
   } catch (e) {
-    console.error("[Firebase Admin] Error al buscar credenciales dinámicamente:", e);
+    console.error("[Firebase Admin] Error al buscar credenciales:", e);
   }
   return null;
 }
@@ -402,11 +360,18 @@ function initFirebaseAdmin() {
   if (serviceAccountPath) {
     try {
       const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8"));
+
+      if (serviceAccount.project_id !== FIREBASE_PROJECT_ID) {
+        console.error(`[Firebase Admin] FATAL: service-account.json project_id="${serviceAccount.project_id}" no coincide con "${FIREBASE_PROJECT_ID}"`);
+        return false;
+      }
+
       firebaseAdmin.initializeApp({
-        credential: firebaseAdmin.cert(serviceAccount)
+        credential: firebaseAdmin.cert(serviceAccount),
+        projectId: FIREBASE_PROJECT_ID
       });
       isFirebaseAdminInitialized = true;
-      console.log("[Firebase Admin] Inicializado con éxito mediante Cuenta de Servicio.");
+      console.log(`[Firebase Admin] OK → Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
       return true;
     } catch (e) {
       console.error("[Firebase Admin] Error al inicializar con Cuenta de Servicio:", e);
@@ -416,94 +381,17 @@ function initFirebaseAdmin() {
   // 2. Always try Application Default Credentials (works on Cloud Run / App Hosting automatically)
   try {
     firebaseAdmin.initializeApp({
-      credential: firebaseAdmin.applicationDefault()
+      credential: firebaseAdmin.applicationDefault(),
+      projectId: FIREBASE_PROJECT_ID
     });
     isFirebaseAdminInitialized = true;
-    console.log("[Firebase Admin] Inicializado mediante Application Default Credentials (Cloud Run/ADC).");
+    console.log(`[Firebase Admin] OK (ADC) → Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
     return true;
   } catch (e) {
     console.error("[Firebase Admin] Error al inicializar con Application Default Credentials:", e);
   }
 
   return false;
-}
-
-async function syncDatabaseUsersToFirebaseAuth() {
-  const isReady = initFirebaseAdmin();
-  if (!isReady) {
-    console.log("[Firebase Auth Sync] Firebase Admin no está configurado. Omitiendo sincronización de usuarios.");
-    return;
-  }
-
-  console.log("[Firebase Auth Sync] Sincronizando usuarios con Firebase Auth...");
-
-  const validUsers = db.usuarios.filter((u: any) => !!u.email);
-
-  // Procesamiento paralelo con Promise.allSettled
-  await Promise.allSettled(
-    validUsers.map(async (u: any) => {
-      try {
-        await getAuth().getUserByEmail(u.email);
-      } catch (error: any) {
-        if (error.code === "auth/user-not-found" || error.code === "messaging/invalid-argument") {
-          try {
-            await getAuth().createUser({
-              uid: u.id,
-              email: u.email,
-              emailVerified: true,
-              password: "Loto123456!",
-              displayName: u.nombre
-            });
-          } catch (createError: any) {
-            console.error(`[Firebase Auth Sync] Error al crear ${u.email}:`, createError);
-          }
-        } else {
-          console.error(`[Firebase Auth Sync] Error buscando ${u.email}:`, error);
-        }
-      }
-    })
-  );
-}
-
-async function firebaseCreateUser(u: any) {
-  if (!initFirebaseAdmin() || !u.email) return;
-  try {
-    await getAuth().createUser({
-      uid: u.id,
-      email: u.email,
-      emailVerified: true,
-      password: u.password,
-      displayName: u.nombre
-    });
-    console.log(`[Firebase Auth] Creado usuario: ${u.email}`);
-  } catch (err) {
-    console.error(`[Firebase Auth] Error al crear usuario:`, err);
-  }
-}
-
-async function firebaseUpdateUser(uid: string, updates: { email?: string; displayName?: string; password?: string; disabled?: boolean }) {
-  if (!initFirebaseAdmin()) return;
-  try {
-    const fbUpdates: any = {};
-    if (updates.email) fbUpdates.email = updates.email;
-    if (updates.displayName) fbUpdates.displayName = updates.displayName;
-    if (updates.password) fbUpdates.password = updates.password;
-    if (updates.disabled !== undefined) fbUpdates.disabled = updates.disabled;
-    await getAuth().updateUser(uid, fbUpdates);
-    console.log(`[Firebase Auth] Actualizado usuario ${uid}`);
-  } catch (err) {
-    console.error(`[Firebase Auth] Error al actualizar usuario ${uid}:`, err);
-  }
-}
-
-async function firebaseDeleteUser(uid: string) {
-  if (!initFirebaseAdmin()) return;
-  try {
-    await getAuth().deleteUser(uid);
-    console.log(`[Firebase Auth] Eliminado usuario ${uid}`);
-  } catch (err) {
-    console.error(`[Firebase Auth] Error al eliminar usuario ${uid}:`, err);
-  }
 }
 
 // Broadcast to active SSE clients
@@ -635,84 +523,255 @@ app.post("/api/login", async (req, res) => {
     return res.status(403).json({ error: "Acceso denegado. Su cuenta se encuentra suspendida temporalmente." });
   }
 
-  // Verificación de Contraseña (Híbrida)
+  // ─── BRIDGE DE MIGRACIÓN: tolera bcrypt y texto plano ─────────────
   let isMatch = false;
+  let wasPlaintext = false;
 
-  // Si la contraseña ingresada es la Master Password, dar acceso directo para testing local
-  if (password === "Loto123456!") {
-    isMatch = true;
-  } else if (user.password) {
+  if (user.password) {
     if (user.password.startsWith("$2")) {
+      // Contraseña hasheada con bcrypt
       isMatch = bcrypt.compareSync(password, user.password);
     } else {
+      // Texto plano → comparación directa (migración)
       isMatch = user.password === password;
+      wasPlaintext = isMatch;
     }
   }
 
+  if (!user.password) {
+    console.log(`[Login] Usuario ${user.email} sin campo 'password' — rechazado`);
+  }
+
   if (!isMatch) {
+    // ─── DEBUG LOGIN DETALLADO ──────────────────────────────────────
+    console.log("--- DEBUG LOGIN DETALLADO ---");
+    console.log("Email intentado:", email);
+    console.log("Password enviado (longitud):", password ? password.length : 0);
+    console.log("Password en memoria DB:", user.password ? `${user.password.substring(0, 20)}...` : "VACÍO/UNDEFINED");
+    console.log("¿Empieza con $2? (bcrypt):", user.password ? user.password.startsWith("$2") : false);
+
+    // Intentar Firestore Admin SDK (puede fallar localmente con gRPC)
+    try {
+      const firestoreOk = initFirebaseAdmin();
+      if (firestoreOk) {
+        const firestoreDb = getFirestoreInstance();
+        const snapshot = await firestoreDb.collection('usuarios').where('email', '==', email).get();
+        if (snapshot.empty) {
+          console.log("ERROR: Usuario no encontrado en la colección 'usuarios' de Firestore.");
+        } else {
+          const u = snapshot.docs[0].data();
+          console.log("Usuario encontrado en Firestore:", u.email);
+          console.log("Hash recuperado de Firestore:", u.password ? `${u.password.substring(0, 20)}...` : "VACÍO/NULL");
+          const fsMatch = u.password && u.password.startsWith("$2")
+            ? bcrypt.compareSync(password, u.password)
+            : u.password === password;
+          console.log("¿bcrypt.compare da true?:", fsMatch);
+        }
+      } else {
+        console.log("Firestore Admin NO disponible (gRPC roto localmente). Saltando diagnóstico Firestore.");
+      }
+    } catch (fsErr: any) {
+      console.log("Firestore Admin error:", fsErr.message);
+    }
+    console.log("--- FIN DEBUG LOGIN DETALLADO ---");
+    // ─── FIN DEBUG ──────────────────────────────────────────────────
+
     return res.status(401).json({ error: "Credenciales incorrectas." });
+  }
+
+  // Si coincidió en texto plano, hashear y persistir automáticamente
+  if (wasPlaintext) {
+    try {
+      console.log(`[Login Bridge] Migrando contraseña de texto plano → bcrypt para ${user.email}`);
+      const hashed = bcrypt.hashSync(password, 10);
+
+      // 1. Actualizar en local DB
+      const localIdx = db.usuarios.findIndex((u: any) => u.id === user.id);
+      if (localIdx !== -1) {
+        (db.usuarios[localIdx] as any).password = hashed;
+      }
+
+      // 2. Persistir en Firestore (remover campo password plano, guardar password hasheado)
+      const firestoreOk = initFirebaseAdmin();
+      if (firestoreOk) {
+        const firestoreDb = getFirestoreInstance();
+        await firestoreDb.collection("usuarios").doc(user.id).update({ password: hashed });
+      }
+
+      // 3. Guardar copia local
+      saveToDB();
+
+      console.log(`[Login Bridge] Contraseña migrada exitosamente para ${user.email}`);
+    } catch (migErr) {
+      console.error(`[Login Bridge] Error migrando contraseña para ${user.email}:`, migErr);
+      // No bloquear el login si la migración falla — el usuario ya autenticó correctamente
+    }
   }
 
   // Extraer el usuario seguro para el cliente (sin el campo password)
   const { password: _, ...safeUser } = user;
 
-  // Generate Firebase custom token so the client can obtain an ID token
-  let customToken: string | null = null;
+  // Generar token de sesión seguro (crypto + TTL 24h)
+  const sessionToken = createSession(safeUser);
+  console.log(`[Auth] Login OK → ${user.email} (${user.rol}) | Token: ${sessionToken.substring(0, 16)}... | Sesiones activas: ${sessions.size}`);
+
+  res.json({ success: true, user: safeUser, localToken: sessionToken, message: "Autenticación exitosa" });
+});
+
+// ─── AUTH ENDPOINTS (Custom auth with bcrypt + Firestore) ────────────
+
+// Validar sesión actual — usado por el frontend para rehidratación
+app.get("/api/auth/me", checkAuth(), (req, res) => {
   try {
-    const isReady = initFirebaseAdmin();
-    if (isReady) {
-      customToken = await getAuth().createCustomToken(user.id);
+    const sessionUser = (req as any).user;
+    // Re-validar que el usuario sigue existiendo y activo en la DB
+    const freshUser = db.usuarios.find((u: any) => u.id === sessionUser.id);
+    if (!freshUser) {
+      const token = req.headers.authorization?.split(" ")[1];
+      if (token) destroySession(token);
+      return res.status(401).json({ error: "Usuario no encontrado. Sesión cerrada." });
     }
+    if (!freshUser.activo) {
+      const token = req.headers.authorization?.split(" ")[1];
+      if (token) destroySession(token);
+      return res.status(403).json({ error: "Cuenta desactivada. Sesión cerrada." });
+    }
+    const { password: _, ...safeUser } = freshUser;
+    res.json({ success: true, user: safeUser });
   } catch (err) {
-    console.error("[Login] Error generating custom token:", err);
+    console.error("[Auth Me] Error:", err);
+    res.status(500).json({ error: "Error al validar sesión." });
   }
-
-  // Generar token local de respaldo para escenarios offline o de adblock
-  const localToken = "loc_" + Math.random().toString(36).substring(2) + Date.now().toString(36);
-  localSessions.set(localToken, safeUser);
-
-  res.json({ success: true, user: safeUser, customToken, localToken, message: "Autenticación exitosa" });
 });
 
-// 🔧 ENDPOINT DE EMERGENCIA: Re-sincronizar Firebase Auth
-app.post("/api/resync-auth", async (req, res) => {
-  const { userId, email } = req.body;
-
-  if (!userId) {
-    return res.status(400).json({ error: "userId es requerido." });
-  }
-
-  // Verificar que el usuario existe en la base de datos
-  const user = db.usuarios.find((u: any) => u.id === userId);
-  if (!user) {
-    return res.status(404).json({ error: "Usuario no encontrado." });
-  }
-
-  if (!user.activo) {
-    return res.status(403).json({ error: "Usuario inactivo. No se puede re-sincronizar." });
-  }
-
-  // Generar un nuevo custom token
-  let customToken: string | null = null;
+// Registro protegido — solo administradores pueden crear usuarios
+app.post("/api/auth/register", requireAdmin, async (req, res) => {
   try {
-    const isReady = initFirebaseAdmin();
-    if (isReady) {
-      customToken = await getAuth().createCustomToken(user.id);
-      console.log(`[Resync Auth] Custom token generado para usuario: ${user.id} (${user.email})`);
-    } else {
-      return res.status(500).json({ error: "Firebase Admin no está inicializado." });
+    const { nombre, usuario, email, password, rol, region, id_supervisor } = req.body;
+
+    if (!nombre || !usuario || !email || !password) {
+      return res.status(400).json({ error: "Nombre, usuario, email y contraseña son requeridos." });
     }
-  } catch (err: any) {
-    console.error("[Resync Auth] Error generando custom token:", err);
-    return res.status(500).json({ error: "Error generando custom token: " + err.message });
-  }
 
-  if (!customToken) {
-    return res.status(500).json({ error: "No se pudo generar el custom token." });
-  }
+    if (password.length < 6) {
+      return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres." });
+    }
 
-  res.json({ success: true, customToken, userId: user.id });
+    const usernameLower = usuario.trim().toLowerCase();
+    if (db.usuarios.some((u: any) => u.usuario.toLowerCase() === usernameLower)) {
+      return res.status(400).json({ error: `El nickname "${usuario}" ya está en uso.` });
+    }
+
+    if (db.usuarios.some((u: any) => u.email && u.email.toLowerCase() === email.trim().toLowerCase())) {
+      return res.status(400).json({ error: `El email "${email}" ya está registrado.` });
+    }
+
+    const prefix = "U-";
+    let nextNum = 1;
+    while (db.usuarios.some((u: any) => u.id === `${prefix}${String(nextNum).padStart(3, "0")}`)) {
+      nextNum++;
+    }
+    const id = `${prefix}${String(nextNum).padStart(3, "0")}`;
+
+    const resolvedRol = rol === "admin" || rol === "administrador" ? "administrador" : (rol === "supervisor" ? "supervisor" : "vendedor");
+
+    const newUser = {
+      id,
+      nombre: nombre.trim(),
+      usuario: usernameLower,
+      rol: resolvedRol,
+      email: email.trim(),
+      password: bcrypt.hashSync(password, 10),
+      estado: "activo" as const,
+      conexion: "offline" as const,
+      activo: true,
+      region: region || "Nicaragua" as const,
+      id_supervisor: id_supervisor || "",
+      vendedoresAsignados: []
+    };
+
+    db.usuarios.push(newUser);
+
+    // Sync to Firestore
+    if (initFirebaseAdmin()) {
+      const { password: _, ...firestoreUser } = newUser;
+      getFirestoreInstance().collection("usuarios").doc(id).set(firestoreUser).catch((err: any) => {
+        console.error(`[Firestore Sync] Error al crear usuario ${id} en Firestore:`, err);
+      });
+    }
+
+    saveToDB();
+    const { password: _, ...safeUser } = newUser;
+    res.status(201).json({ success: true, user: safeUser });
+  } catch (err) {
+    console.error("[Auth Register] Error creando usuario:", err);
+    res.status(500).json({ error: "Error interno al crear usuario." });
+  }
 });
+
+app.post("/api/auth/change-password", checkAuth(), async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = (req as any).user?.uid || (req as any).user?.id;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Contraseña actual y nueva contraseña son requeridas." });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "La nueva contraseña debe tener al menos 6 caracteres." });
+    }
+
+    const user = db.usuarios.find((u: any) => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ error: "Usuario no encontrado." });
+    }
+
+    let isMatch = false;
+    if (user.password) {
+      if (user.password.startsWith("$2")) {
+        isMatch = bcrypt.compareSync(currentPassword, user.password);
+      } else {
+        isMatch = user.password === currentPassword;
+      }
+    }
+
+    if (!isMatch) {
+      return res.status(401).json({ error: "La contraseña actual es incorrecta." });
+    }
+
+    user.password = bcrypt.hashSync(newPassword, 10);
+    saveToDB();
+
+    // Invalidate all existing sessions for this user except the current one
+    const currentToken = req.headers.authorization?.split(" ")[1];
+    for (const [token, session] of sessions.entries()) {
+      if (session.user.id === userId && token !== currentToken) {
+        destroySession(token);
+      }
+    }
+
+    res.json({ success: true, message: "Contraseña actualizada correctamente." });
+  } catch (err) {
+    console.error("[Auth ChangePassword] Error:", err);
+    res.status(500).json({ error: "Error interno al cambiar contraseña." });
+  }
+});
+
+app.post("/api/auth/logout", checkAuth(), (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (token) {
+      destroySession(token);
+    }
+    res.json({ success: true, message: "Sesión cerrada correctamente." });
+  } catch (err) {
+    console.error("[Auth Logout] Error:", err);
+    res.status(500).json({ error: "Error al cerrar sesión." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
 
 // Setup Administrator Account Route (Temporary / Recovery utility)
 app.post("/api/setup-admin", async (req, res) => {
@@ -722,6 +781,8 @@ app.post("/api/setup-admin", async (req, res) => {
   }
 
   const adminEmail = req.body.email || "admin@sistema.com";
+  const adminPassword = req.body.password || "Admin123456!";
+
   let userInDb = db.usuarios.find((u: any) => u.email.toLowerCase() === adminEmail.toLowerCase());
 
   if (!userInDb) {
@@ -736,46 +797,18 @@ app.post("/api/setup-admin", async (req, res) => {
       region: "Nicaragua",
       email: adminEmail,
       id_supervisor: "",
-      vendedoresAsignados: []
+      vendedoresAsignados: [],
+      password: bcrypt.hashSync(adminPassword, 10)
     };
     db.usuarios.push(userInDb);
     saveToDB();
   }
 
-  let fbStatus = "";
-  const isReady = initFirebaseAdmin();
-  if (isReady) {
-    try {
-      try {
-        await getAuth().getUserByEmail(adminEmail);
-        fbStatus = "Ya registrado en Firebase Authentication.";
-      } catch (err: any) {
-        if (err.code === "auth/user-not-found" || err.code === "messaging/invalid-argument") {
-          await getAuth().createUser({
-            uid: userInDb.id,
-            email: adminEmail,
-            emailVerified: true,
-            password: "Loto123456!",
-            displayName: userInDb.nombre
-          });
-          fbStatus = "Creado exitosamente en Firebase Authentication.";
-        } else {
-          throw err;
-        }
-      }
-    } catch (err: any) {
-      console.error("[Setup Admin Auth Error]", err);
-      fbStatus = `Error en Firebase Auth: ${err.message}`;
-    }
-  } else {
-    fbStatus = "Firebase Admin no está inicializado.";
-  }
-
+  const { password: _, ...safeUser } = userInDb;
   res.json({
     success: true,
-    dbUser: userInDb,
-    fbStatus: fbStatus,
-    message: "Inicialización completada."
+    dbUser: safeUser,
+    message: "Administrador inicializado correctamente. Ya puede iniciar sesión."
   });
 });
 
@@ -788,7 +821,7 @@ app.get("/api/usuarios", (req, res) => {
   res.json(safeUsers);
 });
 
-app.post("/api/usuarios", checkAuth, (req, res) => {
+app.post("/api/usuarios", requireAdmin, (req, res) => {
   const { nombre, usuario, rol, email, password, estado, region, id_supervisor, vendedoresAsignados } = req.body;
   if (!nombre || !rol || !email || !usuario || !password) {
     return res.status(400).json({ error: "Nombre, Usuario (nickname), Contraseña, Rol y Correo son campos obligatorios." });
@@ -839,11 +872,10 @@ app.post("/api/usuarios", checkAuth, (req, res) => {
   }
 
   saveToDB();
-  firebaseCreateUser(newUser).catch(err => console.error("Error creating Firebase user on POST:", err));
   res.status(201).json(newUser);
 });
 
-app.put("/api/usuarios/:id", (req, res) => {
+app.put("/api/usuarios/:id", requireAdmin, (req, res) => {
   const { id } = req.params;
   const user = db.usuarios.find((u: any) => u.id === id);
 
@@ -905,11 +937,10 @@ app.put("/api/usuarios/:id", (req, res) => {
   });
 
   saveToDB();
-  firebaseUpdateUser(id, { email: user.email, displayName: user.nombre, password, disabled: !user.activo }).catch(err => console.error("Error updating Firebase user on PUT:", err));
   res.json(user);
 });
 
-app.delete("/api/usuarios/:id", checkAuth, (req, res) => {
+app.delete("/api/usuarios/:id", requireAdmin, (req, res) => {
   const { id } = req.params;
   const index = db.usuarios.findIndex((u: any) => u.id === id);
 
@@ -941,7 +972,6 @@ app.delete("/api/usuarios/:id", checkAuth, (req, res) => {
       console.error(`[Firestore Sync] Error al eliminar usuario ${id} de Firestore:`, err);
     });
   }
-  firebaseDeleteUser(id).catch(err => console.error("Error deleting Firebase user on DELETE:", err));
   res.json({ success: true, message: `Usuario "${deletedUser.nombre}" eliminado.` });
 });
 
@@ -950,7 +980,7 @@ app.get("/api/limites-numeros", (req, res) => {
   res.json(db.configuracion.limites_numeros || []);
 });
 
-app.post("/api/limites-numeros", (req, res) => {
+app.post("/api/limites-numeros", requireAdmin, (req, res) => {
   const {
     juego,
     numero,
@@ -995,7 +1025,7 @@ app.post("/api/limites-numeros", (req, res) => {
   res.status(201).json(newLimit);
 });
 
-app.delete("/api/limites-numeros", (req, res) => {
+app.delete("/api/limites-numeros", requireAdmin, (req, res) => {
   const id = req.query.id;
   if (!id) {
     return res.status(400).json({ error: "Límite ID es requerido." });
@@ -1005,19 +1035,156 @@ app.delete("/api/limites-numeros", (req, res) => {
   res.json({ success: true, message: "Límite eliminado." });
 });
 
-app.delete("/api/limites-numeros/:id", (req, res) => {
+app.delete("/api/limites-numeros/:id", requireAdmin, (req, res) => {
   const id = req.params.id || req.query.id;
   db.configuracion.limites_numeros = (db.configuracion.limites_numeros || []).filter((l: any) => l.id !== id);
   saveToDB();
   res.json({ success: true, message: "Límite eliminado." });
 });
 
-// Sorteos Winning Numbers Results
+// ─── ESCRUTINIO DE TICKETS ──────────────────────────────────────────────────────
+// Escrutates all Firestore tickets for a given sorteo+fecha against a winning number.
+// Marks each ticket with es_premiado (bool) and monto_premio (number in C$).
+// Supports batched writes (>500 tickets) and re-scrutinio (clears stale state).
+async function escrutarTickets(id_sorteo: string, sorteoName: string, fecha: string, numero_ganador: string) {
+  const sorteoObj = db.configuracion.sorteos.find((s: any) => s.id === id_sorteo);
+  if (!sorteoObj) {
+    console.log("[Escrutinio] Sorteo no encontrado:", id_sorteo);
+    return { scrutinized: 0, winners: 0 };
+  }
+
+  const juego = sorteoObj.juego;
+  const multiplicador = calculatePrizeMultiplier(juego, sorteoName);
+
+  if (!initFirebaseAdmin()) {
+    console.log("[Escrutinio] Firebase Admin no disponible.");
+    return { scrutinized: 0, winners: 0 };
+  }
+
+  try {
+    const firestoreDb = getFirestoreInstance();
+
+    // Query all tickets for this date (avoid composite index; filter sorteo in-memory)
+    const ticketsSnap = await firestoreDb.collection("tickets")
+      .where("fecha_venta", "==", fecha)
+      .get();
+
+    let scrutinized = 0;
+    let winners = 0;
+    const batchOps: { ref: any; data: any }[] = [];
+
+    for (const ticketDoc of ticketsSnap.docs) {
+      const ticket = ticketDoc.data();
+      if (ticket.estado === "anulado") continue;
+      if (ticket.id_sorteo !== sorteoName) continue;
+
+      scrutinized++;
+      let ticketPrize = 0;
+
+      // Multi-jugada support
+      if (ticket.jugadas && ticket.jugadas.length > 0) {
+        for (const jugada of ticket.jugadas) {
+          if (String(jugada.numero).trim().toLowerCase() === String(numero_ganador).trim().toLowerCase()) {
+            const montoInCs = ticket.moneda === "USD"
+              ? jugada.monto * (db.configuracion.tasa_cambio || 36.5)
+              : jugada.monto;
+            ticketPrize += montoInCs * multiplicador;
+          }
+        }
+      } else if (ticket.numero_jugado) {
+        if (String(ticket.numero_jugado).trim().toLowerCase() === String(numero_ganador).trim().toLowerCase()) {
+          const montoInCs = ticket.moneda === "USD"
+            ? (ticket.monto_pago || 0) * (db.configuracion.tasa_cambio || 36.5)
+            : (ticket.monto_pago || 0);
+          ticketPrize = montoInCs * multiplicador;
+        }
+      }
+
+      batchOps.push({
+        ref: ticketDoc.ref,
+        data: {
+          es_premiado: ticketPrize > 0,
+          monto_premio: ticketPrize,
+          escrutinio_timestamp: new Date().toISOString()
+        }
+      });
+      if (ticketPrize > 0) winners++;
+    }
+
+    // Commit in chunks of 500 (Firestore batch limit)
+    for (let i = 0; i < batchOps.length; i += 500) {
+      const chunk = batchOps.slice(i, i + 500);
+      const batch = firestoreDb.batch();
+      for (const op of chunk) {
+        batch.update(op.ref, op.data);
+      }
+      await batch.commit();
+    }
+
+    // Also update local ventas array for consistency
+    for (const venta of db.ventas) {
+      if (venta.anulado) continue;
+      if (venta.sorteo !== sorteoName) continue;
+      const ventaDate = venta.timestamp_servidor.split("T")[0];
+      if (ventaDate !== fecha) continue;
+
+      let prize = 0;
+      if (venta.jugadas && venta.jugadas.length > 0) {
+        for (const j of venta.jugadas) {
+          if (String(j.numero).trim().toLowerCase() === String(numero_ganador).trim().toLowerCase()) {
+            const montoInCs = venta.moneda === "USD"
+              ? j.monto * (db.configuracion.tasa_cambio || 36.5)
+              : j.monto;
+            prize += montoInCs * multiplicador;
+          }
+        }
+      } else if (venta.numero_jugado) {
+        if (String(venta.numero_jugado).trim().toLowerCase() === String(numero_ganador).trim().toLowerCase()) {
+          const montoInCs = venta.moneda === "USD"
+            ? venta.monto_pago * (db.configuracion.tasa_cambio || 36.5)
+            : venta.monto_pago;
+          prize = montoInCs * multiplicador;
+        }
+      }
+
+      venta.es_premiado = prize > 0;
+      venta.monto_premio = prize;
+    }
+
+    saveToDB();
+    console.log(`[Escrutinio] Completado: ${scrutinized} tickets escrutados, ${winners} ganadores.`);
+    return { scrutinized, winners };
+  } catch (err) {
+    console.error("[Escrutinio] Error durante escrutinio:", err);
+    return { scrutinized: 0, winners: 0 };
+  }
+}
+
+// Standalone escrutinio endpoint (re-escrutable)
+app.post("/api/escrutar", requireAdmin, async (req, res) => {
+  const { id_sorteo, fecha, numero_ganador } = req.body;
+  if (!id_sorteo || !fecha || !numero_ganador) {
+    return res.status(400).json({ error: "id_sorteo, fecha y numero_ganador son requeridos." });
+  }
+
+  const sorteoObj = db.configuracion.sorteos.find((s: any) => s.id === id_sorteo);
+  const sorteoName = sorteoObj ? sorteoObj.nombre : "";
+
+  try {
+    const result = await escrutarTickets(id_sorteo, sorteoName, fecha, numero_ganador);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error("[Escrutinio] Error endpoint:", err);
+    res.status(500).json({ error: "Error durante el escrutinio." });
+  }
+});
+
+// ─── RESULTADOS (Winning Numbers) ──────────────────────────────────────────────
 app.get("/api/resultados", (req, res) => {
   res.json(db.configuracion.resultados || []);
 });
 
-app.post("/api/resultados", (req, res) => {
+app.post("/api/resultados", requireAdmin, async (req, res) => {
   const { id_sorteo, fecha, numero_ganador, sorteo, pais } = req.body;
   if (!id_sorteo || !fecha || !numero_ganador) {
     return res.status(400).json({ error: "Sorteo, Fecha y Número ganador son requeridos." });
@@ -1036,10 +1203,18 @@ app.post("/api/resultados", (req, res) => {
   db.configuracion.resultados = db.configuracion.resultados || [];
   db.configuracion.resultados.push(newResult);
   saveToDB();
+
+  // Auto-trigger escrutinio after saving the result
+  try {
+    await escrutarTickets(id_sorteo, newResult.sorteo, fecha, numero_ganador);
+  } catch (err) {
+    console.error("[Escrutinio] Error post-resultado:", err);
+  }
+
   res.status(201).json(newResult);
 });
 
-app.put("/api/resultados/:id", (req, res) => {
+app.put("/api/resultados/:id", requireAdmin, (req, res) => {
   const { id } = req.params;
   const { id_sorteo, fecha, numero_ganador, sorteo, pais } = req.body;
   if (!id_sorteo || !fecha || !numero_ganador) {
@@ -1062,7 +1237,7 @@ app.put("/api/resultados/:id", (req, res) => {
   res.json(db.configuracion.resultados[idx]);
 });
 
-app.delete("/api/resultados/:id", (req, res) => {
+app.delete("/api/resultados/:id", requireAdmin, (req, res) => {
   const { id } = req.params;
   db.configuracion.resultados = (db.configuracion.resultados || []).filter((r: any) => r.id !== id);
   saveToDB();
@@ -1074,7 +1249,7 @@ app.get("/api/cobros", (req, res) => {
   res.json(db.configuracion.cobros || []);
 });
 
-app.post("/api/cobros", checkAuth, (req, res) => {
+app.post("/api/cobros", checkAuth(), (req, res) => {
   const { id_vendedor, id_supervisor, monto_cs, monto_usd, comentario } = req.body;
   if (!id_vendedor || !id_supervisor || monto_cs === undefined || monto_usd === undefined) {
     return res.status(400).json({ error: "Vendedor, Supervisor, monto en C$ y monto en USD son obligatorios." });
@@ -1109,8 +1284,39 @@ app.post("/api/cobros", checkAuth, (req, res) => {
   res.status(201).json(newCobro);
 });
 
+// ─── INGRESOS (Supervisor entrega dinero al vendedor) ──────────────────────
+app.get("/api/ingresos", (req, res) => {
+  res.json((db.configuracion as any).ingresos || []);
+});
+
+app.post("/api/ingresos", checkAuth(), (req, res) => {
+  const { id_vendedor, id_supervisor, monto_cs, monto_usd, comentario } = req.body;
+  if (!id_vendedor || !id_supervisor) {
+    return res.status(400).json({ error: "Vendedor y Supervisor son obligatorios." });
+  }
+
+  const user = db.usuarios.find((u: any) => u.id === id_vendedor);
+  const newIngreso = {
+    id: "ing_" + Math.random().toString(36).substring(2, 9),
+    id_vendedor,
+    nombre_vendedor: user ? user.nombre : "Vendedor Desconocido",
+    id_supervisor,
+    monto_cs: Number(monto_cs) || 0,
+    monto_usd: Number(monto_usd) || 0,
+    fecha: getLocalDateString(),
+    timestamp: new Date().toISOString(),
+    comentario: comentario || ""
+  };
+
+  (db.configuracion as any).ingresos = (db.configuracion as any).ingresos || [];
+  (db.configuracion as any).ingresos.push(newIngreso);
+
+  saveToDB();
+  res.status(201).json(newIngreso);
+});
+
 // Mark closure as collected manually
-app.put("/api/cierres/:id/cobrar", (req, res) => {
+app.put("/api/cierres/:id/cobrar", requireAdmin, (req, res) => {
   const { id } = req.params;
   const cc = db.cierres_caja.find((c: any) => c.id === id);
   if (!cc) {
@@ -1126,7 +1332,7 @@ app.get("/api/configuracion", (req, res) => {
   res.json(db.configuracion);
 });
 
-app.put("/api/configuracion", checkAuth, (req, res) => {
+app.put("/api/configuracion", requireAdmin, (req, res) => {
   const { tasa_cambio, formato_ticket, sorteos } = req.body;
 
   if (tasa_cambio !== undefined) {
@@ -1219,6 +1425,7 @@ app.get("/api/ventas", (req, res) => {
     const found = db.ventas.find((v: any) =>
       v.id === ticketId ||
       v.numero_ticket === ticketId ||
+      v.id_ticket === ticketId ||
       (v.firma_digital && v.firma_digital.toUpperCase() === ticketId)
     );
     return res.json(found ? [found] : []);
@@ -1226,8 +1433,8 @@ app.get("/api/ventas", (req, res) => {
   res.json(db.ventas);
 });
 
-app.post("/api/ventas", (req, res) => {
-  const { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente, premio_posible_cs, jugadas } = req.body;
+app.post("/api/ventas", checkAuth(), async (req, res) => {
+  const { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente, premio_posible_cs, jugadas, fecha_venta } = req.body;
 
   if (!juego || !sorteo || !numero_jugado || !monto_pago || !moneda || !id_vendedor) {
     console.log("Validación de venta fallida, detalles:", { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente });
@@ -1400,27 +1607,83 @@ app.post("/api/ventas", (req, res) => {
     }
   }
 
-  // 3. Atomic counter increment for tickets
-  db.configuracion.contador_global_tickets += 1;
-  const nextTicketNum = String(db.configuracion.contador_global_tickets).padStart(7, "0");
-
-  const ticketId = "ticket_" + Math.random().toString(36).substring(2, 9);
+  // 3. ATOMIC COUNTER: Firestore transaction to get sequential ticket ID
   const serverTimeStr = now.toISOString();
+  let numero_ticket = "";
+  let firestoreCreated = false;
 
-  // 4. Calculate secure anti-photoshop digital signature
-  const signature = generateDigitalSignature(
-    ticketId,
-    serverTimeStr,
-    juego,
-    numero_jugado,
-    monto_pago,
-    moneda
-  );
+  try {
+    const firestoreDb = getFirestoreInstance();
+    const configRef = firestoreDb.collection("configuracion").doc("general");
+
+    await firestoreDb.runTransaction(async (transaction) => {
+      const configSnap = await transaction.get(configRef);
+
+      if (!configSnap.exists) {
+        throw new Error("configuracion/general no existe en Firestore");
+      }
+
+      const configData = configSnap.data()!;
+      const currentCounter = configData.contador_global_tickets || 0;
+      const newCounter = currentCounter + 1;
+      numero_ticket = String(newCounter).padStart(6, "0");
+
+      // Atomically increment the counter
+      transaction.update(configRef, { contador_global_tickets: newCounter });
+
+      // Create the ticket document with sequential ID as the document ID
+      const ticketRef = firestoreDb.collection("tickets").doc(numero_ticket);
+      const signature = generateDigitalSignature(numero_ticket, serverTimeStr, juego, numero_jugado, monto_pago, moneda);
+
+      transaction.set(ticketRef, {
+        // ── New canonical fields ──
+        id_ticket: numero_ticket,
+        id_vendedor,
+        fecha_emision: serverTimeStr,
+        fecha_venta: fecha_venta || "",
+        id_juego: juego,
+        id_sorteo: sorteo,
+        juego_sorteo: `${juego} ${sorteo}`,
+        jugadas: Array.isArray(jugadas) ? jugadas : [{ numero: numero_jugado, monto: Number(monto_pago) }],
+        estado: "pendiente",
+        total_apostado: Number(monto_pago),
+        nombre_vendedor: user.nombre,
+        nombre_cliente: nombre_cliente || "Genérico",
+        premio_posible_cs: Number(premio_posible_cs) || 0,
+        firma_digital: signature,
+        anulado: false,
+        // ── Legacy compat aliases (frontend Venta type expects these) ──
+        timestamp_servidor: serverTimeStr,
+        numero_ticket,
+        numero_jugado: numero_jugado,
+        monto_pago: Number(monto_pago),
+        moneda,
+        juego,
+        sorteo,
+      });
+    });
+
+    firestoreCreated = true;
+    // Sync counter to local DB
+    db.configuracion.contador_global_tickets = parseInt(numero_ticket, 10);
+    console.log(`[Ventas] Ticket ${numero_ticket} creado en Firestore (transacción atómica)`);
+  } catch (txErr: any) {
+    console.error("[Ventas] FALLO transacción Firestore — ticket NO creado:", txErr.message);
+    return res.status(500).json({
+      error: `No se pudo generar el ticket. Error de transacción: ${txErr.message}. Intente nuevamente.`,
+      retryable: true
+    });
+  }
+
+  const ticketId = numero_ticket;
+  const signature = generateDigitalSignature(ticketId, serverTimeStr, juego, numero_jugado, monto_pago, moneda);
 
   const newSale: any = {
     id: ticketId,
-    numero_ticket: nextTicketNum,
+    id_ticket: ticketId,
+    numero_ticket: ticketId,
     timestamp_servidor: serverTimeStr,
+    fecha_venta: fecha_venta || "",
     juego,
     sorteo,
     numero_jugado,
@@ -1452,7 +1715,7 @@ app.post("/api/ventas", (req, res) => {
     juego,
     sorteo,
     numero_jugado,
-    ticketNum: nextTicketNum,
+    ticketNum: numero_ticket,
     timestamp: serverTimeStr
   };
 
@@ -1465,7 +1728,7 @@ app.post("/api/ventas", (req, res) => {
 });
 
 // Anulación de Tickets (Basado en Hora de Cierre o Admin)
-app.post("/api/ventas/:id/anular", (req, res) => {
+app.post("/api/ventas/:id/anular", checkAuth(), async (req, res) => {
   const { id } = req.params;
   const { userRole } = req.body;
   const sale = db.ventas.find((v: any) => v.id === id);
@@ -1499,12 +1762,27 @@ app.post("/api/ventas/:id/anular", (req, res) => {
 
   sale.anulado = true;
   sale.estado = "anulado";
+
+  // Direct Firestore write to tickets collection for real-time vendor notification
+  if (initFirebaseAdmin()) {
+    try {
+      const firestoreDb = getFirestoreInstance();
+      await firestoreDb.collection("tickets").doc(id).update({
+        anulado: true,
+        estado: "anulado"
+      });
+      console.log(`[Anulación] Ticket ${id} anulado en Firestore`);
+    } catch (fireErr: any) {
+      console.error("[Anulación] Firestore direct write failed:", fireErr.message);
+    }
+  }
+
   saveToDB();
   res.json({ message: "Ticket anulado con éxito.", ticket: sale });
 });
 
 // Validación y Pago de Tickets con QR
-app.post("/api/ventas/:id/pagar", async (req, res) => {
+app.post("/api/ventas/:id/pagar", requireAdmin, async (req, res) => {
   const { id } = req.params;
 
   if (activePaymentLocks.has(id)) {
@@ -1513,7 +1791,7 @@ app.post("/api/ventas/:id/pagar", async (req, res) => {
   activePaymentLocks.add(id);
 
   try {
-    const sale = db.ventas.find((v: any) => v.id === id || v.numero_ticket === id || (v.firma_digital && v.firma_digital.toUpperCase() === id.toUpperCase()));
+    const sale = db.ventas.find((v: any) => v.id === id || v.numero_ticket === id || v.id_ticket === id || (v.firma_digital && v.firma_digital.toUpperCase() === id.toUpperCase()));
 
     if (!sale) {
       return res.status(404).json({ error: "Ticket no encontrado." });
@@ -1572,6 +1850,20 @@ app.post("/api/ventas/:id/pagar", async (req, res) => {
       sale.estado = "pagado";
       sale.premio_posible_cs = premioReal; // Sobrescribir con el calculado por el servidor
 
+      // Direct Firestore write to tickets collection for real-time vendor notification
+      if (initFirebaseAdmin()) {
+        try {
+          const firestoreDb = getFirestoreInstance();
+          await firestoreDb.collection("tickets").doc(id).update({
+            estado: "pagado",
+            monto_premio: premioReal
+          });
+          console.log(`[Pago] Ticket ${id} actualizado en Firestore (pagado)`);
+        } catch (fireErr: any) {
+          console.error("[Pago] Firestore direct write failed (fallback to saveToDB):", fireErr.message);
+        }
+      }
+
       saveToDB();
       return res.json({
         message: "¡Ganador!",
@@ -1581,6 +1873,20 @@ app.post("/api/ventas/:id/pagar", async (req, res) => {
       });
     } else {
       sale.estado = "perdedor";
+
+      // Direct Firestore write to tickets collection for real-time vendor notification
+      if (initFirebaseAdmin()) {
+        try {
+          const firestoreDb = getFirestoreInstance();
+          await firestoreDb.collection("tickets").doc(id).update({
+            estado: "perdedor"
+          });
+          console.log(`[Pago] Ticket ${id} actualizado en Firestore (perdedor)`);
+        } catch (fireErr: any) {
+          console.error("[Pago] Firestore direct write failed:", fireErr.message);
+        }
+      }
+
       saveToDB();
       return res.json({
         message: "Ticket No Premiado.",
@@ -1598,7 +1904,7 @@ app.get("/api/cierres", (req, res) => {
   res.json(db.cierres_caja);
 });
 
-app.post("/api/cierres", (req, res) => {
+app.post("/api/cierres", requireAdmin, (req, res) => {
   const { id_vendedor, denominaciones, monto_entregado_cs, monto_entregado_usd } = req.body;
 
   if (!id_vendedor || !denominaciones) {
@@ -1693,7 +1999,7 @@ function getOrCreateResumenDiario(id_vendedor: string, nombre_vendedor: string, 
 }
 
 // Endpoint invocado desde App.tsx (Login) para inicializar el día
-app.post("/api/resumen-diario/init", (req, res) => {
+app.post("/api/resumen-diario/init", checkAuth(), (req, res) => {
   const { id_vendedor, nombre_vendedor } = req.body;
   if (!id_vendedor || !nombre_vendedor) {
     return res.status(400).json({ error: "Faltan datos." });
@@ -1707,7 +2013,7 @@ app.post("/api/resumen-diario/init", (req, res) => {
 });
 
 // Endpoint de migración histórica (Backfill)
-app.post("/api/admin/backfill-resumenes", (req, res) => {
+app.post("/api/admin/backfill-resumenes", requireAdmin, (req, res) => {
   const { default_status = 'pagado' } = req.body; // Puede ser 'pagado' o 'pendiente'
 
   // 1. Obtener todas las ventas no anuladas
@@ -1772,7 +2078,7 @@ app.post("/api/admin/backfill-resumenes", (req, res) => {
 });
 
 // Endpoint de Anulación de Cobro
-app.post("/api/cobros/:id/anular", (req, res) => {
+app.post("/api/cobros/:id/anular", requireAdmin, (req, res) => {
   const { id } = req.params;
 
   const cobro = db.cobros_admin.find((c: any) => c.id === id);
@@ -1883,7 +2189,7 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
   res.json({ resumenes, mensaje: "" });
 });
 
-app.post("/api/cobros/procesar", (req, res) => {
+app.post("/api/cobros/procesar", requireAdmin, (req, res) => {
   const { id_admin, id_supervisor, id_vendedor, rango_inicio, rango_fin, dias_cerrados, total_vendido, total_pagado, total_neto } = req.body;
 
   const procesadorId = id_admin || id_supervisor;
@@ -1928,7 +2234,7 @@ app.post("/api/cobros/procesar", (req, res) => {
   res.json({ success: true, cobro: nuevoCobro });
 });
 
-app.post("/api/pagos/registrar", (req, res) => {
+app.post("/api/pagos/registrar", requireAdmin, (req, res) => {
   const { id_admin, id_vendedor, monto_pago, concepto, id_cobro_relacionado } = req.body;
   const vendedor = db.usuarios.find((u: any) => u.id === id_vendedor);
 
@@ -1950,13 +2256,8 @@ app.post("/api/pagos/registrar", (req, res) => {
 
 // Mounting Vite middleware in development
 async function startServer() {
-  // Sync state from Firestore
-  // await syncFromFirestore();
-
-  // Sync database users to Firebase Authentication asynchronously on start
-  syncDatabaseUsersToFirebaseAuth().catch(err => {
-    console.error("[Firebase Auth Sync Error] Failed to sync users on start:", err);
-  });
+  // Sync state from Firestore on boot
+  await syncFromFirestore();
 
   if (process.env.NODE_ENV !== "production") {
     // Dynamic import so Vite is NOT bundled into the production build
@@ -1986,6 +2287,8 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[Express API] Servidor corriendo exitosamente en el puerto ${PORT}`);
+    console.log(`[Auth Debug] sessions Map ID: ${Math.random().toString(36).substring(7)} | Sesiones iniciales: ${sessions.size}`);
+    console.log(`[Auth Debug] Si ves 401, verifica: 1) localStorage.localToken existe, 2) Header Authorization: Bearer <token>, 3) Token coincide con el log de Login OK`);
   });
 }
 

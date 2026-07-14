@@ -85,7 +85,8 @@ export interface Configuracion {
 
 export interface Venta {
   id: string;
-  numero_ticket: string; // e.g. "0001045"
+  id_ticket?: string; // Sequential ticket ID (e.g. "000001") — primary lookup key
+  numero_ticket: string; // e.g. "000001" — same as id_ticket for new tickets
   timestamp_servidor: string; // ISO String
   fecha_venta?: string; // YYYY-MM-DD — fecha del sorteo
   juego: string; // "Diaria", "Premia2", etc.
@@ -101,6 +102,8 @@ export interface Venta {
   anulado: boolean;
   estado?: 'pendiente' | 'pagado' | 'anulado' | 'perdedor';
   jugadas?: Jugada[]; // Lista de jugadas individuales (multi-número)
+  es_premiado?: boolean;   // Marcado por escrutinio server-side
+  monto_premio?: number;   // Monto del premio en C$ calculado por escrutinio
 }
 
 export interface CierreCaja {

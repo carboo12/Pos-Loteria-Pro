@@ -26,7 +26,11 @@ import {
   WifiOff
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, CobroVendedor } from "../types";
+import { toDateStr, getTicketDate } from "../lib/date-utils";
+import { getTicketTheoreticalPrize } from "../lib/prize-utils";
 import { motion, AnimatePresence } from "framer-motion";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { firestore } from "../lib/firebase";
 import FacturacionVendedorCard from "./FacturacionVendedorCard";
 import ResumenFacturacionCard from "./ResumenFacturacionCard";
 
@@ -51,15 +55,6 @@ const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: b
     return String(dateInput);
   }
 };
-function calculatePrizeMultiplier(juego: string, sorteo: string): number {
-  const cleanJuego = juego.trim();
-  if (cleanJuego === "Premia2" && sorteo.includes("(NI)")) return 4000;
-  if (cleanJuego === "Jugá 3") return 600;
-  if (cleanJuego === "Fechas") return 210;
-  if (cleanJuego === "3 Monazos") return 650;
-  return 80;
-}
-
 
 interface SupervisorInterfaceProps {
   user: Usuario;
@@ -106,6 +101,12 @@ export default function SupervisorInterface({
   const [montoCobroCs, setMontoCobroCs] = useState("");
   const [montoCobroUsd, setMontoCobroUsd] = useState("");
   const [comentarioCobro, setComentarioCobro] = useState("");
+
+  // Form values for register ingreso (supervisor entrega dinero al vendedor)
+  const [selectedSellerForIngreso, setSelectedSellerForIngreso] = useState<Usuario | null>(null);
+  const [montoIngresoCs, setMontoIngresoCs] = useState("");
+  const [montoIngresoUsd, setMontoIngresoUsd] = useState("");
+  const [comentarioIngreso, setComentarioIngreso] = useState("");
   
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -180,6 +181,52 @@ export default function SupervisorInterface({
 
   // 2. Transactions of linked vendedores
   const linkedSellersIds = linkedSellers.map(s => s.id);
+
+  // Real-time Firestore listener: watches the `tickets` collection for changes made by the
+  // server during escrutinio (es_premiado / monto_premio updates) and payment status changes.
+  // When a change is detected, it triggers an immediate data refresh so the supervisor sees
+  // updated totals instantly.
+  useEffect(() => {
+    if (linkedSellersIds.length === 0) return;
+
+    // Firestore `in` supports up to 30 values. If more, fall back to polling.
+    const sellerSlice = linkedSellersIds.slice(0, 30);
+    const q = query(
+      collection(firestore, "tickets"),
+      where("id_vendedor", "in", sellerSlice)
+    );
+
+    let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      // Explicitly handle docChanges to detect removals
+      let hasRemoved = false;
+      let hasOtherChanges = false;
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === "removed") {
+          hasRemoved = true;
+        } else {
+          hasOtherChanges = true;
+        }
+      });
+
+      // Trigger a full re-sync from the global sales state (App.tsx handles the actual state update)
+      if (hasRemoved || hasOtherChanges) {
+        if (refreshTimeout) clearTimeout(refreshTimeout);
+        refreshTimeout = setTimeout(() => {
+          onRefreshSales();
+        }, 800);
+      }
+    }, (err) => {
+      console.error("Error in onSnapshot tickets (supervisor):", err);
+    });
+
+    return () => {
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+      unsubscribe();
+    };
+  }, [linkedSellersIds.join(",")]);
+
   const linkedSales = sales
     .filter(s => linkedSellersIds.includes(s.id_vendedor))
     .sort((a, b) => new Date(b.timestamp_servidor).getTime() - new Date(a.timestamp_servidor).getTime());
@@ -239,6 +286,55 @@ export default function SupervisorInterface({
       await handleRefreshAll();
     } catch (err: any) {
       setErrorMessage(err.message || "Error al procesar cobro.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Submit income handler (supervisor entrega dinero al vendedor — no balance validation)
+  const handleRegisterIngreso = async (e: FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    if (!selectedSellerForIngreso) return;
+
+    const amtCs = Number(montoIngresoCs);
+    const amtUsd = Number(montoIngresoUsd);
+
+    if ((isNaN(amtCs) || amtCs < 0) && (isNaN(amtUsd) || amtUsd < 0)) {
+      setErrorMessage("Ingrese al menos un monto válido en C$ o USD.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/ingresos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id_vendedor: selectedSellerForIngreso.id,
+          id_supervisor: user.id,
+          monto_cs: amtCs || 0,
+          monto_usd: amtUsd || 0,
+          comentario: comentarioIngreso
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Fallo al registrar el ingreso.");
+      }
+
+      setSuccessMessage(`Ingreso registrado para ${selectedSellerForIngreso.nombre}.`);
+      setSelectedSellerForIngreso(null);
+      setMontoIngresoCs("");
+      setMontoIngresoUsd("");
+      setComentarioIngreso("");
+
+      await handleRefreshAll();
+    } catch (err: any) {
+      setErrorMessage(err.message || "Error al procesar ingreso.");
     } finally {
       setLoading(false);
     }
@@ -314,7 +410,7 @@ export default function SupervisorInterface({
     const sellers = linkedSellers.filter(s => selectedVendedorFilter === "TODOS" || s.id === selectedVendedorFilter);
     return sellers.map(seller => {
       const sellerSales = sales.filter(s => {
-        const saleDateStr = s.timestamp_servidor.substring(0, 10);
+        const saleDateStr = getTicketDate(s);
         const dateMatch = saleDateStr >= reportFilterFechaInicio && saleDateStr <= reportFilterFechaFin;
         const activeMatch = !s.anulado;
         const sellerMatch = s.id_vendedor === seller.id;
@@ -324,23 +420,21 @@ export default function SupervisorInterface({
       const sumUsd = sellerSales.filter(s => s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0);
       const vendido = sumCs + (sumUsd * config.tasa_cambio);
       let totalAPagar = 0;
+      let totalPremios = 0;
       sellerSales.forEach(s => {
-        const tDate = s.timestamp_servidor.substring(0, 10);
-        const sObj = config.sorteos?.find(draw => draw.nombre === s.sorteo);
-        const rObj = sObj
-          ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
-          : null;
-        if (rObj && s.numero_jugado.trim().toLowerCase() === rObj.numero_ganador.trim().toLowerCase()) {
-          const multiplier = calculatePrizeMultiplier(s.juego, s.sorteo);
-          const prizeCs = s.moneda === "C$"
-            ? (s.monto_pago * multiplier)
-            : (s.monto_pago * multiplier * config.tasa_cambio);
-          totalAPagar += prizeCs;
+        // Use shared prize logic — handles multi-jugada + single-number tickets
+        const theoreticalPrize = getTicketTheoreticalPrize(s, config);
+        if (theoreticalPrize > 0) {
+          totalAPagar += theoreticalPrize;
+        }
+        // Prefer persisted monto_premio from escrutinio (server-authoritative)
+        if (typeof s.monto_premio === "number" && s.es_premiado) {
+          totalPremios += s.monto_premio;
         }
       });
       const pagado = sellerSales
         .filter(s => s.estado === 'pagado')
-        .reduce((sum, s) => sum + (s.premio_posible_cs || 0), 0);
+        .reduce((sum, s) => sum + ((typeof s.monto_premio === "number" && s.es_premiado) ? s.monto_premio : getTicketTheoreticalPrize(s, config)), 0);
       const sellerIngresos = ((config as any).ingresos || []).filter((i: any) => {
         const isSeller = i.id_vendedor === seller.id;
         const inRange = i.fecha >= reportFilterFechaInicio && i.fecha <= reportFilterFechaFin;
@@ -355,7 +449,7 @@ export default function SupervisorInterface({
       const cobrado = sellerCobros.reduce((sum: number, c: any) => sum + c.monto_cs + (c.monto_usd * config.tasa_cambio), 0);
       const ganancia = (vendido - totalAPagar) + ingresos;
       const total = (vendido - pagado) + ingresos - cobrado;
-      return { seller, vendido, totalAPagar, pagado, ingresos, cobrado, ganancia, total };
+      return { seller, vendido, totalAPagar, totalPremios, pagado, ingresos, cobrado, ganancia, total };
     });
   }, [linkedSellers, selectedVendedorFilter, sales, reportFilterFechaInicio, reportFilterFechaFin, config, allCobros]);
 
@@ -583,7 +677,18 @@ export default function SupervisorInterface({
                     </div>
 
                     {/* Compact Touch Targets optimized for thumb reach */}
-                    <div className="pt-1">
+                    <div className="pt-1 grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => {
+                          setSelectedSellerForIngreso(seller);
+                          setMontoIngresoCs("");
+                          setMontoIngresoUsd("");
+                        }}
+                        className="h-12 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-display font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer shadow-xs flex items-center justify-center space-x-1 transition-all"
+                      >
+                        <Plus className="w-4 h-4 stroke-[2.5]" />
+                        <span>Ingreso</span>
+                      </button>
                       <button
                         onClick={() => {
                           setSelectedSellerForCobro(seller);
@@ -595,10 +700,10 @@ export default function SupervisorInterface({
                             setMontoCobroUsd("");
                           }
                         }}
-                        className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-display font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer shadow-xs flex items-center justify-center space-x-1.5 transition-all"
+                        className="h-12 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-display font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer shadow-xs flex items-center justify-center space-x-1 transition-all"
                       >
-                        <DollarSign className="w-4.5 h-4.5 stroke-[2.5]" />
-                        <span>Arqueo / Cobro</span>
+                        <DollarSign className="w-4 h-4 stroke-[2.5]" />
+                        <span>Cobro</span>
                       </button>
                     </div>
                   </div>
@@ -695,6 +800,7 @@ export default function SupervisorInterface({
                 pagado={ad.pagado}
                 ingresos={ad.ingresos}
                 totalAPagar={ad.totalAPagar}
+                totalPremios={ad.totalPremios}
                 cobrado={ad.cobrado}
                 ganancia={ad.ganancia}
                 total={ad.total}
@@ -707,6 +813,7 @@ export default function SupervisorInterface({
             const sumFacturado = arqueoData.reduce((a, d) => a + d.vendido, 0);
             const sumIngresos = arqueoData.reduce((a, d) => a + d.ingresos, 0);
             const sumAPagar = arqueoData.reduce((a, d) => a + d.totalAPagar, 0);
+            const sumPremios = arqueoData.reduce((a, d) => a + (d.totalPremios || 0), 0);
             const sumCobro = arqueoData.reduce((a, d) => a + d.cobrado, 0);
             const sumPagado = arqueoData.reduce((a, d) => a + d.pagado, 0);
             const sumTotal = arqueoData.reduce((a, d) => a + d.total, 0);
@@ -1051,6 +1158,99 @@ export default function SupervisorInterface({
                 <button
                   type="button"
                   onClick={() => setSelectedSellerForCobro(null)}
+                  className="w-full h-12 bg-gray-100 hover:bg-gray-200 text-gray-700 font-sans font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer text-xs text-center border border-gray-300"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL INGRESO — Supervisor entrega dinero al vendedor */}
+      {selectedSellerForIngreso && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 animate-fade-in">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-200 max-h-[92vh] flex flex-col transition-all duration-300">
+            <div className="w-12 h-1.5 bg-gray-300 rounded-full mx-auto my-3 sm:hidden" />
+
+            <div className="bg-blue-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
+              <div>
+                <span className="text-[9px] uppercase font-mono tracking-widest font-bold opacity-85">Entrega de Efectivo</span>
+                <h3 className="font-display font-black text-base uppercase tracking-tight">Ingreso a Vendedor</h3>
+              </div>
+              <button
+                onClick={() => setSelectedSellerForIngreso(null)}
+                className="text-white hover:text-gray-200 w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/10 cursor-pointer transition-all shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRegisterIngreso} className="p-6 space-y-4 overflow-y-auto flex-1 text-left">
+              <div>
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Vendedor</label>
+                <span className="block text-xs font-black text-gray-950 uppercase tracking-tight mt-1 bg-slate-50 p-3 rounded-xl border border-gray-200 font-sans">
+                  {selectedSellerForIngreso.nombre}
+                </span>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 p-3.5 rounded-xl text-xs text-blue-900 space-y-1">
+                <span className="font-black uppercase text-[10px] tracking-wider block text-blue-800">Monto Libre</span>
+                <span className="block text-[9px] text-blue-700 leading-tight">
+                  Ingrese la cantidad que desee entregar. No hay restricción de saldo.
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Monto C$</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={montoIngresoCs}
+                    onChange={(e) => setMontoIngresoCs(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-slate-50 border border-gray-300 rounded-xl px-3.5 py-3 font-mono text-xs focus:outline-none focus:border-blue-900 focus:bg-white min-h-[48px]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Monto USD</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={montoIngresoUsd}
+                    onChange={(e) => setMontoIngresoUsd(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-slate-50 border border-gray-300 rounded-xl px-3.5 py-3 font-mono text-xs focus:outline-none focus:border-blue-900 focus:bg-white min-h-[48px]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Comentario o Nota</label>
+                <textarea
+                  value={comentarioIngreso}
+                  onChange={(e) => setComentarioIngreso(e.target.value)}
+                  placeholder="Ej: Entrega de caja inicial, anticipo, etc."
+                  className="w-full bg-slate-50 border border-gray-300 rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-blue-900 focus:bg-white min-h-[70px]"
+                  rows={2}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2 pt-2 pb-safe">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full h-14 bg-blue-600 hover:bg-blue-700 text-white font-display font-black uppercase tracking-wider rounded-xl transition-all shadow-md cursor-pointer text-xs flex items-center justify-center space-x-2"
+                >
+                  <CheckCircle className="w-5 h-5 shrink-0 stroke-[2.5]" />
+                  <span>{loading ? "REGISTRANDO..." : "REGISTRAR INGRESO"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedSellerForIngreso(null)}
                   className="w-full h-12 bg-gray-100 hover:bg-gray-200 text-gray-700 font-sans font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer text-xs text-center border border-gray-300"
                 >
                   Cancelar

@@ -1,79 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // ============================================
-    // COLECCIÓN DE USUARIOS
-    // ============================================
-    match /usuarios/{userId} {
-      allow read: if request.auth != null && (request.auth.uid == userId || get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'administrador');
-      allow write: if request.auth != null && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'administrador';
-    }
-    
-    // ============================================
-    // COLECCIÓN DE CONFIGURACIÓN (sorteos, límites, tasas)
-    // ============================================
-    match /configuracion/{docId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'administrador';
-    }
-    
-    // ============================================
-    // COLECCIÓN DE RESULTADOS OFICIALES
-    // ============================================
-    match /resultados/{docId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-    
-    // ============================================
-    // COLECCIÓN DE TICKETS (nueva arquitectura)
-    // ============================================
-    match /tickets/{ticketId} {
-      // Creación: Solo usuarios autenticados, y el id_vendedor debe coincidir con el UID
-      allow create: if request.auth != null && request.resource.data.id_vendedor == request.auth.uid;
-      
-      // Lectura: Cualquier usuario autenticado (refinaremos después para scope por rol)
-      allow read: if request.auth != null;
-      
-      // Actualización: Cualquier usuario autenticado (necesario para cambiar estado a "cobrado")
-      allow update: if request.auth != null;
-      
-      // Eliminación: Solo administrador
-      allow delete: if request.auth != null && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'administrador';
-    }
-    
-    // ============================================
-    // COLECCIÓN DE VENTAS (legacy - mantener compatibilidad)
-    // ============================================
-    match /ventas/{ventaId} {
-      allow create: if request.auth != null && request.resource.data.id_vendedor == request.auth.uid;
-      allow read: if request.auth != null && (resource.data.id_vendedor == request.auth.uid || get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol in ['administrador', 'supervisor']);
-      allow update, delete: if request.auth != null && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'administrador';
-    }
-    
-    // ============================================
-    // COLECCIÓN DE COBROS
-    // ============================================
-    match /cobros/{cobroId} {
-      allow read, write: if request.auth != null && 
-                   get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol in ['administrador', 'supervisor'];
-    }
-    
-    // ============================================
-    // COLECCIÓN DE PAGOS
-    // ============================================
-    match /pagos/{pagoId} {
-      allow read, write: if request.auth != null && 
-                   get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol in ['administrador', 'supervisor'];
-    }
-    
-    // ============================================
-    // CATCH-ALL: Denegar todo lo demás por defecto
-    // ============================================
     match /{document=**} {
-      allow read: if request.auth != null;
-      allow write: if false;
+      allow read, write: if request.auth != null;
     }
   }
 }

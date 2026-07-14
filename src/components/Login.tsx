@@ -1,7 +1,5 @@
 import React, { useState } from "react";
 
-import { auth } from "../lib/firebase";
-import { signInWithCustomToken } from "firebase/auth";
 import { Usuario } from "../types";
 import toast from "react-hot-toast";
 import { 
@@ -72,37 +70,8 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
     setLoading(true);
     setError(null);
 
-    // Bypass de desarrollo para administrador
-    if (email.trim() === "carboo12@gmail.com" && password === "ld14304") {
-      console.log("Bypass de desarrollo activado para administrador.");
-      const matchedUser = users.find(u => u.email.toLowerCase() === "carboo12@gmail.com");
-      if (matchedUser) {
-        localStorage.setItem("localToken", "bypass-dev-admin-token");
-        localStorage.setItem("currentUser", JSON.stringify(matchedUser));
-        toast.success(`¡Bienvenido Admin, ${matchedUser.nombre}!`, { position: 'top-center' });
-        onLoginSuccess(matchedUser);
-      } else {
-        const fallbackUser: Usuario = {
-          id: "dev-bypass-admin",
-          nombre: "Admin Dev",
-          usuario: "admin",
-          rol: "administrador",
-          estado: "activo",
-          conexion: "online",
-          activo: true,
-          region: "Nicaragua",
-          email: "carboo12@gmail.com",
-        };
-        localStorage.setItem("localToken", "bypass-dev-admin-token");
-        localStorage.setItem("currentUser", JSON.stringify(fallbackUser));
-        toast.success("¡Bienvenido Admin (Bypass)!", { position: 'top-center' });
-        onLoginSuccess(fallbackUser);
-      }
-      return;
-    }
-
     try {
-      // 1. Autenticar contra el backend (Estrategia Híbrida: Plaintext + Bcrypt)
+      // 1. Autenticar contra el backend (bcrypt)
       const res = await fetch("/api/login", {
         method: "POST",
         headers: {
@@ -127,16 +96,6 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
       // 2. Si la respuesta es OK, procesar el JSON con seguridad
       const data = await res.json();
 
-      // 2. Sign in through Firebase Auth using the custom token so the
-      //    global fetch interceptor can inject a valid Bearer token.
-      if (data.customToken) {
-        try {
-          await signInWithCustomToken(auth, data.customToken);
-        } catch (fbErr) {
-          console.warn("Firebase Auth sign-in failed (non-blocking):", fbErr);
-        }
-      }
-
       // 2. Extraer el perfil seguro y redirigir
       const matchedUser = data.user;
       
@@ -151,7 +110,11 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
       onLoginSuccess(matchedUser);
       
     } catch (err: any) {
-      console.error("Login error:", err);
+      console.error("[Login] Error completo:", {
+        message: err.message,
+        stack: err.stack,
+        raw: err
+      });
       setError(err.message || "Ocurrió un error al iniciar sesión. Intente nuevamente.");
     } finally {
       setLoading(false);

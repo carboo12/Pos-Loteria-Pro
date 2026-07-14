@@ -3,6 +3,8 @@ import { useState, useRef, useCallback } from "react";
 import { toBlob } from "html-to-image";
 
 import { Venta, Configuracion } from "../types";
+import { toDateStr } from "../lib/date-utils";
+import { calculatePrizeMultiplier } from "../lib/prize-utils";
 import { QRCodeSVG } from "qrcode.react";
 
 
@@ -70,22 +72,6 @@ interface TicketPreviewModalProps {
   onPrint?: () => void;
 }
 
-function calculatePrizeMultiplier(juego: string, sorteo: string): number {
-  const cleanJuego = juego.trim();
-  if (cleanJuego === "Premia2" && sorteo.includes("(NI)")) {
-    return 4000;
-  }
-  if (cleanJuego === "Jugá 3") {
-    return 600;
-  }
-  if (cleanJuego === "Fechas") {
-    return 210;
-  }
-  if (cleanJuego === "3 Monazos") {
-    return 650;
-  }
-  return 80;
-}
 
 export default function TicketPreviewModal({ ticket, config, onClose, userRole = "vendedor", serverTime, onPrint }: TicketPreviewModalProps) {
   const [copied, setCopied] = useState(false);
@@ -154,19 +140,19 @@ export default function TicketPreviewModal({ ticket, config, onClose, userRole =
   // Determine jugadas list (fallback to single legacy field)
   const jugadasList = ticket.jugadas && ticket.jugadas.length > 0
     ? ticket.jugadas
-    : [{ numero: ticket.numero_jugado, monto: ticket.monto_pago, premio_posible: potentialPrizeCs }];
+    : [{ numero: ticket.numero_jugado || 'N/A', monto: ticket.monto_pago || 0, premio_posible: potentialPrizeCs }];
 
   const padRight = (s: string, len: number) => s.length >= len ? s.substring(0, len) : s + " ".repeat(len - s.length);
   const padLeft = (s: string, len: number) => s.length >= len ? s.substring(0, len) : " ".repeat(len - s.length) + s;
 
   const jugadasLines = jugadasList.map(j => {
-    const num = padRight(j.numero, 10);
-    const monto = padLeft(`${ticket.moneda} ${j.monto.toFixed(2)}`, 12);
-    const premio = padLeft(`C$ ${j.premio_posible.toFixed(0)}`, 12);
+    const num = padRight(String(j.numero ?? 'N/A'), 10);
+    const monto = padLeft(`${ticket.moneda} ${(Number(j.monto) || 0).toFixed(2)}`, 12);
+    const premio = padLeft(`C$ ${(Number(j.premio_posible) || 0).toFixed(0)}`, 12);
     return `${num}${monto}${premio}`;
-  }).join("\n");
+  });
 
-  const totalLine = padLeft(`TOTAL: ${ticket.moneda} ${ticket.monto_pago.toFixed(2)}`, 32);
+  const totalLine = padLeft(`TOTAL: ${ticket.moneda} ${(Number(ticket.monto_pago) || 0).toFixed(2)}`, 32);
 
   const ticketText = `
 --------------------------------
@@ -203,7 +189,7 @@ ${config.formato_ticket.mensaje_pie}
     
     // Información del ticket
     t += `[L]TICKET: [R]#${ticket.numero_ticket}\n`;
-    t += `[L]FECHA: [R]${ticket.timestamp_servidor.substring(0, 10)}\n`;
+    t += `[L]FECHA: [R]${toDateStr(ticket.timestamp_servidor)}\n`;
     t += `[L]VEND: ${ticket.nombre_vendedor || 'JOSE'} [R]CLI: ${ticket.nombre_cliente || 'GENERICO'}\n`;
     t += "[C]--------------------------------\n";
     
@@ -218,18 +204,18 @@ ${config.formato_ticket.mensaje_pie}
 
     const jugadas = ticket.jugadas && ticket.jugadas.length > 0
       ? ticket.jugadas
-      : [{ numero: ticket.numero_jugado, monto: ticket.monto_pago, premio_posible: potentialPrizeCs }];
+      : [{ numero: ticket.numero_jugado || 'N/A', monto: ticket.monto_pago || 0, premio_posible: potentialPrizeCs }];
 
     // Filas alineadas por columnas
     jugadas.forEach((j: any) => {
-      const num = j.numero.toString().padStart(2, '0');
-      const monto = `${ticket.moneda} ${parseFloat(j.monto).toFixed(0)}`;
-      const premio = `C$ ${parseFloat(j.premio_posible).toFixed(0)}`;
+      const num = String(j.numero ?? 'N/A').padStart(2, '0');
+      const monto = `${ticket.moneda} ${(Number(j.monto) || 0).toFixed(0)}`;
+      const premio = `C$ ${(Number(j.premio_posible) || 0).toFixed(0)}`;
       t += `[L]${num}[C]${monto}[R]${premio}\n`;
     });
 
     t += "[C]--------------------------------\n";
-    t += `[L]<b>TOTAL:</b> [R]<b>${ticket.moneda} ${parseFloat(ticket.monto_pago.toString()).toFixed(2)}</b>\n`;
+    t += `[L]<b>TOTAL:</b> [R]<b>${ticket.moneda} ${(Number(ticket.monto_pago) || 0).toFixed(2)}</b>\n`;
     t += "[C]--------------------------------\n";
     t += `[L]<b>FIRMA:</b> [R]<b>${ticket.firma_digital || 'XXXX-XX'}</b>\n`;
     t += "[C]--------------------------------\n";
@@ -241,7 +227,7 @@ ${config.formato_ticket.mensaje_pie}
     
     // Determinar resultado
     const sorteoObj = config.sorteos?.find(s => s.nombre === ticket.sorteo);
-    const ticketDate = ticket.timestamp_servidor.substring(0, 10);
+    const ticketDate = toDateStr(ticket.timestamp_servidor);
     const resultObj = sorteoObj 
       ? (config.resultados || []).find((r: any) => r.id_sorteo === sorteoObj.id && r.fecha === ticketDate)
       : null;
@@ -407,7 +393,7 @@ ${config.formato_ticket.mensaje_pie}
               {(() => {
                 const jugadas = ticket.jugadas && ticket.jugadas.length > 0
                   ? ticket.jugadas
-                  : [{ numero: ticket.numero_jugado, monto: ticket.monto_pago, premio_posible: potentialPrizeCs }];
+                  : [{ numero: ticket.numero_jugado || 'N/A', monto: ticket.monto_pago || 0, premio_posible: potentialPrizeCs }];
 
                 return (
                   <div className="mt-2 bg-transparent">
@@ -424,9 +410,9 @@ ${config.formato_ticket.mensaje_pie}
                     {/* Dynamic Rows */}
                     {jugadas.map((j, i) => (
                       <div key={i} className="flex justify-between text-xs font-mono py-0.5 text-black">
-                        <span className="w-12 text-left font-black text-black">{j.numero}</span>
-                        <span className="flex-1 text-center font-bold text-black">{ticket.moneda} {j.monto.toFixed(2)}</span>
-                        <span className="w-24 text-right font-black text-black">C$ {j.premio_posible.toFixed(0)}</span>
+                        <span className="w-12 text-left font-black text-black">{j.numero ?? 'N/A'}</span>
+                        <span className="flex-1 text-center font-bold text-black">{ticket.moneda} {(Number(j.monto) || 0).toFixed(2)}</span>
+                        <span className="w-24 text-right font-black text-black">C$ {(Number(j.premio_posible) || 0).toFixed(0)}</span>
                       </div>
                     ))}
                     
@@ -436,7 +422,7 @@ ${config.formato_ticket.mensaje_pie}
                     {/* Total */}
                     <div className="flex justify-between text-xs font-black text-black pt-1 mt-1 uppercase">
                       <span>Total:</span>
-                      <span>{ticket.moneda} {ticket.monto_pago.toFixed(2)}</span>
+                      <span>{ticket.moneda} {(Number(ticket.monto_pago) || 0).toFixed(2)}</span>
                     </div>
                   </div>
                 );

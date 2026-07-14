@@ -2,14 +2,13 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx'
 
-import { auth } from './lib/firebase';
 import './index.css';
 
 // ──────────────────────────────────────────────────────
 // APP_VERSION — must match CACHE_NAME in public/sw.js
 // Increment on every deploy that changes frontend assets.
 // ──────────────────────────────────────────────────────
-const APP_VERSION = "v9";
+const APP_VERSION = "v10";
 const VERSION_KEY = "sw_version";
 
 // ──────────────────────────────────────────────────────
@@ -43,26 +42,17 @@ const runKillSwitch = async (): Promise<boolean> => {
 };
 
 // ──────────────────────────────────────────────────────
-// FETCH INTERCEPTOR — inject Firebase token into /api/ calls
+// FETCH INTERCEPTOR — inject session token + 401 auto-logout
 // ──────────────────────────────────────────────────────
+let isForceLoggingOut = false;
+
 const originalFetch = window.fetch;
 window.fetch = async (input, init) => {
   const url = typeof input === 'string' ? input : (input instanceof Request ? input.url : '');
   
+  // Inyectar token de sesión en peticiones autenticadas
   if (url.includes('/api/') && !url.includes('/api/ping') && !url.includes('/api/reloj') && !url.includes('/api/setup-admin')) {
-    let tokenStr = null;
-    
-    if (auth.currentUser) {
-      try {
-        tokenStr = await auth.currentUser.getIdToken();
-      } catch (e) {
-        console.warn("Firebase token injection bypassed (offline/blocked).");
-      }
-    }
-    
-    if (!tokenStr) {
-      tokenStr = localStorage.getItem("localToken");
-    }
+    const tokenStr = localStorage.getItem("localToken");
 
     if (tokenStr) {
       init = init || {};
@@ -72,7 +62,32 @@ window.fetch = async (input, init) => {
       };
     }
   }
-  return originalFetch(input, init);
+
+  const response = await originalFetch(input, init);
+
+  // Anti-bucle: si ya estamos en proceso de logout forzado, no interceptar
+  if (isForceLoggingOut) return response;
+
+  // Si la respuesta es 401/403 en una petición autenticada → sesión muerta
+  if ((response.status === 401 || response.status === 403) && url.includes('/api/') && !url.includes('/api/login') && !url.includes('/api/auth/me') && !url.includes('/api/setup-admin') && !url.includes('/api/ping') && !url.includes('/api/reloj') && !url.includes('/api/notifications') && !url.includes('/api/usuarios')) {
+    console.warn(`[Auth] Sesión expirada o rechazada (${response.status}). Cerrando sesión...`);
+    isForceLoggingOut = true;
+    
+    // Limpiar estado local
+    localStorage.removeItem("localToken");
+    localStorage.removeItem("currentUser");
+    
+    // Invalidar sesión en servidor (best-effort)
+    try {
+      await originalFetch("/api/auth/logout", { method: "POST" });
+    } catch {}
+    
+    // Forzar recarga completa al login
+    window.location.href = "/";
+    return response;
+  }
+
+  return response;
 };
 
 // ──────────────────────────────────────────────────────
