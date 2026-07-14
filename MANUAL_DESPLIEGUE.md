@@ -2,7 +2,7 @@
 
 Este manual describe los pasos necesarios para desplegar correctamente la aplicación en un entorno de producción utilizando PM2. Los problemas de que la aplicación "no se queda online" suelen deberse a que PM2 está intentando ejecutar el código TypeScript directamente sin compilar, o está apuntando al archivo equivocado.
 
-## 1. Preparación del Entorno
+## 1. Preparación del Entorno....
 
 Asegúrate de estar en la raíz del proyecto y de tener todas las dependencias instaladas:
 
