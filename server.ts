@@ -552,123 +552,125 @@ app.get("/api/reloj", (req, res) => {
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
 
-  console.log(`[Login] ──────── NUEVO INTENTO ────────`);
-  console.log(`[Login] Email recibido: "${email}" | Password length: ${password ? password.length : 0}`);
+  console.log(`[Login] ════════════════════════════════════════`);
+  console.log(`[Login] NUEVO INTENTO | email="${email}" | pwd_len=${password ? password.length : 0}`);
 
   if (!email || !password) {
-    console.log(`[Login] RECHAZADO: email o password vacíos`);
+    console.log(`[Login] ✗ RECHAZADO 400: email o password vacíos`);
     return res.status(400).json({ error: "Email y contraseña son requeridos." });
   }
 
+  // ─── PASO 1: Buscar usuario ───────────────────────────────────────
   const emailLower = email.toLowerCase().trim();
   let user = db.usuarios.find((u: any) => u.email && u.email.toLowerCase() === emailLower);
   let source = "memoria";
 
-  console.log(`[Login] Buscando en memoria (${db.usuarios.length} usuarios): ${user ? `ENCONTRADO id=${user.id}` : "NO ENCONTRADO"}`);
-  console.log(`[Login] Emails en memoria: [${db.usuarios.map((u: any) => `"${u.email}"`).join(", ")}]`);
+  console.log(`[Login] PASO 1 — Buscando usuario`);
+  console.log(`[Login]   Usuarios en memoria: ${db.usuarios.length}`);
+  console.log(`[Login]   Emails: [${db.usuarios.map((u: any) => u.email).join(", ")}]`);
+  console.log(`[Login]   Resultado memoria: ${user ? `ENCONTRADO id=${user.id}` : "NO ENCONTRADO"}`);
 
-  // ─── FIRESTORE FALLBACK: si no está en memoria, buscar directo ────
+  // ─── FIRESTORE FALLBACK ───────────────────────────────────────────
   if (!user) {
-    console.log(`[Login] Usuario no está en memoria. Buscando en Firestore colección 'usuarios'...`);
+    console.log(`[Login]   Buscando en Firestore colección 'usuarios'...`);
     try {
       const firestoreOk = initFirebaseAdmin();
+      console.log(`[Login]   Firebase Admin inicializado: ${firestoreOk}`);
       if (firestoreOk) {
         const firestoreDb = getFirestoreInstance();
         const snapshot = await firestoreDb.collection('usuarios').where('email', '==', emailLower).get();
-
-        console.log(`[Login] Firestore resultado: ${snapshot.size} documento(s) encontrado(s)`);
+        console.log(`[Login]   Firestore query resultado: ${snapshot.size} doc(s)`);
 
         if (!snapshot.empty) {
           const doc = snapshot.docs[0];
           user = { id: doc.id, ...doc.data() } as any;
           source = "firestore";
-          console.log(`[Login] Firestore: id=${user.id}, activo=${user.activo}, password=${user.password ? `SÍ (${user.password.length} chars, tipo=${user.password.startsWith("$2") ? "bcrypt" : "texto_plano"})` : "NO / UNDEFINED"}`);
+          console.log(`[Login]   Firestore: ENCONTRADO id=${doc.id}`);
         } else {
-          console.log(`[Login] Firestore: NO existe usuario con email="${emailLower}" en colección 'usuarios'`);
-          console.log(`[Login] → Listando primeros 5 documentos para referencia:`);
+          console.log(`[Login]   Firestore: SIN RESULTADOS. Listando docs existentes:`);
           const allUsers = await firestoreDb.collection('usuarios').limit(5).get();
           allUsers.forEach((d: any) => {
             const data = d.data();
-            console.log(`[Login]   doc ${d.id}: email="${data.email || "N/A"}", usuario="${data.usuario || "N/A"}", rol="${data.rol || "N/A"}"`);
+            console.log(`[Login]     → doc ${d.id}: email="${data.email || "N/A"}", usuario="${data.usuario || "N/A"}"`);
           });
         }
-      } else {
-        console.log(`[Login] Firestore Admin NO inicializado — solo se busca en memoria`);
       }
     } catch (fsErr: any) {
-      console.error(`[Login] Firestore error: ${fsErr.message}`);
+      console.error(`[Login]   Firestore error: ${fsErr.message}`);
     }
   }
 
   if (!user) {
-    console.log(`[Login] RESULTADO: Usuario "${emailLower}" no encontrado en ninguna fuente → 401`);
+    console.log(`[Login] ✗ RESULTADO: Usuario NO existe → 401`);
+    console.log(`[Login] ════════════════════════════════════════`);
     return res.status(401).json({ error: "Credenciales incorrectas o usuario no encontrado." });
   }
 
-  console.log(`[Login] Fuente: ${source} | id=${user.id} | activo=${user.activo} | password=${user.password ? "PRESENTE" : "AUSENTE"}`);
+  // ─── PASO 2: Estructura completa del usuario (password oculto) ────
+  console.log(`[Login] PASO 2 — Estructura de usuario recibida (${source}):`);
+  console.log(`[Login]   ${JSON.stringify({ ...user, password: '***' })}`);
 
   if (!user.activo) {
-    console.log(`[Login] RESULTADO: Cuenta desactivada → 403`);
+    console.log(`[Login] ✗ RESULTADO: Cuenta desactivada (activo=false) → 403`);
+    console.log(`[Login] ════════════════════════════════════════`);
     return res.status(403).json({ error: "Acceso denegado. Su cuenta se encuentra suspendida temporalmente." });
   }
 
-  // ─── BRIDGE DE MIGRACIÓN: tolera bcrypt y texto plano ─────────────
+  // ─── PASO 3: Comparación de contraseña ────────────────────────────
+  console.log(`[Login] PASO 3 — Comparación de contraseña`);
   let isMatch = false;
   let wasPlaintext = false;
 
   if (user.password) {
     const isBcrypt = user.password.startsWith("$2");
-    console.log(`[Login] Comparando contraseña: tipo=${isBcrypt ? "bcrypt" : "texto_plano"}, hash_preview="${user.password.substring(0, 20)}..."`);
+    console.log(`[Login]   Campo password: PRESENTE`);
+    console.log(`[Login]   Hash preview: "${user.password.substring(0, 24)}..." (longitud total: ${user.password.length})`);
+    console.log(`[Login]   Tipo detectado: ${isBcrypt ? "bcrypt ($2...)" : "TEXTO PLANO (no hasheado)"}`);
+    console.log(`[Login]   Input password length: ${password.length}`);
 
     if (isBcrypt) {
       isMatch = bcrypt.compareSync(password, user.password);
+      console.log(`[Login]   bcrypt.compareSync(input, hash) → ${isMatch}`);
     } else {
       isMatch = user.password === password;
       wasPlaintext = isMatch;
+      console.log(`[Login]   Comparación directa (===) → ${isMatch}`);
     }
-
-    console.log(`[Login] bcrypt.compareSync resultado: ${isMatch}`);
   } else {
-    console.log(`[Login] Usuario SIN campo password — login rechazado`);
+    console.log(`[Login]   Campo password: ${user.password === undefined ? "UNDEFINED" : "NULL/empty"} — IMPOSIBLE AUTENTICAR`);
   }
 
   if (!isMatch) {
-    console.log(`[Login] RESULTADO: Contraseña incorrecta → 401`);
-    console.log(`[Login] ──────── FIN (FALLIDO) ────────`);
+    console.log(`[Login] ✗ RESULTADO: Contraseña incorrecta → 401`);
+    console.log(`[Login]   Causa probable: hash en DB no coincide con input del usuario`);
+    console.log(`[Login]   Acción recomendada: verificar el hash en Firestore Console → colección 'usuarios' → doc ${user.id}`);
+    console.log(`[Login] ════════════════════════════════════════`);
     return res.status(401).json({ error: "Credenciales incorrectas." });
   }
 
-  // Si coincidió en texto plano, hashear y persistir automáticamente
+  // ─── Migración texto plano → bcrypt ──────────────────────────────
   if (wasPlaintext) {
     try {
       console.log(`[Login Bridge] Migrando contraseña de texto plano → bcrypt para ${user.email}`);
       const hashed = bcrypt.hashSync(password, 10);
-
       const localIdx = db.usuarios.findIndex((u: any) => u.id === user.id);
-      if (localIdx !== -1) {
-        (db.usuarios[localIdx] as any).password = hashed;
-      }
-
+      if (localIdx !== -1) (db.usuarios[localIdx] as any).password = hashed;
       const firestoreOk = initFirebaseAdmin();
       if (firestoreOk) {
-        const firestoreDb = getFirestoreInstance();
-        await firestoreDb.collection("usuarios").doc(user.id).update({ password: hashed });
+        await getFirestoreInstance().collection("usuarios").doc(user.id).update({ password: hashed });
       }
-
       saveToDB();
-      console.log(`[Login Bridge] Contraseña migrada exitosamente para ${user.email}`);
+      console.log(`[Login Bridge] Contraseña migrada exitosamente`);
     } catch (migErr) {
-      console.error(`[Login Bridge] Error migrando contraseña para ${user.email}:`, migErr);
+      console.error(`[Login Bridge] Error:`, migErr);
     }
   }
 
-  // Extraer el usuario seguro para el cliente (sin el campo password)
+  // ─── ÉXITO ────────────────────────────────────────────────────────
   const { password: _, ...safeUser } = user;
-
-  // Generar token de sesión seguro (crypto + TTL 24h)
   const sessionToken = createSession(safeUser);
-  console.log(`[Login] RESULTADO: EXITOSO → ${user.email} (${user.rol}) | Token: ${sessionToken.substring(0, 16)}... | Sesiones activas: ${sessions.size}`);
-  console.log(`[Login] ──────── FIN (OK) ────────`);
+  console.log(`[Login] ✓ RESULTADO: EXITOSO → ${user.email} (${user.rol}) | Sesiones: ${sessions.size}`);
+  console.log(`[Login] ════════════════════════════════════════`);
 
   res.json({ success: true, user: safeUser, localToken: sessionToken, message: "Autenticación exitosa" });
 });
