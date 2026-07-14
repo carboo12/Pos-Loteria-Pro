@@ -3,6 +3,11 @@
  * Firestore SDK returns Timestamp objects (with .toDate()) via onSnapshot,
  * but the Admin SDK serializes dates as ISO strings via REST. This module
  * normalizes both formats safely without crashing.
+ *
+ * TIMEZONE NOTE: All date extraction uses the browser's local timezone
+ * (America/Managua, UTC-6 for Nicaraguan users). We NEVER use toISOString()
+ * for date extraction because it returns UTC which can shift the date by +1
+ * near midnight local time.
  */
 
 /** Convert any date-like value to a JS Date. Returns `fallback` if unparseable. */
@@ -34,9 +39,17 @@ export function toDateSafe(value: unknown, fallback: Date = new Date()): Date {
   return fallback;
 }
 
-/** Extract YYYY-MM-DD string from any date-like value safely. */
+/** Extract YYYY-MM-DD in the browser's LOCAL timezone (not UTC). */
+function localDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Extract YYYY-MM-DD string from any date-like value in LOCAL timezone. */
 export function toDateStr(value: unknown): string {
-  return toDateSafe(value).toISOString().substring(0, 10);
+  return localDateStr(toDateSafe(value));
 }
 
 /** Extract ISO string from any date-like value safely. */
@@ -62,4 +75,9 @@ export function getTicketDate(ticket: { fecha_venta?: string; timestamp_servidor
  */
 export function getTicketAmount(ticket: { total_apostado?: number; monto_pago?: number; [key: string]: unknown }): number {
   return (ticket.total_apostado ?? ticket.monto_pago ?? 0) as number;
+}
+
+/** Returns today's YYYY-MM-DD in the browser's local timezone. */
+export function getLocalTodayStr(): string {
+  return localDateStr(new Date());
 }

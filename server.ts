@@ -169,6 +169,32 @@ function getLocalDateString(date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+// ─── Nicaragua Timezone Helpers (UTC-6) ───────────────────────────────
+// All lottery operations use Nicaragua local time (America/Managua, UTC-6).
+// These helpers ensure getHours/getMinutes/getDay return NIC time regardless
+// of the server's system timezone (critical for App Hosting / Cloud Run).
+
+const NICARAGUA_OFFSET_MS = -6 * 3600000; // -6 hours in milliseconds
+
+/** Returns a Date whose getHours()/getMinutes()/getDay() return Nicaragua local time. */
+function getNicaraguaNow(date = new Date()): Date {
+  const utcMs = date.getTime() + (date.getTimezoneOffset() * 60000);
+  return new Date(utcMs + NICARAGUA_OFFSET_MS);
+}
+
+/** Returns an ISO-8601 string with -06:00 offset (e.g. 2024-01-15T14:43:00.000-06:00). */
+function getNicaraguaISOString(date = new Date()): string {
+  const nic = getNicaraguaNow(date);
+  const y = nic.getFullYear();
+  const m = String(nic.getMonth() + 1).padStart(2, "0");
+  const d = String(nic.getDate()).padStart(2, "0");
+  const hh = String(nic.getHours()).padStart(2, "0");
+  const mm = String(nic.getMinutes()).padStart(2, "0");
+  const ss = String(nic.getSeconds()).padStart(2, "0");
+  const ms = String(nic.getMilliseconds()).padStart(3, "0");
+  return `${y}-${m}-${d}T${hh}:${mm}:${ss}.${ms}-06:00`;
+}
+
 
 // ─── SERVER DATA INTERFACES ────────────────────────────────────────────
 interface ServerSorteo {
@@ -566,14 +592,14 @@ app.post("/api/notifications/register-token", (req, res) => {
 // Server Reloj
 app.get("/api/reloj", (req, res) => {
   res.json({
-    timestamp_servidor: new Date().toISOString(),
-    local_time_readable: new Date().toLocaleTimeString("es-ES")
+    timestamp_servidor: getNicaraguaISOString(),
+    local_time_readable: getNicaraguaNow().toLocaleTimeString("es-ES")
   });
 });
 
 // ─── LOGIN ENDPOINT (Firestore-direct con logs garantizados) ──────────
 app.post("/api/login", async (req, res) => {
-  const ts = new Date().toISOString();
+  const ts = getNicaraguaISOString();
   const { email, password } = req.body || {};
 
   // Logs con process.stdout.write para garantizar que aparecen en Cloud Logging
@@ -1208,7 +1234,7 @@ async function escrutarTickets(id_sorteo: string, sorteoName: string, fecha: str
         data: {
           es_premiado: ticketPrize > 0,
           monto_premio: ticketPrize,
-          escrutinio_timestamp: new Date().toISOString()
+          escrutinio_timestamp: getNicaraguaISOString()
         }
       });
       if (ticketPrize > 0) winners++;
@@ -1300,7 +1326,7 @@ app.post("/api/resultados", requireAdmin, async (req, res) => {
     pais: pais || "",
     fecha, // YYYY-MM-DD
     numero_ganador,
-    timestamp: new Date().toISOString()
+    timestamp: getNicaraguaISOString()
   };
 
   db.configuracion.resultados = db.configuracion.resultados || [];
@@ -1367,7 +1393,7 @@ app.post("/api/cobros", checkAuth(), (req, res) => {
     monto_cs: Number(monto_cs),
     monto_usd: Number(monto_usd),
     fecha: getLocalDateString(),
-    timestamp: new Date().toISOString(),
+    timestamp: getNicaraguaISOString(),
     comentario: comentario || ""
   };
 
@@ -1407,7 +1433,7 @@ app.post("/api/ingresos", checkAuth(), (req, res) => {
     monto_cs: Number(monto_cs) || 0,
     monto_usd: Number(monto_usd) || 0,
     fecha: getLocalDateString(),
-    timestamp: new Date().toISOString(),
+    timestamp: getNicaraguaISOString(),
     comentario: comentario || ""
   };
 
@@ -1518,7 +1544,7 @@ app.get("/verificar", (req, res) => {
 
 // Ping
 app.get("/api/ping", (req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
+  res.json({ ok: true, time: getNicaraguaISOString() });
 });
 
 // Sales (Ventas)
@@ -1558,7 +1584,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
   const selectedSorteo = id_sorteo
     ? db.configuracion.sorteos.find((s: any) => s.id === id_sorteo)
     : db.configuracion.sorteos.find((s: any) => s.nombre === sorteo && s.juego === juego);
-  const now = new Date();
+  const now = getNicaraguaNow();
 
   if (!selectedSorteo) {
     return res.status(400).json({
@@ -1569,7 +1595,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
   {
     const [cierreHour, cierreMin] = selectedSorteo.hora_cierre.split(":").map(Number);
 
-    // Server-side clock compared ONLY against this specific sorteo's hora_cierre
+    // Nicaragua-local clock compared ONLY against this specific sorteo's hora_cierre
     const currentHour = now.getHours();
     const currentMin = now.getMinutes();
 
@@ -1660,7 +1686,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
 
   for (const applicableLimit of applicableLimits) {
     const limitMontoCs = Number(applicableLimit.max_monto ?? applicableLimit.montoMaximo ?? applicableLimit.techo_dinero);
-    const todayStr = now.toISOString().split("T")[0];
+    const todayStr = getLocalDateString(now);
 
     // Sum previous active sales of this number matching this limit today
     const matchingSales = db.ventas.filter((v: any) => {
@@ -1717,7 +1743,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
   }
 
   // 3. ATOMIC COUNTER: Firestore transaction to get sequential ticket ID
-  const serverTimeStr = now.toISOString();
+  const serverTimeStr = getNicaraguaISOString(now);
   let numero_ticket = "";
   let firestoreCreated = false;
 
@@ -1857,7 +1883,7 @@ app.post("/api/ventas/:id/anular", checkAuth(), async (req, res) => {
       ? db.configuracion.sorteos.find((s: any) => s.id === sale.id_sorteo)
       : db.configuracion.sorteos.find((s: any) => s.nombre === sale.sorteo && s.juego === sale.juego);
     if (selectedSorteo) {
-      const now = new Date();
+      const now = getNicaraguaNow();
       const [cierreHour, cierreMin] = selectedSorteo.hora_cierre.split(":").map(Number);
       const currentHour = now.getHours();
       const currentMin = now.getMinutes();
@@ -2060,7 +2086,7 @@ app.post("/api/cierres", requireAdmin, (req, res) => {
     monto_sistema_usd: systemUsd,
     descuadre_cs: descuadreCs,
     descuadre_usd: descuadreUsd,
-    timestamp: new Date().toISOString()
+    timestamp: getNicaraguaISOString()
   };
 
   db.cierres_caja.push(newCierre);
@@ -2101,8 +2127,8 @@ function getOrCreateResumenDiario(id_vendedor: string, nombre_vendedor: string, 
       pagado: 0,
       cierre: 'pendiente',
       egreso: 0,
-      timestamp_creacion: new Date().toISOString(),
-      timestamp_actualizacion: new Date().toISOString()
+      timestamp_creacion: getNicaraguaISOString(),
+      timestamp_actualizacion: getNicaraguaISOString()
     };
     db.resumenes_diarios.push(resumen);
     saveToDB();
@@ -2117,8 +2143,8 @@ app.post("/api/resumen-diario/init", checkAuth(), (req, res) => {
     return res.status(400).json({ error: "Faltan datos." });
   }
 
-  const today = new Date();
-  const dateStr = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, '0') + "-" + String(today.getDate()).padStart(2, '0');
+  const today = getNicaraguaNow();
+  const dateStr = getLocalDateString(today);
 
   const resumen = getOrCreateResumenDiario(id_vendedor, nombre_vendedor, dateStr);
   res.json({ success: true, resumen });
@@ -2171,8 +2197,8 @@ app.post("/api/admin/backfill-resumenes", requireAdmin, (req, res) => {
         pagado: g.pagado,
         cierre: default_status, // Estado por defecto elegido por el admin
         egreso: default_status === 'pagado' ? (g.vendido - g.pagado) : 0,
-        timestamp_creacion: new Date().toISOString(),
-        timestamp_actualizacion: new Date().toISOString()
+        timestamp_creacion: getNicaraguaISOString(),
+        timestamp_actualizacion: getNicaraguaISOString()
       };
       db.resumenes_diarios.push(resumen);
       migrados++;
@@ -2180,7 +2206,7 @@ app.post("/api/admin/backfill-resumenes", requireAdmin, (req, res) => {
       // Solo actualizamos los montos si ya existe, no tocamos el estado para no corromper cobros actuales
       resumen.vendido = g.vendido;
       resumen.pagado = g.pagado;
-      resumen.timestamp_actualizacion = new Date().toISOString();
+      resumen.timestamp_actualizacion = getNicaraguaISOString();
       migrados++;
     }
   }
@@ -2214,7 +2240,7 @@ app.post("/api/cobros/:id/anular", requireAdmin, (req, res) => {
       delete r.id_cobro;
       delete r.timestamp_cobro;
       delete r.procesado_por;
-      r.timestamp_actualizacion = new Date().toISOString();
+      r.timestamp_actualizacion = getNicaraguaISOString();
       resumenesRevertidos++;
     }
   });
@@ -2289,8 +2315,8 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
       pagado: grouped[dateStr].pagado,
       cierre: 'pendiente',
       egreso: 0,
-      timestamp_creacion: new Date().toISOString(),
-      timestamp_actualizacion: new Date().toISOString()
+      timestamp_creacion: getNicaraguaISOString(),
+      timestamp_actualizacion: getNicaraguaISOString()
     });
   }
 
@@ -2309,7 +2335,7 @@ app.post("/api/cobros/procesar", requireAdmin, (req, res) => {
   const vendedor = db.usuarios.find((u: any) => u.id === id_vendedor);
 
   const id_cobro = `cobro_${Date.now()}`;
-  const timestamp = new Date().toISOString();
+  const timestamp = getNicaraguaISOString();
 
   const nuevoCobro = {
     id: id_cobro,
@@ -2358,7 +2384,7 @@ app.post("/api/pagos/registrar", requireAdmin, (req, res) => {
     monto_pago,
     concepto,
     id_cobro_relacionado,
-    timestamp: new Date().toISOString()
+    timestamp: getNicaraguaISOString()
   };
 
   db.pagos_comision.push(nuevoPago);

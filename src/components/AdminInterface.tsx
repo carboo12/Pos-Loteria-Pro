@@ -38,7 +38,7 @@ import {
   EyeOff
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
-import { toDateStr, getTicketDate, getTicketAmount } from "../lib/date-utils";
+import { toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr } from "../lib/date-utils";
 import { calculatePrizeMultiplier, getTicketTheoreticalPrize } from "../lib/prize-utils";
 import { createPortal } from "react-dom";
 import { jsPDF } from "jspdf";
@@ -197,7 +197,7 @@ export default function AdminInterface({
   const [winningNumberInput, setWinningNumberInput] = useState("");
   const [resultFechasDia, setResultFechasDia] = useState("01");
   const [resultFechasMes, setResultFechasMes] = useState("Enero");
-  const [fechaResultadosInput, setFechaResultadosInput] = useState(new Date().toISOString().substring(0, 10));
+  const [fechaResultadosInput, setFechaResultadosInput] = useState(getLocalTodayStr());
   const [resultadoEditando, setResultadoEditando] = useState<any>(null);
 
   // Limits (Límites) Section States
@@ -212,13 +212,13 @@ export default function AdminInterface({
 
   // Reports (Reportes) Section States
   const [reportFilterVendedor, setReportFilterVendedor] = useState("TODOS");
-  const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(new Date().toISOString().substring(0, 10));
-  const [reportFilterFechaFin, setReportFilterFechaFin] = useState(new Date().toISOString().substring(0, 10));
+  const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(getLocalTodayStr());
+  const [reportFilterFechaFin, setReportFilterFechaFin] = useState(getLocalTodayStr());
 
   // Finanzas / Cobros states
   const [finanzasVendedor, setFinanzasVendedor] = useState("");
-  const [finanzasFechaInicio, setFinanzasFechaInicio] = useState(new Date().toISOString().substring(0, 10));
-  const [finanzasFechaFin, setFinanzasFechaFin] = useState(new Date().toISOString().substring(0, 10));
+  const [finanzasFechaInicio, setFinanzasFechaInicio] = useState(getLocalTodayStr());
+  const [finanzasFechaFin, setFinanzasFechaFin] = useState(getLocalTodayStr());
   const [finanzasResumenes, setFinanzasResumenes] = useState<any[]>([]);
   const [finanzasMensajeInfo, setFinanzasMensajeInfo] = useState("");
   const [finanzasLoading, setFinanzasLoading] = useState(false);
@@ -611,7 +611,7 @@ export default function AdminInterface({
   const totalSellersCount = activeSellers.length;
   const onlineSellersCount = activeSellers.filter(u => u.conexion === "online").length;
 
-  const today = new Date().toISOString().substring(0, 10);
+  const today = getLocalTodayStr();
 
   const activeSales = sales.filter(s => {
     if (s.anulado) return false;
@@ -799,10 +799,10 @@ export default function AdminInterface({
       printCenter("FIN DEL REPORTE", 8, true);
       const ticketFooter = config?.formato_ticket?.mensaje_pie || "¡Gracias por su preferencia!";
       printCenter(ticketFooter, 7, false);
-      printCenter(now.toISOString().substring(0, 19).replace("T", " "), 6, false);
+      printCenter(now.toLocaleDateString("es-ES") + " " + now.toLocaleTimeString("es-ES"), 6, false);
 
       // Save PDF
-      doc.save(`reporte_termico_80mm_${now.toISOString().substring(0, 10)}.pdf`);
+      doc.save(`reporte_termico_80mm_${getLocalTodayStr()}.pdf`);
     } catch (error) {
       console.error("Error generando PDF térmico:", error);
       alert("Error al generar el reporte en PDF: " + error);
@@ -3158,7 +3158,7 @@ export default function AdminInterface({
               <div className="flex space-x-2">
                 <button
                   onClick={() => {
-                    const today = new Date().toISOString().substring(0, 10);
+                    const today = getLocalTodayStr();
                     setReportFilterFechaInicio(today);
                     setReportFilterFechaFin(today);
                     setReportFilterVendedor("TODOS");

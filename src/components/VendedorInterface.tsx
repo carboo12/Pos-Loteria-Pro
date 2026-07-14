@@ -38,7 +38,7 @@ import { firestore } from "../lib/firebase";
 import { BluetoothPrinterService, PrinterStatus } from "../services/BluetoothPrinterService";
 import { buildTicketBuffer, ticketDataFromVenta, loadLogoBitmap } from "../services/escpos-builder";
 import { isSorteoHabilitado, getDiasHabilitadosShortLabel, isDateValidForSorteo, getNextValidDate } from "../lib/sorteo-utils";
-import { toDateSafe, toDateStr, getTicketDate, getTicketAmount } from "../lib/date-utils";
+import { toDateSafe, toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr } from "../lib/date-utils";
 import { calculatePrizeMultiplier, getTicketTheoreticalPrize } from "../lib/prize-utils";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
@@ -441,7 +441,7 @@ export default function VendedorInterface({
         }
       }
 
-      const tDate = ticket.fecha_emision_date.toISOString().substring(0, 10);
+      const tDate = toDateStr(ticket.fecha_emision_date);
       const sObj = config?.sorteos?.find(d => d.nombre === draw && d.juego === game);
       const rObj = sObj
         ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
@@ -571,7 +571,7 @@ export default function VendedorInterface({
         draw = js.substring("3 Monazos".length).trim();
       }
     }
-    const ticketDate = ticket.timestamp_servidor ? ticket.timestamp_servidor.substring(0, 10) : new Date().toISOString().substring(0, 10);
+    const ticketDate = ticket.timestamp_servidor ? toDateStr(ticket.timestamp_servidor) : getLocalTodayStr();
     const sObj = config?.sorteos?.find(s => s.nombre === draw && s.juego === game);
     if (!sObj) return true;
 
@@ -580,7 +580,7 @@ export default function VendedorInterface({
       : null;
     if (rObj) return true;
 
-    const todayStr = getSyncedNow().toISOString().substring(0, 10);
+    const todayStr = getLocalTodayStr();
     if (ticketDate < todayStr) return true;
     if (ticketDate === todayStr) {
       return isSorteoCerrado(sObj);
