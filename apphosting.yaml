@@ -1,6 +1,9 @@
 ﻿# Firebase App Hosting configuration
 # https://firebase.google.com/docs/app-hosting/configure
 
+backend:
+  runtime: nodejs
+
 runConfig:
   concurrency: 80
   cpu: 1
@@ -9,8 +12,6 @@ runConfig:
   maxInstances: 2
 
 env:
-  # NODE_ENV=production ONLY at RUNTIME so that npm ci installs devDependencies
-  # (vite, esbuild) during the build step. At runtime the server uses static files.
   - variable: NODE_ENV
     value: production
     availability:
