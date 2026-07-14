@@ -371,32 +371,6 @@ let sseClients: any[] = [];
 // Initialize Firebase Admin for real push notifications lazily
 let isFirebaseAdminInitialized = false;
 
-function findServiceAccountPath(): string | null {
-  const envPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
-  if (envPath && fs.existsSync(envPath)) {
-    console.log(`[Firebase Admin] Usando service account desde env: ${envPath}`);
-    return envPath;
-  }
-
-  try {
-    const files = fs.readdirSync(process.cwd());
-    const candidates = [
-      "service-account.json",
-      ...files.filter(f => f.includes("firebase-adminsdk") && f.endsWith(".json"))
-    ];
-    for (const name of candidates) {
-      const fullPath = path.join(process.cwd(), name);
-      if (fs.existsSync(fullPath)) {
-        console.log(`[Firebase Admin] Service account detectado: ${name}`);
-        return fullPath;
-      }
-    }
-  } catch (e) {
-    console.error("[Firebase Admin] Error al buscar credenciales:", e);
-  }
-  return null;
-}
-
 function initFirebaseAdmin() {
   if (isFirebaseAdminInitialized) return true;
 
@@ -406,14 +380,14 @@ function initFirebaseAdmin() {
     return true;
   }
 
-  // 1. Try explicit service account file (local dev)
-  const serviceAccountPath = findServiceAccountPath();
-  if (serviceAccountPath) {
+  // 1. Environment variable FIREBASE_CONFIG_JSON (production / App Hosting)
+  const configJson = process.env.FIREBASE_CONFIG_JSON;
+  if (configJson) {
     try {
-      const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8"));
+      const serviceAccount = JSON.parse(configJson);
 
       if (serviceAccount.project_id !== FIREBASE_PROJECT_ID) {
-        console.error(`[Firebase Admin] FATAL: service-account.json project_id="${serviceAccount.project_id}" no coincide con "${FIREBASE_PROJECT_ID}"`);
+        console.error(`[Firebase Admin] FATAL: FIREBASE_CONFIG_JSON project_id="${serviceAccount.project_id}" no coincide con "${FIREBASE_PROJECT_ID}"`);
         return false;
       }
 
@@ -425,23 +399,41 @@ function initFirebaseAdmin() {
       console.log(`[Firebase Admin] OK → Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
       return true;
     } catch (e) {
-      console.error("[Firebase Admin] Error al inicializar con Cuenta de Servicio:", e);
+      console.error("[Firebase Admin] Error al inicializar con FIREBASE_CONFIG_JSON:", e);
     }
   }
 
-  // 2. Always try Application Default Credentials (works on Cloud Run / App Hosting automatically)
+  // 2. Fallback: service-account.json file (local dev only)
+  const envPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+  const candidates = envPath ? [envPath] : ["service-account.json"];
   try {
-    firebaseAdmin.initializeApp({
-      credential: firebaseAdmin.applicationDefault(),
-      projectId: FIREBASE_PROJECT_ID
-    });
-    isFirebaseAdminInitialized = true;
-    console.log(`[Firebase Admin] OK (ADC) → Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
-    return true;
-  } catch (e) {
-    console.error("[Firebase Admin] Error al inicializar con Application Default Credentials:", e);
+    const files = fs.readdirSync(process.cwd());
+    candidates.push(...files.filter(f => f.includes("firebase-adminsdk") && f.endsWith(".json")));
+  } catch (_) {}
+
+  for (const name of candidates) {
+    const fullPath = path.isAbsolute(name) ? name : path.join(process.cwd(), name);
+    if (fs.existsSync(fullPath)) {
+      try {
+        const serviceAccount = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+        if (serviceAccount.project_id !== FIREBASE_PROJECT_ID) {
+          console.error(`[Firebase Admin] FATAL: ${name} project_id="${serviceAccount.project_id}" no coincide con "${FIREBASE_PROJECT_ID}"`);
+          return false;
+        }
+        firebaseAdmin.initializeApp({
+          credential: firebaseAdmin.cert(serviceAccount),
+          projectId: FIREBASE_PROJECT_ID
+        });
+        isFirebaseAdminInitialized = true;
+        console.log(`[Firebase Admin] OK (file: ${name}) → Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
+        return true;
+      } catch (e) {
+        console.error(`[Firebase Admin] Error al inicializar con ${name}:`, e);
+      }
+    }
   }
 
+  console.error("[Firebase Admin] No se encontraron credenciales. Configure FIREBASE_CONFIG_JSON o coloque service-account.json en la raíz del proyecto.");
   return false;
 }
 
