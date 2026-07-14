@@ -548,129 +548,149 @@ app.get("/api/reloj", (req, res) => {
   });
 });
 
-// Autenticación Híbrida (Login Endpoint)
+// ─── LOGIN ENDPOINT (Firestore-direct con logs garantizados) ──────────
 app.post("/api/login", async (req, res) => {
-  const { email, password } = req.body;
+  const ts = new Date().toISOString();
+  const { email, password } = req.body || {};
 
-  console.log(`[Login] ════════════════════════════════════════`);
-  console.log(`[Login] NUEVO INTENTO | email="${email}" | pwd_len=${password ? password.length : 0}`);
+  // Logs con process.stdout.write para garantizar que aparecen en Cloud Logging
+  const log = (msg: string) => {
+    const line = `[Login][${ts}] ${msg}\n`;
+    process.stdout.write(line);
+    console.log(line.trimEnd());
+  };
+
+  log(`════════════════════════════════════════`);
+  log(`Buscando en colección: 'usuarios', email: "${email}"`);
 
   if (!email || !password) {
-    console.log(`[Login] ✗ RECHAZADO 400: email o password vacíos`);
+    log(`RECHAZADO 400: campos vacíos (email=${!!email}, password=${!!password})`);
     return res.status(400).json({ error: "Email y contraseña son requeridos." });
   }
 
-  // ─── PASO 1: Buscar usuario ───────────────────────────────────────
   const emailLower = email.toLowerCase().trim();
-  let user = db.usuarios.find((u: any) => u.email && u.email.toLowerCase() === emailLower);
-  let source = "memoria";
 
-  console.log(`[Login] PASO 1 — Buscando usuario`);
-  console.log(`[Login]   Usuarios en memoria: ${db.usuarios.length}`);
-  console.log(`[Login]   Emails: [${db.usuarios.map((u: any) => u.email).join(", ")}]`);
-  console.log(`[Login]   Resultado memoria: ${user ? `ENCONTRADO id=${user.id}` : "NO ENCONTRADO"}`);
+  // ─── PASO 1: Intentar Firebase Admin ──────────────────────────────
+  const adminReady = initFirebaseAdmin();
+  log(`Firebase Admin inicializado: ${adminReady}`);
 
-  // ─── FIRESTORE FALLBACK ───────────────────────────────────────────
-  if (!user) {
-    console.log(`[Login]   Buscando en Firestore colección 'usuarios'...`);
+  if (!adminReady) {
+    log(`ERROR FATAL: Firebase Admin NO inicializado. SIN ACCESO A FIRESTORE.`);
+    log(`Causa probable: variable de entorno FIREBASE_CONFIG_JSON no configurada.`);
+    log(`════════════════════════════════════════`);
+    return res.status(503).json({ error: "Servidor sin conexión a base de datos. Contacte al administrador." });
+  }
+
+  // ─── PASO 2: Buscar en Firestore por campo 'email' ───────────────
+  const firestoreDb = getFirestoreInstance();
+  let userDoc: any = null;
+  let user: any = null;
+  let sourceField = "";
+
+  try {
+    log(`Consultando Firestore: collection('usuarios').where('email','==','${emailLower}')`);
+    const byEmail = await firestoreDb.collection('usuarios').where('email', '==', emailLower).get();
+    log(`¿Documento encontrado?: ${!byEmail.empty} (${byEmail.size} resultado(s))`);
+
+    if (!byEmail.empty) {
+      userDoc = byEmail.docs[0];
+      sourceField = "email";
+    }
+  } catch (err: any) {
+    log(`ERROR en query Firestore (email): ${err.message}`);
+  }
+
+  // ─── PASO 3: Si no encontró por email, buscar por campo 'usuario' ─
+  if (!userDoc) {
     try {
-      const firestoreOk = initFirebaseAdmin();
-      console.log(`[Login]   Firebase Admin inicializado: ${firestoreOk}`);
-      if (firestoreOk) {
-        const firestoreDb = getFirestoreInstance();
-        const snapshot = await firestoreDb.collection('usuarios').where('email', '==', emailLower).get();
-        console.log(`[Login]   Firestore query resultado: ${snapshot.size} doc(s)`);
+      log(`Consultando Firestore: collection('usuarios').where('usuario','==','${emailLower}')`);
+      const byUsuario = await firestoreDb.collection('usuarios').where('usuario', '==', emailLower).get();
+      log(`¿Documento encontrado?: ${!byUsuario.empty} (${byUsuario.size} resultado(s))`);
 
-        if (!snapshot.empty) {
-          const doc = snapshot.docs[0];
-          user = { id: doc.id, ...doc.data() } as any;
-          source = "firestore";
-          console.log(`[Login]   Firestore: ENCONTRADO id=${doc.id}`);
-        } else {
-          console.log(`[Login]   Firestore: SIN RESULTADOS. Listando docs existentes:`);
-          const allUsers = await firestoreDb.collection('usuarios').limit(5).get();
-          allUsers.forEach((d: any) => {
-            const data = d.data();
-            console.log(`[Login]     → doc ${d.id}: email="${data.email || "N/A"}", usuario="${data.usuario || "N/A"}"`);
-          });
-        }
+      if (!byUsuario.empty) {
+        userDoc = byUsuario.docs[0];
+        sourceField = "usuario";
       }
-    } catch (fsErr: any) {
-      console.error(`[Login]   Firestore error: ${fsErr.message}`);
+    } catch (err: any) {
+      log(`ERROR en query Firestore (usuario): ${err.message}`);
     }
   }
 
-  if (!user) {
-    console.log(`[Login] ✗ RESULTADO: Usuario NO existe → 401`);
-    console.log(`[Login] ════════════════════════════════════════`);
+  // ─── PASO 4: Listar todos los documentos para diagnóstico ─────────
+  if (!userDoc) {
+    log(`USUARIO NO ENCONTRADO por ningún campo. Listando TODOS los documentos de 'usuarios':`);
+    try {
+      const allDocs = await firestoreDb.collection('usuarios').get();
+      log(`Total documentos en colección 'usuarios': ${allDocs.size}`);
+      allDocs.forEach((d: any) => {
+        const data = d.data();
+        log(`  → doc ${d.id}: email="${data.email || "N/A"}", usuario="${data.usuario || "N/A"}", activo=${data.activo}, password=${data.password ? "SÍ" : "NO"}`);
+      });
+    } catch (err: any) {
+      log(`ERROR listando documentos: ${err.message}`);
+    }
+    log(`════════════════════════════════════════`);
     return res.status(401).json({ error: "Credenciales incorrectas o usuario no encontrado." });
   }
 
-  // ─── PASO 2: Estructura completa del usuario (password oculto) ────
-  console.log(`[Login] PASO 2 — Estructura de usuario recibida (${source}):`);
-  console.log(`[Login]   ${JSON.stringify({ ...user, password: '***' })}`);
+  // ─── PASO 5: Usuario encontrado — preparar datos ─────────────────
+  user = { id: userDoc.id, ...userDoc.data() };
+  log(`Usuario encontrado. Validando password...`);
+  log(`Estructura de usuario recibida: ${JSON.stringify({ ...user, password: "***" })}`);
 
   if (!user.activo) {
-    console.log(`[Login] ✗ RESULTADO: Cuenta desactivada (activo=false) → 403`);
-    console.log(`[Login] ════════════════════════════════════════`);
-    return res.status(403).json({ error: "Acceso denegado. Su cuenta se encuentra suspendida temporalmente." });
+    log(`USUARIO DESACTIVADO (activo=false) → 403`);
+    log(`════════════════════════════════════════`);
+    return res.status(403).json({ error: "Acceso denegado. Su cuenta se encuentra suspendida." });
   }
 
-  // ─── PASO 3: Comparación de contraseña ────────────────────────────
-  console.log(`[Login] PASO 3 — Comparación de contraseña`);
-  let isMatch = false;
-  let wasPlaintext = false;
-
-  if (user.password) {
-    const isBcrypt = user.password.startsWith("$2");
-    console.log(`[Login]   Campo password: PRESENTE`);
-    console.log(`[Login]   Hash preview: "${user.password.substring(0, 24)}..." (longitud total: ${user.password.length})`);
-    console.log(`[Login]   Tipo detectado: ${isBcrypt ? "bcrypt ($2...)" : "TEXTO PLANO (no hasheado)"}`);
-    console.log(`[Login]   Input password length: ${password.length}`);
-
-    if (isBcrypt) {
-      isMatch = bcrypt.compareSync(password, user.password);
-      console.log(`[Login]   bcrypt.compareSync(input, hash) → ${isMatch}`);
-    } else {
-      isMatch = user.password === password;
-      wasPlaintext = isMatch;
-      console.log(`[Login]   Comparación directa (===) → ${isMatch}`);
-    }
-  } else {
-    console.log(`[Login]   Campo password: ${user.password === undefined ? "UNDEFINED" : "NULL/empty"} — IMPOSIBLE AUTENTICAR`);
-  }
-
-  if (!isMatch) {
-    console.log(`[Login] ✗ RESULTADO: Contraseña incorrecta → 401`);
-    console.log(`[Login]   Causa probable: hash en DB no coincide con input del usuario`);
-    console.log(`[Login]   Acción recomendada: verificar el hash en Firestore Console → colección 'usuarios' → doc ${user.id}`);
-    console.log(`[Login] ════════════════════════════════════════`);
+  // ─── PASO 6: Comparación de contraseña ────────────────────────────
+  if (!user.password) {
+    log(`Campo password: ${user.password === undefined ? "UNDEFINED" : "NULL/vacío"}`);
+    log(`Error: El usuario NO tiene campo 'password' en Firestore.`);
+    log(`════════════════════════════════════════`);
     return res.status(401).json({ error: "Credenciales incorrectas." });
   }
 
-  // ─── Migración texto plano → bcrypt ──────────────────────────────
+  const isBcrypt = user.password.startsWith("$2");
+  log(`Hash stored: "${user.password.substring(0, 24)}..." (len=${user.password.length}, tipo=${isBcrypt ? "bcrypt" : "texto_plano"})`);
+
+  let isMatch = false;
+  let wasPlaintext = false;
+
+  if (isBcrypt) {
+    isMatch = bcrypt.compareSync(password, user.password);
+    log(`bcrypt.compareSync("${password}", "${user.password.substring(0, 20)}...") → ${isMatch}`);
+  } else {
+    isMatch = user.password === password;
+    wasPlaintext = isMatch;
+    log(`Comparación directa === → ${isMatch}`);
+  }
+
+  if (!isMatch) {
+    log(`Error: La comparación de password devolvió false.`);
+    log(`════════════════════════════════════════`);
+    return res.status(401).json({ error: "Credenciales incorrectas." });
+  }
+
+  // ─── PASO 7: Migración texto plano → bcrypt ──────────────────────
   if (wasPlaintext) {
     try {
-      console.log(`[Login Bridge] Migrando contraseña de texto plano → bcrypt para ${user.email}`);
+      log(`Migrando contraseña texto plano → bcrypt...`);
       const hashed = bcrypt.hashSync(password, 10);
-      const localIdx = db.usuarios.findIndex((u: any) => u.id === user.id);
-      if (localIdx !== -1) (db.usuarios[localIdx] as any).password = hashed;
-      const firestoreOk = initFirebaseAdmin();
-      if (firestoreOk) {
-        await getFirestoreInstance().collection("usuarios").doc(user.id).update({ password: hashed });
-      }
-      saveToDB();
-      console.log(`[Login Bridge] Contraseña migrada exitosamente`);
-    } catch (migErr) {
-      console.error(`[Login Bridge] Error:`, migErr);
+      await firestoreDb.collection("usuarios").doc(user.id).update({ password: hashed });
+      user.password = hashed;
+      log(`Migración completada.`);
+    } catch (err: any) {
+      log(`Error en migración: ${err.message}`);
     }
   }
 
-  // ─── ÉXITO ────────────────────────────────────────────────────────
+  // ─── PASO 8: Login exitoso ───────────────────────────────────────
   const { password: _, ...safeUser } = user;
   const sessionToken = createSession(safeUser);
-  console.log(`[Login] ✓ RESULTADO: EXITOSO → ${user.email} (${user.rol}) | Sesiones: ${sessions.size}`);
-  console.log(`[Login] ════════════════════════════════════════`);
+  log(`LOGIN EXITOSO → id=${user.id}, email=${user.email}, rol=${user.rol}`);
+  log(`════════════════════════════════════════`);
 
   res.json({ success: true, user: safeUser, localToken: sessionToken, message: "Autenticación exitosa" });
 });
