@@ -384,72 +384,38 @@ async function syncFromFirestore() {
 // Live real-time notification subscribers (SSE)
 let sseClients: any[] = [];
 
-// Initialize Firebase Admin for real push notifications lazily
+// ─── FIREBASE ADMIN INITIALIZATION (eager at startup) ───────────────
+const configJson = process.env.FIREBASE_CONFIG_JSON;
+
+if (configJson) {
+  try {
+    const serviceAccount = JSON.parse(configJson);
+
+    firebaseAdmin.initializeApp({
+      credential: firebaseAdmin.cert(serviceAccount),
+      projectId: FIREBASE_PROJECT_ID
+    });
+
+    console.log(`[Firebase Admin] OK → Inicializado con FIREBASE_CONFIG_JSON | Proyecto: ${serviceAccount.project_id} | Database: ${FIRESTORE_DATABASE_ID}`);
+  } catch (error: any) {
+    console.error(`[Firebase Admin] ERROR al parsear FIREBASE_CONFIG_JSON:`, error.message || error);
+    console.error(`[Firebase Admin] La variable FIREBASE_CONFIG_JSON tiene longitud: ${configJson.length} chars. Primeros 100: "${configJson.substring(0, 100)}..."`);
+  }
+} else {
+  console.error("[Firebase Admin] ERROR CRÍTICO: La variable FIREBASE_CONFIG_JSON no está definida en el entorno.");
+  console.error("[Firebase Admin] Configure FIREBASE_CONFIG_JSON con el contenido JSON de su service account en las variables de entorno de App Hosting.");
+}
+
+// Lazy init wrapper — returns true if already initialized above, tries again if not
 let isFirebaseAdminInitialized = false;
 
-function initFirebaseAdmin() {
+function initFirebaseAdmin(): boolean {
   if (isFirebaseAdminInitialized) return true;
-
   if (firebaseAdmin.apps && firebaseAdmin.apps.length > 0) {
     isFirebaseAdminInitialized = true;
-    console.log("[Firebase Admin] Ya inicializado previamente.");
     return true;
   }
-
-  // 1. Environment variable FIREBASE_CONFIG_JSON (production / App Hosting)
-  const configJson = process.env.FIREBASE_CONFIG_JSON;
-  if (configJson) {
-    try {
-      const serviceAccount = JSON.parse(configJson);
-
-      if (serviceAccount.project_id !== FIREBASE_PROJECT_ID) {
-        console.error(`[Firebase Admin] FATAL: FIREBASE_CONFIG_JSON project_id="${serviceAccount.project_id}" no coincide con "${FIREBASE_PROJECT_ID}"`);
-        return false;
-      }
-
-      firebaseAdmin.initializeApp({
-        credential: firebaseAdmin.cert(serviceAccount),
-        projectId: FIREBASE_PROJECT_ID
-      });
-      isFirebaseAdminInitialized = true;
-      console.log(`[Firebase Admin] OK → Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
-      return true;
-    } catch (e) {
-      console.error("[Firebase Admin] Error al inicializar con FIREBASE_CONFIG_JSON:", e);
-    }
-  }
-
-  // 2. Fallback: service-account.json file (local dev only)
-  const envPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
-  const candidates = envPath ? [envPath] : ["service-account.json"];
-  try {
-    const files = fs.readdirSync(process.cwd());
-    candidates.push(...files.filter(f => f.includes("firebase-adminsdk") && f.endsWith(".json")));
-  } catch (_) {}
-
-  for (const name of candidates) {
-    const fullPath = path.isAbsolute(name) ? name : path.join(process.cwd(), name);
-    if (fs.existsSync(fullPath)) {
-      try {
-        const serviceAccount = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
-        if (serviceAccount.project_id !== FIREBASE_PROJECT_ID) {
-          console.error(`[Firebase Admin] FATAL: ${name} project_id="${serviceAccount.project_id}" no coincide con "${FIREBASE_PROJECT_ID}"`);
-          return false;
-        }
-        firebaseAdmin.initializeApp({
-          credential: firebaseAdmin.cert(serviceAccount),
-          projectId: FIREBASE_PROJECT_ID
-        });
-        isFirebaseAdminInitialized = true;
-        console.log(`[Firebase Admin] OK (file: ${name}) → Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
-        return true;
-      } catch (e) {
-        console.error(`[Firebase Admin] Error al inicializar con ${name}:`, e);
-      }
-    }
-  }
-
-  console.error("[Firebase Admin] No se encontraron credenciales. Configure FIREBASE_CONFIG_JSON o coloque service-account.json en la raíz del proyecto.");
+  console.error("[Firebase Admin] No inicializado. Todas las operaciones Firestore/FCM estarán deshabilitadas.");
   return false;
 }
 
