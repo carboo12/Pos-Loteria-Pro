@@ -2,7 +2,7 @@
 
 Este documento detalla la arquitectura completa, el stack tecnológico y las funcionalidades implementadas en el **Punto de Venta de Lotería**, un sistema SaaS diseñado para operar en Nicaragua y Honduras..
 
----
+-------
 
 ## 1. Stack Tecnológico
 
