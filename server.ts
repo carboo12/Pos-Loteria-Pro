@@ -558,9 +558,33 @@ app.post("/api/login", async (req, res) => {
 
   const user = db.usuarios.find((u: any) => u.email && u.email.toLowerCase() === email.toLowerCase());
 
+  console.log(`[Login] Buscando email="${email}" → Encontrado en memoria: ${user ? `SÍ (id=${user.id}, rol=${user.rol})` : "NO"}`);
+  console.log(`[Login] Usuarios en memoria: ${db.usuarios.length} | Emails: [${db.usuarios.map((u: any) => u.email).join(", ")}]`);
+
   if (!user) {
+    // ─── FIRESTORE DIRECT LOOKUP (fallback si no está en memoria) ─────
+    try {
+      const firestoreOk = initFirebaseAdmin();
+      if (firestoreOk) {
+        const firestoreDb = getFirestoreInstance();
+        const snapshot = await firestoreDb.collection('usuarios').where('email', '==', email).get();
+        if (snapshot.empty) {
+          console.log(`[Login] Firestore: usuario con email="${email}" NO encontrado en colección 'usuarios'.`);
+        } else {
+          const fsUser = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as any;
+          console.log(`[Login] Firestore: usuario encontrado → id=${fsUser.id}, email=${fsUser.email}, activo=${fsUser.activo}, password=${fsUser.password ? "PRESENTE (" + fsUser.password.substring(0, 10) + "...)" : "AUSENTE"}`);
+        }
+      } else {
+        console.log("[Login] Firestore Admin no disponible.");
+      }
+    } catch (fsErr: any) {
+      console.log(`[Login] Firestore lookup error: ${fsErr.message}`);
+    }
+
     return res.status(401).json({ error: "Credenciales incorrectas o usuario no encontrado." });
   }
+
+  console.log(`[Login] Password en usuario encontrado: ${user.password ? `SÍ (tipo=${user.password.startsWith("$2") ? "bcrypt" : "texto_plano"}, len=${user.password.length})` : "NO / UNDEFINED"}`);
 
   if (!user.activo) {
     return res.status(403).json({ error: "Acceso denegado. Su cuenta se encuentra suspendida temporalmente." });
