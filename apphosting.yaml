@@ -13,4 +13,4 @@ runConfig:
 
 env:
   - variable: FIREBASE_CONFIG_JSON
-    value: "TEMPORAL"
+    secret: FIREBASE_SERVICE_ACCOUNT_SECRET

@@ -3,11 +3,25 @@ import cors from "cors";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
-import * as adminNamespace from "firebase-admin";
 import bcrypt from "bcryptjs";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
-const firebaseAdmin = ((adminNamespace as any).default || adminNamespace) as any;
+
+// ─── FIREBASE ADMIN: import segura para esbuild CJS ─────────────────
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const firebaseAdmin: any = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require("firebase-admin");
+    return mod?.default || mod;
+  } catch {
+    return null;
+  }
+})();
+
+if (!firebaseAdmin) {
+  console.error("[Firebase Admin] No se pudo importar el módulo 'firebase-admin'. Verifique que esté instalado.");
+}
 
 const app = express();
 const activePaymentLocks = new Set<string>();
@@ -390,30 +404,59 @@ async function syncFromFirestore() {
 let sseClients: any[] = [];
 
 // ─── FIREBASE ADMIN INITIALIZATION ──────────────────────────────────
-// No applicationDefault(), no file fallback. FIREBASE_CONFIG_JSON only.
-if (!firebaseAdmin.apps.length) {
-  try {
-    const configJson = process.env.FIREBASE_CONFIG_JSON;
+// FIREBASE_CONFIG_JSON (Secret Manager) → applicationDefault() fallback
+function initFirebaseAdminAtStartup(): boolean {
+  if (!firebaseAdmin) {
+    console.error("[Firebase Admin] Módulo no disponible. Firestore/FCM deshabilitados.");
+    return false;
+  }
 
-    if (!configJson) {
-      throw new Error("FIREBASE_CONFIG_JSON no está definida en el entorno.");
+  if (firebaseAdmin.apps?.length > 0) {
+    console.log("[Firebase Admin] Ya inicializado previamente.");
+    return true;
+  }
+
+  // 1. FIREBASE_CONFIG_JSON desde Secret Manager
+  const configJson = process.env.FIREBASE_CONFIG_JSON;
+  if (configJson) {
+    try {
+      const serviceAccount = JSON.parse(configJson);
+      firebaseAdmin.initializeApp({
+        credential: firebaseAdmin.cert(serviceAccount),
+        projectId: FIREBASE_PROJECT_ID
+      });
+      console.log(`[Firebase Admin] OK (FIREBASE_CONFIG_JSON) → Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
+      return true;
+    } catch (error: any) {
+      console.error(`[Firebase Admin] Error con FIREBASE_CONFIG_JSON: ${error.message}`);
     }
+  }
 
-    const serviceAccount = JSON.parse(configJson);
+  // 2. Application Default Credentials (Cloud Run / App Hosting automático)
+  try {
     firebaseAdmin.initializeApp({
-      credential: firebaseAdmin.cert(serviceAccount),
+      credential: firebaseAdmin.credential?.applicationDefault?.() || undefined,
       projectId: FIREBASE_PROJECT_ID
     });
-
-    console.log(`[Firebase Admin] OK → Inicializado correctamente desde Secret Manager. Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
+    console.log(`[Firebase Admin] OK (ADC) → Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
+    return true;
   } catch (error: any) {
-    console.error(`[Firebase Admin] ERROR CRÍTICO: ${error.message}`);
+    console.error(`[Firebase Admin] Error con Application Default Credentials: ${error.message}`);
   }
+
+  console.error("[Firebase Admin] ERROR CRÍTICO: No se encontraron credenciales válidas.");
+  return false;
 }
 
-// Lazy check — returns true if initialized above
+let firebaseReady = initFirebaseAdminAtStartup();
+
+// Safe wrapper — returns true only if initialized
 function initFirebaseAdmin(): boolean {
-  if (firebaseAdmin.apps && firebaseAdmin.apps.length > 0) return true;
+  if (firebaseReady) return true;
+  if (firebaseAdmin?.apps?.length > 0) {
+    firebaseReady = true;
+    return true;
+  }
   return false;
 }
 
