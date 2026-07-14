@@ -552,41 +552,63 @@ app.get("/api/reloj", (req, res) => {
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
 
+  console.log(`[Login] ──────── NUEVO INTENTO ────────`);
+  console.log(`[Login] Email recibido: "${email}" | Password length: ${password ? password.length : 0}`);
+
   if (!email || !password) {
+    console.log(`[Login] RECHAZADO: email o password vacíos`);
     return res.status(400).json({ error: "Email y contraseña son requeridos." });
   }
 
-  const user = db.usuarios.find((u: any) => u.email && u.email.toLowerCase() === email.toLowerCase());
+  const emailLower = email.toLowerCase().trim();
+  let user = db.usuarios.find((u: any) => u.email && u.email.toLowerCase() === emailLower);
+  let source = "memoria";
 
-  console.log(`[Login] Buscando email="${email}" → Encontrado en memoria: ${user ? `SÍ (id=${user.id}, rol=${user.rol})` : "NO"}`);
-  console.log(`[Login] Usuarios en memoria: ${db.usuarios.length} | Emails: [${db.usuarios.map((u: any) => u.email).join(", ")}]`);
+  console.log(`[Login] Buscando en memoria (${db.usuarios.length} usuarios): ${user ? `ENCONTRADO id=${user.id}` : "NO ENCONTRADO"}`);
+  console.log(`[Login] Emails en memoria: [${db.usuarios.map((u: any) => `"${u.email}"`).join(", ")}]`);
 
+  // ─── FIRESTORE FALLBACK: si no está en memoria, buscar directo ────
   if (!user) {
-    // ─── FIRESTORE DIRECT LOOKUP (fallback si no está en memoria) ─────
+    console.log(`[Login] Usuario no está en memoria. Buscando en Firestore colección 'usuarios'...`);
     try {
       const firestoreOk = initFirebaseAdmin();
       if (firestoreOk) {
         const firestoreDb = getFirestoreInstance();
-        const snapshot = await firestoreDb.collection('usuarios').where('email', '==', email).get();
-        if (snapshot.empty) {
-          console.log(`[Login] Firestore: usuario con email="${email}" NO encontrado en colección 'usuarios'.`);
+        const snapshot = await firestoreDb.collection('usuarios').where('email', '==', emailLower).get();
+
+        console.log(`[Login] Firestore resultado: ${snapshot.size} documento(s) encontrado(s)`);
+
+        if (!snapshot.empty) {
+          const doc = snapshot.docs[0];
+          user = { id: doc.id, ...doc.data() } as any;
+          source = "firestore";
+          console.log(`[Login] Firestore: id=${user.id}, activo=${user.activo}, password=${user.password ? `SÍ (${user.password.length} chars, tipo=${user.password.startsWith("$2") ? "bcrypt" : "texto_plano"})` : "NO / UNDEFINED"}`);
         } else {
-          const fsUser = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as any;
-          console.log(`[Login] Firestore: usuario encontrado → id=${fsUser.id}, email=${fsUser.email}, activo=${fsUser.activo}, password=${fsUser.password ? "PRESENTE (" + fsUser.password.substring(0, 10) + "...)" : "AUSENTE"}`);
+          console.log(`[Login] Firestore: NO existe usuario con email="${emailLower}" en colección 'usuarios'`);
+          console.log(`[Login] → Listando primeros 5 documentos para referencia:`);
+          const allUsers = await firestoreDb.collection('usuarios').limit(5).get();
+          allUsers.forEach((d: any) => {
+            const data = d.data();
+            console.log(`[Login]   doc ${d.id}: email="${data.email || "N/A"}", usuario="${data.usuario || "N/A"}", rol="${data.rol || "N/A"}"`);
+          });
         }
       } else {
-        console.log("[Login] Firestore Admin no disponible.");
+        console.log(`[Login] Firestore Admin NO inicializado — solo se busca en memoria`);
       }
     } catch (fsErr: any) {
-      console.log(`[Login] Firestore lookup error: ${fsErr.message}`);
+      console.error(`[Login] Firestore error: ${fsErr.message}`);
     }
+  }
 
+  if (!user) {
+    console.log(`[Login] RESULTADO: Usuario "${emailLower}" no encontrado en ninguna fuente → 401`);
     return res.status(401).json({ error: "Credenciales incorrectas o usuario no encontrado." });
   }
 
-  console.log(`[Login] Password en usuario encontrado: ${user.password ? `SÍ (tipo=${user.password.startsWith("$2") ? "bcrypt" : "texto_plano"}, len=${user.password.length})` : "NO / UNDEFINED"}`);
+  console.log(`[Login] Fuente: ${source} | id=${user.id} | activo=${user.activo} | password=${user.password ? "PRESENTE" : "AUSENTE"}`);
 
   if (!user.activo) {
+    console.log(`[Login] RESULTADO: Cuenta desactivada → 403`);
     return res.status(403).json({ error: "Acceso denegado. Su cuenta se encuentra suspendida temporalmente." });
   }
 
@@ -595,54 +617,24 @@ app.post("/api/login", async (req, res) => {
   let wasPlaintext = false;
 
   if (user.password) {
-    if (user.password.startsWith("$2")) {
-      // Contraseña hasheada con bcrypt
+    const isBcrypt = user.password.startsWith("$2");
+    console.log(`[Login] Comparando contraseña: tipo=${isBcrypt ? "bcrypt" : "texto_plano"}, hash_preview="${user.password.substring(0, 20)}..."`);
+
+    if (isBcrypt) {
       isMatch = bcrypt.compareSync(password, user.password);
     } else {
-      // Texto plano → comparación directa (migración)
       isMatch = user.password === password;
       wasPlaintext = isMatch;
     }
-  }
 
-  if (!user.password) {
-    console.log(`[Login] Usuario ${user.email} sin campo 'password' — rechazado`);
+    console.log(`[Login] bcrypt.compareSync resultado: ${isMatch}`);
+  } else {
+    console.log(`[Login] Usuario SIN campo password — login rechazado`);
   }
 
   if (!isMatch) {
-    // ─── DEBUG LOGIN DETALLADO ──────────────────────────────────────
-    console.log("--- DEBUG LOGIN DETALLADO ---");
-    console.log("Email intentado:", email);
-    console.log("Password enviado (longitud):", password ? password.length : 0);
-    console.log("Password en memoria DB:", user.password ? `${user.password.substring(0, 20)}...` : "VACÍO/UNDEFINED");
-    console.log("¿Empieza con $2? (bcrypt):", user.password ? user.password.startsWith("$2") : false);
-
-    // Intentar Firestore Admin SDK (puede fallar localmente con gRPC)
-    try {
-      const firestoreOk = initFirebaseAdmin();
-      if (firestoreOk) {
-        const firestoreDb = getFirestoreInstance();
-        const snapshot = await firestoreDb.collection('usuarios').where('email', '==', email).get();
-        if (snapshot.empty) {
-          console.log("ERROR: Usuario no encontrado en la colección 'usuarios' de Firestore.");
-        } else {
-          const u = snapshot.docs[0].data();
-          console.log("Usuario encontrado en Firestore:", u.email);
-          console.log("Hash recuperado de Firestore:", u.password ? `${u.password.substring(0, 20)}...` : "VACÍO/NULL");
-          const fsMatch = u.password && u.password.startsWith("$2")
-            ? bcrypt.compareSync(password, u.password)
-            : u.password === password;
-          console.log("¿bcrypt.compare da true?:", fsMatch);
-        }
-      } else {
-        console.log("Firestore Admin NO disponible (gRPC roto localmente). Saltando diagnóstico Firestore.");
-      }
-    } catch (fsErr: any) {
-      console.log("Firestore Admin error:", fsErr.message);
-    }
-    console.log("--- FIN DEBUG LOGIN DETALLADO ---");
-    // ─── FIN DEBUG ──────────────────────────────────────────────────
-
+    console.log(`[Login] RESULTADO: Contraseña incorrecta → 401`);
+    console.log(`[Login] ──────── FIN (FALLIDO) ────────`);
     return res.status(401).json({ error: "Credenciales incorrectas." });
   }
 
@@ -652,26 +644,21 @@ app.post("/api/login", async (req, res) => {
       console.log(`[Login Bridge] Migrando contraseña de texto plano → bcrypt para ${user.email}`);
       const hashed = bcrypt.hashSync(password, 10);
 
-      // 1. Actualizar en local DB
       const localIdx = db.usuarios.findIndex((u: any) => u.id === user.id);
       if (localIdx !== -1) {
         (db.usuarios[localIdx] as any).password = hashed;
       }
 
-      // 2. Persistir en Firestore (remover campo password plano, guardar password hasheado)
       const firestoreOk = initFirebaseAdmin();
       if (firestoreOk) {
         const firestoreDb = getFirestoreInstance();
         await firestoreDb.collection("usuarios").doc(user.id).update({ password: hashed });
       }
 
-      // 3. Guardar copia local
       saveToDB();
-
       console.log(`[Login Bridge] Contraseña migrada exitosamente para ${user.email}`);
     } catch (migErr) {
       console.error(`[Login Bridge] Error migrando contraseña para ${user.email}:`, migErr);
-      // No bloquear el login si la migración falla — el usuario ya autenticó correctamente
     }
   }
 
@@ -680,7 +667,8 @@ app.post("/api/login", async (req, res) => {
 
   // Generar token de sesión seguro (crypto + TTL 24h)
   const sessionToken = createSession(safeUser);
-  console.log(`[Auth] Login OK → ${user.email} (${user.rol}) | Token: ${sessionToken.substring(0, 16)}... | Sesiones activas: ${sessions.size}`);
+  console.log(`[Login] RESULTADO: EXITOSO → ${user.email} (${user.rol}) | Token: ${sessionToken.substring(0, 16)}... | Sesiones activas: ${sessions.size}`);
+  console.log(`[Login] ──────── FIN (OK) ────────`);
 
   res.json({ success: true, user: safeUser, localToken: sessionToken, message: "Autenticación exitosa" });
 });
