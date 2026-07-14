@@ -111,7 +111,12 @@ function calculatePrizeMultiplier(juego: string, sorteo: string): number {
   return 80;
 }
 
-const PORT = parseInt(process.env.PORT || "3000", 10);
+const PORT = parseInt(process.env.PORT || "8080", 10);
+
+// ─── HEALTH CHECK: responde ANTES de todo middleware ─────────────────
+app.get("/health", (_req, res) => {
+  res.status(200).send("OK");
+});
 
 // ─── CORS: abierto para diagnosticar el bloqueo POST ────────────────
 app.use(cors({
@@ -2309,41 +2314,46 @@ app.post("/api/pagos/registrar", requireAdmin, (req, res) => {
   res.json({ success: true, pago: nuevoPago });
 });
 
-// Mounting Vite middleware in development
-async function startServer() {
-  // Sync state from Firestore on boot
-  await syncFromFirestore();
-
+// ─── STARTUP: listen FIRST, sync Firestore in background ───────────
+function startServer() {
   if (process.env.NODE_ENV !== "production") {
     // Dynamic import so Vite is NOT bundled into the production build
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
+    import("vite").then(({ createServer: createViteServer }) => {
+      createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      }).then((vite) => {
+        app.use(vite.middlewares);
+        registerCatchAllRoutes();
+        listen();
+      });
     });
-    app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    registerCatchAllRoutes();
+    listen();
+  }
+}
 
-    // Asegurar que Express sirva los assets estáticos con el tipo MIME correcto
+function registerCatchAllRoutes() {
+  const distPath = path.join(process.cwd(), "dist");
+
+  if (process.env.NODE_ENV === "production") {
     app.use(express.static(distPath));
     app.use('/assets', express.static(path.join(distPath, "assets")));
-
-    // IMPORTANTE: Si un asset no existe, devolver 404, NO el index.html
-    app.use('/assets', (req, res) => {
-      res.status(404).send('Asset no encontrado');
-    });
-
-    // Ruta comodín al final para el enrutamiento de la SPA
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    app.use('/assets', (_req, res) => { res.status(404).send('Asset no encontrado'); });
+    app.get("*", (_req, res) => { res.sendFile(path.join(distPath, "index.html")); });
   }
+}
 
+function listen() {
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Express API] Servidor corriendo exitosamente en el puerto ${PORT}`);
-    console.log(`[Auth Debug] sessions Map ID: ${Math.random().toString(36).substring(7)} | Sesiones iniciales: ${sessions.size}`);
-    console.log(`[Auth Debug] Si ves 401, verifica: 1) localStorage.localToken existe, 2) Header Authorization: Bearer <token>, 3) Token coincide con el log de Login OK`);
+    console.log(`[Express API] Servidor escuchando en puerto ${PORT} — listo para recibir tráfico`);
+    // Sync Firestore en background — NO bloquea el arranque
+    syncFromFirestore().then(() => {
+      console.log(`[Express API] Firestore sincronizado. Usuarios en memoria: ${db.usuarios.length}`);
+    }).catch((err) => {
+      console.error(`[Express API] Error sincronizando Firestore:`, err.message);
+    });
   });
 }
 
