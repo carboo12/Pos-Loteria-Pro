@@ -135,9 +135,59 @@ function getLocalDateString(date = new Date()): string {
 }
 
 
+// ─── SERVER DATA INTERFACES ────────────────────────────────────────────
+interface ServerSorteo {
+  id: string;
+  juego: string;
+  hora_sorteo: string;
+  hora_cierre: string;
+  nombre: string;
+  dias_habilitados?: number[];
+}
+
+interface ServerConfiguracion {
+  tasa_cambio: number;
+  contador_global_tickets: number;
+  formato_ticket: any;
+  sorteos: ServerSorteo[];
+  limites_numeros: any[];
+  resultados: any[];
+  cobros: any[];
+  ingresos?: any[];
+  pagos_comision?: any[];
+}
+
+interface ServerUsuario {
+  id: string;
+  requiereCambioPassword: boolean;
+  nombre: string;
+  usuario: string;
+  rol: string;
+  estado: string;
+  conexion: string;
+  activo: boolean;
+  region: string;
+  email: string;
+  id_supervisor: string;
+  vendedoresAsignados: any[];
+  password?: string;
+  configuracion?: ServerConfiguracion;
+}
+
+interface ServerDB {
+  usuarios: ServerUsuario[];
+  configuracion: ServerConfiguracion;
+  ventas: any[];
+  cierres_caja: any[];
+  resumenes_diarios: any[];
+  cobros_admin: any[];
+  pagos_comision: any[];
+  fcm_tokens: string[];
+}
+
 // In-memory defaults — all persistence is in Firestore. No local file I/O.
-function initDatabase() {
-  const initialDB = {
+function initDatabase(): ServerDB {
+  const initialDB: ServerDB = {
     usuarios: [
       {
         id: "admin_1",
@@ -190,18 +240,19 @@ function initDatabase() {
     cierres_caja: [],
     resumenes_diarios: [],
     cobros_admin: [],
-    pagos_comision: []
+    pagos_comision: [],
+    fcm_tokens: []
   };
 
   return initialDB;
 }
 
-let db = initDatabase();
+let db: ServerDB = initDatabase();
 // Ensure dynamic backward compatibility
-db.fcm_tokens = db.fcm_tokens || [];
 db.resumenes_diarios = db.resumenes_diarios || [];
 db.cobros_admin = db.cobros_admin || [];
 db.pagos_comision = db.pagos_comision || [];
+db.fcm_tokens = db.fcm_tokens || [];
 
 async function saveToDB() {
   const isReady = initFirebaseAdmin();
@@ -250,7 +301,7 @@ async function syncFromFirestore() {
     const fetchPromise = (async () => {
       const configDoc = await firestoreDb.collection("configuracion").doc("general").get();
       if (configDoc.exists) {
-        db.configuracion = configDoc.data();
+        db.configuracion = configDoc.data() as ServerConfiguracion;
         console.log("[Firestore Sync] Configuración cargada desde Firestore.");
       } else {
         console.log("[Firestore Sync] Guardando configuración predeterminada en Firestore...");
@@ -675,7 +726,7 @@ app.post("/api/auth/register", requireAdmin, async (req, res) => {
 
     const resolvedRol = rol === "admin" || rol === "administrador" ? "administrador" : (rol === "supervisor" ? "supervisor" : "vendedor");
 
-    const newUser = {
+    const newUser: ServerUsuario = {
       id,
       nombre: nombre.trim(),
       usuario: usernameLower,
@@ -687,7 +738,8 @@ app.post("/api/auth/register", requireAdmin, async (req, res) => {
       activo: true,
       region: region || "Nicaragua" as const,
       id_supervisor: id_supervisor || "",
-      vendedoresAsignados: []
+      vendedoresAsignados: [],
+      requiereCambioPassword: true
     };
 
     db.usuarios.push(newUser);
@@ -798,7 +850,8 @@ app.post("/api/setup-admin", async (req, res) => {
       email: adminEmail,
       id_supervisor: "",
       vendedoresAsignados: [],
-      password: bcrypt.hashSync(adminPassword, 10)
+      password: bcrypt.hashSync(adminPassword, 10),
+      requiereCambioPassword: true
     };
     db.usuarios.push(userInDb);
     saveToDB();
@@ -844,7 +897,7 @@ app.post("/api/usuarios", requireAdmin, (req, res) => {
   const resolvedRol = rol === "admin" || rol === "administrador" ? "administrador" : (rol === "supervisor" ? "supervisor" : "vendedor");
   const isActivo = estado !== "inactivo";
 
-  const newUser = {
+  const newUser: ServerUsuario = {
     id,
     nombre: nombre.trim(),
     usuario: usernameLower,
@@ -856,7 +909,8 @@ app.post("/api/usuarios", requireAdmin, (req, res) => {
     activo: isActivo,
     region: region || "Nicaragua",
     id_supervisor: id_supervisor || "",
-    vendedoresAsignados: (resolvedRol === "supervisor" && Array.isArray(vendedoresAsignados)) ? vendedoresAsignados : []
+    vendedoresAsignados: (resolvedRol === "supervisor" && Array.isArray(vendedoresAsignados)) ? vendedoresAsignados : [],
+    requiereCambioPassword: true
   };
 
   if (newUser.password) { newUser.password = bcrypt.hashSync(newUser.password, 10); }
