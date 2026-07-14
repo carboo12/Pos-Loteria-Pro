@@ -106,8 +106,8 @@ const qrCode = (text: string): number[] => {
   cmds.push(0x1D, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00);
   // 2. Set module size (size 6)
   cmds.push(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, 0x06);
-  // 3. Set error correction level M (0x31)
-  cmds.push(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x31);
+  // 3. Set error correction level L (0x30 = lowest, fewer modules, faster scan)
+  cmds.push(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x30);
   // 4. Store data
   cmds.push(0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30);
   cmds.push(...dataBytes);
@@ -350,7 +350,7 @@ export function ticketDataFromVenta(venta: Venta, config: Configuracion): Ticket
   const numTicket = venta.numero_ticket || venta.id.substring(0, 7).toUpperCase();
 
   return {
-    negocio: sanitizeText(config.formato_ticket?.titulo || "LA NUEVA ERA"),
+    negocio: sanitizeText(config.formato_ticket?.titulo || ""),
     ruc: sanitizeText(config.formato_ticket?.ruc || ""),
     direccion: undefined,
     numero_ticket: numTicket,

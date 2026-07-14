@@ -183,8 +183,6 @@ ${config.formato_ticket.mensaje_pie}
     let t = "";
     // Cabecera con logo e información principal de RawBT centrado
     t += "[C]<img>" + window.location.origin + "/logo_print_bw.png</img>\n";
-    t += "[C]<b>LA NUEVA ERA</b>\n";
-    t += "[C]pida su linea\n";
     t += "[C]--------------------------------\n";
     
     // Información del ticket
@@ -221,7 +219,7 @@ ${config.formato_ticket.mensaje_pie}
     t += "[C]--------------------------------\n";
     
     // Código QR nativo de RawBT con sintaxis <qrcode>
-    t += `\n[C]<qrcode size='8'>${window.location.origin}/verificar?ticket=${ticket.numero_ticket}&firma=${ticket.firma_digital}</qrcode>\n`;
+    t += `\n[C]<qrcode size='8'>${ticket.numero_ticket || ticket.id}</qrcode>\n`;
     
     t += "[C]ESTADO DEL TICKET\n";
     
@@ -450,9 +448,9 @@ ${config.formato_ticket.mensaje_pie}
             <div className="mt-4 flex flex-col items-center border-t-2 border-black border-dotted pt-3 space-y-3">
               <div className="flex flex-col items-center p-2 bg-white border-2 border-black">
                 <QRCodeSVG 
-                  value={`${window.location.origin}/verificar?ticket=${ticket.numero_ticket}&firma=${ticket.firma_digital}`}
+                  value={ticket.numero_ticket || ticket.id}
                   size={100}
-                  level="M"
+                  level="L"
                   bgColor="#ffffff"
                   fgColor="#000000"
                 />

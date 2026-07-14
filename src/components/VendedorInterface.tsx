@@ -1193,6 +1193,7 @@ export default function VendedorInterface({
         body: JSON.stringify({
           juego: selectedJuego,
           sorteo: selectedSorteo,
+          id_sorteo: config?.sorteos?.find(s => s.nombre === selectedSorteo && s.juego === selectedJuego)?.id || "",
           numero_jugado: jugadas[0].numero,
           monto_pago: totalMontoCs,
           moneda,

@@ -233,7 +233,7 @@ function initDatabase(): ServerDB {
       tasa_cambio: 36.50,
       contador_global_tickets: 1000,
       formato_ticket: {
-        titulo: "LA NUEVA ERA",
+        titulo: "",
         ruc: "exiga su ticket en su compra de su numero.",
         mensaje_pie: "¡Gracias por su compra! Verifique su ticket en línea."
       },
@@ -1537,7 +1537,7 @@ app.get("/api/ventas", (req, res) => {
 });
 
 app.post("/api/ventas", checkAuth(), async (req, res) => {
-  const { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente, premio_posible_cs, jugadas, fecha_venta } = req.body;
+  const { juego, sorteo, id_sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente, premio_posible_cs, jugadas, fecha_venta } = req.body;
 
   if (!juego || !sorteo || !numero_jugado || !monto_pago || !moneda || !id_vendedor) {
     console.log("Validación de venta fallida, detalles:", { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente });
@@ -1553,27 +1553,33 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     return res.status(403).json({ error: "Su cuenta de vendedor está inactiva. Comuníquese con el administrador." });
   }
 
-  // 2. Bloqueo por Tiempo de Sorteo (Server-Side Validation)
-  // Let's locate the selected draw schedule
-  const selectedSorteo = db.configuracion.sorteos.find((s: any) => s.nombre === sorteo && s.juego === juego);
+  // 2. Bloqueo por Tiempo de Sorteo (Server-Side Validation — PER-SORTEO by ID)
+  // Primary match: by unique sorteo ID. Fallback: by nombre+juego for backward compat.
+  const selectedSorteo = id_sorteo
+    ? db.configuracion.sorteos.find((s: any) => s.id === id_sorteo)
+    : db.configuracion.sorteos.find((s: any) => s.nombre === sorteo && s.juego === juego);
   const now = new Date();
 
-  if (selectedSorteo) {
-    const [cierreHour, cierreMin] = selectedSorteo.hora_cierre.split(":").map(Number);
-    const [sorteoHour, sorteoMin] = selectedSorteo.hora_sorteo.split(":").map(Number);
+  if (!selectedSorteo) {
+    return res.status(400).json({
+      error: `VENTA RECHAZADA: No se encontró el sorteo "${sorteo}" (id: ${id_sorteo || "N/A"}) en la configuración del servidor.`
+    });
+  }
 
-    // We convert current server clock time to compare hours/minutes
+  {
+    const [cierreHour, cierreMin] = selectedSorteo.hora_cierre.split(":").map(Number);
+
+    // Server-side clock compared ONLY against this specific sorteo's hora_cierre
     const currentHour = now.getHours();
     const currentMin = now.getMinutes();
-    const currentSec = now.getSeconds();
 
-    // Check if we are past the draw closure time for TODAY'S draw
+    // Check if we are past the draw closure time for THIS sorteo
     const isPastCierre = (currentHour > cierreHour) || (currentHour === cierreHour && currentMin >= cierreMin);
 
     // If it's after closure, it is BLOCKED (anti-fraude)
     if (isPastCierre) {
       return res.status(400).json({
-        error: `VENTA RECHAZADA (ANTI-FRAUDE): El sorteo ${sorteo} cerró a las ${selectedSorteo.hora_cierre} (Hora Servidor: ${now.toLocaleTimeString("es-ES")}).`
+        error: `VENTA RECHAZADA (ANTI-FRAUDE): El sorteo ${selectedSorteo.nombre} cerró a las ${selectedSorteo.hora_cierre} (Hora Servidor: ${now.toLocaleTimeString("es-ES")}).`
       });
     }
 
@@ -1584,7 +1590,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
         const diasNames = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
         const diasStr = selectedSorteo.dias_habilitados.map((d: number) => diasNames[d]).join(", ");
         return res.status(400).json({
-          error: `VENTA RECHAZADA: El sorteo ${sorteo} solo está habilitado los días ${diasStr}.`
+          error: `VENTA RECHAZADA: El sorteo ${selectedSorteo.nombre} solo está habilitado los días ${diasStr}.`
         });
       }
     }
@@ -1745,7 +1751,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
         fecha_emision: serverTimeStr,
         fecha_venta: fecha_venta || "",
         id_juego: juego,
-        id_sorteo: sorteo,
+        id_sorteo: selectedSorteo?.id || id_sorteo || sorteo,
         juego_sorteo: `${juego} ${sorteo}`,
         jugadas: Array.isArray(jugadas) ? jugadas : [{ numero: numero_jugado, monto: Number(monto_pago) }],
         estado: "pendiente",
@@ -1789,6 +1795,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     fecha_venta: fecha_venta || "",
     juego,
     sorteo,
+    id_sorteo: selectedSorteo?.id || id_sorteo || "",
     numero_jugado,
     monto_pago: Number(monto_pago),
     moneda,
@@ -1844,9 +1851,11 @@ app.post("/api/ventas/:id/anular", checkAuth(), async (req, res) => {
     return res.status(400).json({ error: "Este ticket ya se encuentra anulado." });
   }
 
-  // If not admin, validate against hora_cierre
+  // If not admin, validate against hora_cierre (PER-SORTEO by ID)
   if (userRole !== "admin" && userRole !== "administrador") {
-    const selectedSorteo = db.configuracion.sorteos.find((s: any) => s.nombre === sale.sorteo && s.juego === sale.juego);
+    const selectedSorteo = sale.id_sorteo
+      ? db.configuracion.sorteos.find((s: any) => s.id === sale.id_sorteo)
+      : db.configuracion.sorteos.find((s: any) => s.nombre === sale.sorteo && s.juego === sale.juego);
     if (selectedSorteo) {
       const now = new Date();
       const [cierreHour, cierreMin] = selectedSorteo.hora_cierre.split(":").map(Number);
@@ -1857,7 +1866,7 @@ app.post("/api/ventas/:id/anular", checkAuth(), async (req, res) => {
 
       if (isPastCierre) {
         return res.status(400).json({
-          error: `VENTA BLOQUEADA: El sorteo ${sale.sorteo} ya cerró a las ${selectedSorteo.hora_cierre}. No se puede anular.`
+          error: `VENTA BLOQUEADA: El sorteo ${selectedSorteo.nombre} ya cerró a las ${selectedSorteo.hora_cierre}. No se puede anular.`
         });
       }
     }
