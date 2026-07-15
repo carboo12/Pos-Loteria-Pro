@@ -380,6 +380,20 @@ export function ticketDataFromVenta(venta: Venta, config: Configuracion): Ticket
   const origin = typeof window !== "undefined" ? window.location.origin : "https://loteria-pro.web.app";
   const numTicket = venta.numero_ticket || venta.id.substring(0, 7).toUpperCase();
 
+  const formatted = (() => {
+    const cleanJuego = venta.juego.trim().toUpperCase();
+    const cleanSorteo = (venta.sorteo || "").trim();
+    if (cleanJuego === "DIARIA" || cleanJuego === "LA DIARIA") {
+      if (cleanSorteo.includes("(SV)")) {
+        return { juego: "SALVADOREÑA", sorteo: "EL SALVADOR" };
+      }
+      if (cleanSorteo.includes("(HN)")) {
+        return { juego: "HONDUREÑA", sorteo: "HONDURAS" };
+      }
+    }
+    return { juego: venta.juego, sorteo: venta.sorteo };
+  })();
+
   return {
     negocio: sanitizeText(config.formato_ticket?.titulo || ""),
     ruc: sanitizeText(config.formato_ticket?.ruc || ""),
@@ -390,8 +404,8 @@ export function ticketDataFromVenta(venta: Venta, config: Configuracion): Ticket
       : formatTicketDate(getNicaraguaISOString())),
     vendedor: sanitizeText(venta.nombre_vendedor || ""),
     cliente: sanitizeText(venta.nombre_cliente || "GENERICO"),
-    juego: sanitizeText(venta.juego),
-    sorteo: sanitizeText(venta.sorteo),
+    juego: sanitizeText(formatted.juego),
+    sorteo: sanitizeText(formatted.sorteo),
     moneda: sanitizeText(venta.moneda),
     jugadas: finalJugadas,
     total_apostado: venta.monto_pago,
