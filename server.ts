@@ -2032,6 +2032,8 @@ app.post("/api/ventas/:id/pagar", requireAdmin, async (req, res) => {
 
       sale.estado = "pagado";
       sale.premio_posible_cs = premioReal; // Sobrescribir con el calculado por el servidor
+      sale.monto_premio = premioReal;
+      sale.es_premiado = true;
 
       // Direct Firestore write to tickets collection for real-time vendor notification
       if (initFirebaseAdmin()) {
@@ -2039,7 +2041,8 @@ app.post("/api/ventas/:id/pagar", requireAdmin, async (req, res) => {
           const firestoreDb = getFirestoreInstance();
           await firestoreDb.collection("tickets").doc(id).update({
             estado: "pagado",
-            monto_premio: premioReal
+            monto_premio: premioReal,
+            es_premiado: true
           });
           console.log(`[Pago] Ticket ${id} actualizado en Firestore (pagado)`);
         } catch (fireErr: any) {
@@ -2219,9 +2222,9 @@ app.post("/api/admin/backfill-resumenes", requireAdmin, (req, res) => {
       };
     }
 
-    groups[key].vendido += v.total_cs || 0;
+    groups[key].vendido += v.total_apostado || v.monto_pago || 0;
     if (v.estado === 'pagado') {
-      groups[key].pagado += v.monto_ganado_cs || 0;
+      groups[key].pagado += v.monto_premio || 0;
     }
   });
 
@@ -2326,10 +2329,10 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
       grouped[dateStr] = { vendido: 0, pagado: 0 };
     }
     if (v.estado !== 'anulado') {
-      grouped[dateStr].vendido += v.total_cs || 0;
+      grouped[dateStr].vendido += v.total_apostado || v.monto_pago || 0;
     }
     if (v.estado === 'pagado') {
-      grouped[dateStr].pagado += v.monto_ganado_cs || 0;
+      grouped[dateStr].pagado += v.monto_premio || 0;
     }
   });
 

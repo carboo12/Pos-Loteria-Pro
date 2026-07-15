@@ -697,7 +697,7 @@ export default function VendedorInterface({
     return reportTickets
       .filter(t => t.estado !== "anulado")
       .reduce((acc, t) => {
-        return acc + ((typeof t.monto_premio === "number" && t.es_premiado) ? t.monto_premio : getTicketTheoreticalPrize(t, config));
+        return acc + ((typeof t.monto_premio === "number" && t.monto_premio > 0) ? t.monto_premio : getTicketTheoreticalPrize(t, config));
       }, 0);
   }, [reportTickets]);
 
@@ -2034,13 +2034,13 @@ export default function VendedorInterface({
           // Calculate theoretical prizes (A Pagar) — prefer persisted monto_premio from escrutinio
           let aPagar = 0;
           rangeTickets.forEach(t => {
-            aPagar += (typeof t.monto_premio === "number" && t.es_premiado) ? t.monto_premio : getTicketTheoreticalPrize(t, config);
+            aPagar += (typeof t.monto_premio === "number" && t.monto_premio > 0) ? t.monto_premio : getTicketTheoreticalPrize(t, config);
           });
 
           // Calculate actually paid/cobrado prizes (Pagado)
           const pagado = rangeTickets
-            .filter(t => t.estado === "cobrado")
-            .reduce((sum, t) => sum + ((typeof t.monto_premio === "number" && t.es_premiado) ? t.monto_premio : getTicketTheoreticalPrize(t, config)), 0);
+            .filter(t => t.estado === "pagado")
+            .reduce((sum, t) => sum + ((typeof t.monto_premio === "number" && t.monto_premio > 0) ? t.monto_premio : getTicketTheoreticalPrize(t, config)), 0);
 
           // Calculate withdrawals made by supervisor (Cobro)
           const sellerCobros = (config.cobros || []).filter(c => {
@@ -2158,8 +2158,8 @@ export default function VendedorInterface({
                         draw = parts.slice(1).join(" ");
                       }
 
-                      const ticketPrize = (typeof t.monto_premio === "number" && t.es_premiado) ? t.monto_premio : getTicketTheoreticalPrize(t, config);
-                      const isWinner = t.es_premiado === true || ticketPrize > 0;
+                      const ticketPrize = (typeof t.monto_premio === "number" && t.monto_premio > 0) ? t.monto_premio : getTicketTheoreticalPrize(t, config);
+                      const isWinner = (typeof t.monto_premio === "number" && t.monto_premio > 0) || ticketPrize > 0;
 
                       return (
                         <div key={t.id} className={`bg-white rounded-xl p-4 shadow-sm border flex flex-col justify-between relative overflow-hidden ${isWinner && t.estado !== "anulado" ? "border-amber-400 bg-gradient-to-br from-amber-50/40 to-yellow-50/30 shadow-md shadow-amber-200/50" : "border-gray-200"} ${t.estado === "anulado" ? "opacity-60 bg-gray-50" : ""}`}>

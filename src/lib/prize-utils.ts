@@ -117,7 +117,7 @@ export function getTicketTheoreticalPrize(
   );
   if (!tDate) return 0;
 
-  const sObj = config.sorteos?.find((d) => d.nombre === draw && d.juego === game);
+  const sObj = config.sorteos?.find((d) => (d.nombre === draw && d.juego === game) || d.id === draw);
   const rObj = sObj
     ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
     : null;

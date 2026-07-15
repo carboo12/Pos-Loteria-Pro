@@ -456,13 +456,13 @@ export default function SupervisorInterface({
           totalAPagar += theoreticalPrize;
         }
         // Prefer persisted monto_premio from escrutinio (server-authoritative)
-        if (typeof s.monto_premio === "number" && s.es_premiado) {
+        if (typeof s.monto_premio === "number" && s.monto_premio > 0) {
           totalPremios += s.monto_premio;
         }
       });
       const pagado = sellerSales
         .filter(s => s.estado === 'pagado')
-        .reduce((sum, s) => sum + ((typeof s.monto_premio === "number" && s.es_premiado) ? s.monto_premio : getTicketTheoreticalPrize(s, config)), 0);
+        .reduce((sum, s) => sum + ((typeof s.monto_premio === "number" && s.monto_premio > 0) ? s.monto_premio : getTicketTheoreticalPrize(s, config)), 0);
       const sellerIngresos = ((config as any).ingresos || []).filter((i: any) => {
         const isSeller = i.id_vendedor === seller.id;
         const inRange = i.fecha >= reportFilterFechaInicio && i.fecha <= reportFilterFechaFin;

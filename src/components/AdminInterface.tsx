@@ -3233,7 +3233,7 @@ export default function AdminInterface({
                     // Pagado Real: suma de premios efectivamente pagados por este vendedor en el rango
                     const totalPagadoRealCs = sellerSales
                       .filter(s => s.estado === 'pagado')
-                      .reduce((sum, s) => sum + ((typeof s.monto_premio === "number" && s.es_premiado) ? s.monto_premio : getTicketTheoreticalPrize(s, config)), 0);
+                      .reduce((sum, s) => sum + ((typeof s.monto_premio === "number" && s.monto_premio > 0) ? s.monto_premio : getTicketTheoreticalPrize(s, config)), 0);
 
                     // Ingresos: inyecciones de caja del supervisor/administrador
                     const sellerIngresos = ((config as any).ingresos || []).filter((i: any) => {
