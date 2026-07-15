@@ -31,6 +31,7 @@ import { Usuario, Configuracion, Venta, Sorteo, Jugada } from "../types";
 import TicketPreviewModal from "./TicketPreviewModal";
 import { QrScannerModal } from "./QrScannerModal";
 import ResumenFacturacionCard from "./ResumenFacturacionCard";
+import FacturacionVendedorCard from "./FacturacionVendedorCard";
 import { useFacturacion } from "../hooks/useFacturacion";
 import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
@@ -140,6 +141,7 @@ export default function VendedorInterface({
     config,
     config.cobros || []
   );
+  const [showDetalleFacturacion, setShowDetalleFacturacion] = useState(false);
   
   // País state
   const [selectedPais, setSelectedPais] = useState<"Nicaragua" | "Honduras" | "El Salvador" | "La Primera" | "Costa Rica">("Nicaragua");
@@ -2107,6 +2109,48 @@ export default function VendedorInterface({
                 total={total}
               />
 
+              {/* Botón Detalle de Facturación */}
+              {factData && (
+                <button
+                  onClick={() => setShowDetalleFacturacion(true)}
+                  className="w-full py-3 bg-blue-900 hover:bg-blue-800 text-white rounded-2xl flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-md text-xs font-black uppercase tracking-wider"
+                >
+                  Ver Detalle de Facturación
+                </button>
+              )}
+
+              {/* Modal de Detalle */}
+              {showDetalleFacturacion && factData && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                  <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full max-h-[90vh] overflow-y-auto border border-gray-200">
+                    <div className="flex justify-between items-center p-4 border-b border-gray-100">
+                      <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider">Detalle de Facturación</h3>
+                      <button
+                        onClick={() => setShowDetalleFacturacion(false)}
+                        className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors text-gray-400 hover:text-gray-600 cursor-pointer"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                    <div className="p-4">
+                      <FacturacionVendedorCard
+                        nombreVendedor={factData.nombre}
+                        vendido={factData.vendido}
+                        pagado={factData.pagado}
+                        ingresos={factData.ingresos}
+                        totalAPagar={factData.aPagar}
+                        totalPremios={factData.totalPremios}
+                        cobrado={factData.cobrado}
+                        ganancia={factData.ganancia}
+                        total={factData.total}
+                      />
+                      <div className="text-center text-[10px] text-gray-400 mt-2 font-sans">
+                        Del {reportFilterFechaInicio} al {reportFilterFechaFin}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Lista de Boletos (UI Stitch) */}
               <div className="space-y-3">
