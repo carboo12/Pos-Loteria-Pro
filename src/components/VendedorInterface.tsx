@@ -2053,10 +2053,10 @@ export default function VendedorInterface({
           const [factData] = vendedorFacturacion;
           const { vendido: facturado, pagado, ingresos, aPagar, cobrado: cobro, total, ganancia } = factData || { vendido: 0, pagado: 0, ingresos: 0, aPagar: 0, cobrado: 0, total: 0, ganancia: 0 };
 
-          const rangeTicketCount = reportTickets.filter(t => {
+          const rangeTickets = reportTickets.filter(t => {
             const ticketDateStr = getTicketDate(t);
             return ticketDateStr >= reportFilterFechaInicio && ticketDateStr <= reportFilterFechaFin;
-          }).length;
+          });
 
           const formatCurrency = (val: number) => {
             return `C$ ${val.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -2111,7 +2111,7 @@ export default function VendedorInterface({
               {/* Lista de Boletos (UI Stitch) */}
               <div className="space-y-3">
                 <span className="block text-[10px] font-display font-black text-gray-500 uppercase tracking-wider">
-                  Boletos Emitidos ({rangeTicketCount})
+                  Boletos Emitidos ({rangeTickets.length})
                 </span>
                 
                 {reportLoading ? (
