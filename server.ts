@@ -1224,7 +1224,7 @@ async function escrutarTickets(id_sorteo: string, sorteoName: string, fecha: str
     for (const ticketDoc of ticketsSnap.docs) {
       const ticket = ticketDoc.data();
       if (ticket.estado === "anulado") continue;
-      if (ticket.id_sorteo !== sorteoName) continue;
+      if (ticket.id_sorteo !== id_sorteo) continue;
 
       scrutinized++;
       let ticketPrize = 0;

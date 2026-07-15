@@ -699,7 +699,7 @@ export default function VendedorInterface({
       .reduce((acc, t) => {
         return acc + ((typeof t.monto_premio === "number" && t.monto_premio > 0) ? t.monto_premio : getTicketTheoreticalPrize(t, config));
       }, 0);
-  }, [reportTickets]);
+  }, [reportTickets, config]);
 
   // Toast notification when totalAPagar transitions from 0 to >0
   const prevAPagarRef = useRef(0);
