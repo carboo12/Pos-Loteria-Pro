@@ -790,7 +790,6 @@ export default function SupervisorInterface({
                 pagado={ad.pagado}
                 ingresos={ad.ingresos}
                 totalAPagar={ad.aPagar}
-                totalPremios={ad.totalPremios}
                 cobrado={ad.cobrado}
                 ganancia={ad.ganancia}
                 total={ad.total}
