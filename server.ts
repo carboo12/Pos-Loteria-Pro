@@ -160,39 +160,58 @@ function getFirestoreInstance() {
 }
 
 function getLocalDateString(date = new Date()): string {
-  const offset = -6; // CST/GMT-6 for Nicaragua/Honduras
-  const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
-  const localDate = new Date(utc + (3600000 * offset));
-  const year = localDate.getFullYear();
-  const month = String(localDate.getMonth() + 1).padStart(2, "0");
-  const day = String(localDate.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  // Extract YYYY-MM-DD directly in Nicaragua timezone — no manual offset math
+  const fmt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "America/Managua",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(date); // "2026-07-14"
 }
 
 // ─── Nicaragua Timezone Helpers (UTC-6) ───────────────────────────────
 // All lottery operations use Nicaragua local time (America/Managua, UTC-6).
-// These helpers ensure getHours/getMinutes/getDay return NIC time regardless
-// of the server's system timezone (critical for App Hosting / Cloud Run).
+// Uses Intl.DateTimeFormat for robust timezone extraction — no manual offset math.
 
-const NICARAGUA_OFFSET_MS = -6 * 3600000; // -6 hours in milliseconds
-
-/** Returns a Date whose getHours()/getMinutes()/getDay() return Nicaragua local time. */
-function getNicaraguaNow(date = new Date()): Date {
-  const utcMs = date.getTime() + (date.getTimezoneOffset() * 60000);
-  return new Date(utcMs + NICARAGUA_OFFSET_MS);
+/**
+ * Returns an ISO-8601 string with -06:00 offset representing the current
+ * Nicaragua local time. Uses Intl.DateTimeFormat to extract the exact time
+ * in America/Managua regardless of the server's system timezone.
+ *
+ * Example output: "2026-07-14T19:30:00.000-06:00"
+ */
+function getNicaraguaISOString(date = new Date()): string {
+  const fmt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "America/Managua",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    fractionalSecondDigits: 3,
+  });
+  // sv-SE produces "2026-07-14 19:30:00,000" — replace space→T, comma→period, append offset
+  return fmt.format(date).replace(" ", "T").replace(",", ".") + "-06:00";
 }
 
-/** Returns an ISO-8601 string with -06:00 offset (e.g. 2024-01-15T14:43:00.000-06:00). */
-function getNicaraguaISOString(date = new Date()): string {
-  const nic = getNicaraguaNow(date);
-  const y = nic.getFullYear();
-  const m = String(nic.getMonth() + 1).padStart(2, "0");
-  const d = String(nic.getDate()).padStart(2, "0");
-  const hh = String(nic.getHours()).padStart(2, "0");
-  const mm = String(nic.getMinutes()).padStart(2, "0");
-  const ss = String(nic.getSeconds()).padStart(2, "0");
-  const ms = String(nic.getMilliseconds()).padStart(3, "0");
-  return `${y}-${m}-${d}T${hh}:${mm}:${ss}.${ms}-06:00`;
+/**
+ * Returns a Date whose getHours()/getMinutes()/getDay() return Nicaragua local time.
+ * Derived from getNicaraguaISOString() for consistency.
+ */
+function getNicaraguaNow(date = new Date()): Date {
+  const iso = getNicaraguaISOString(date);
+  // Parse the time parts directly to avoid double-offset issues
+  const match = iso.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+  if (match) {
+    return new Date(
+      parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]),
+      parseInt(match[4]), parseInt(match[5]), parseInt(match[6])
+    );
+  }
+  // Fallback: should never happen
+  return new Date(date);
 }
 
 

@@ -77,35 +77,45 @@ export function getTicketAmount(ticket: { total_apostado?: number; monto_pago?: 
   return (ticket.total_apostado ?? ticket.monto_pago ?? 0) as number;
 }
 
-/** Returns today's YYYY-MM-DD in the browser's local timezone. */
+/** Returns today's YYYY-MM-DD in the Nicaragua timezone. */
 export function getLocalTodayStr(): string {
-  return localDateStr(new Date());
+  return localDateStr(getNicaraguaNow());
 }
 
 /**
  * Returns an ISO-8601 string with -06:00 offset (Nicaragua timezone).
- * Client-side equivalent of server.ts getNicaraguaISOString().
- * Use this instead of new Date().toISOString() for Firestore writes.
+ * Uses Intl.DateTimeFormat to extract the exact time in America/Managua
+ * regardless of the browser's timezone. No manual offset math.
  */
 export function getNicaraguaISOString(date: Date = new Date()): string {
-  const nic = getNicaraguaNow(date);
-  const y = nic.getFullYear();
-  const m = String(nic.getMonth() + 1).padStart(2, "0");
-  const d = String(nic.getDate()).padStart(2, "0");
-  const hh = String(nic.getHours()).padStart(2, "0");
-  const mm = String(nic.getMinutes()).padStart(2, "0");
-  const ss = String(nic.getSeconds()).padStart(2, "0");
-  const ms = String(nic.getMilliseconds()).padStart(3, "0");
-  return `${y}-${m}-${d}T${hh}:${mm}:${ss}.${ms}-06:00`;
+  const fmt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "America/Managua",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    fractionalSecondDigits: 3,
+  });
+  // sv-SE produces "2026-07-14 19:30:00,000" — replace space→T, comma→period, append offset
+  return fmt.format(date).replace(" ", "T").replace(",", ".") + "-06:00";
 }
 
 /**
  * Returns a Date whose getHours()/getMinutes()/getDay() return Nicaragua local time.
- * Client-side equivalent of server.ts getNicaraguaNow().
+ * Derived from getNicaraguaISOString() for consistency.
  */
-function getNicaraguaNow(date: Date = new Date()): Date {
-  const utcMs = date.getTime() + (date.getTimezoneOffset() * 60000);
-  return new Date(utcMs + (-6 * 3600000));
+export function getNicaraguaNow(date: Date = new Date()): Date {
+  const iso = getNicaraguaISOString(date);
+  const match = iso.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+  if (match) {
+    return new Date(
+      parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]),
+      parseInt(match[4]), parseInt(match[5]), parseInt(match[6])
+    );
+  }
+  return date;
 }
 
 /**

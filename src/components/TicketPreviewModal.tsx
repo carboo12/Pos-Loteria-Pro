@@ -3,7 +3,7 @@ import { useState, useRef, useCallback } from "react";
 import { toBlob } from "html-to-image";
 
 import { Venta, Configuracion } from "../types";
-import { toDateStr, parseISOTimeParts } from "../lib/date-utils";
+import { toDateStr, parseISOTimeParts, getNicaraguaNow } from "../lib/date-utils";
 import { calculatePrizeMultiplier } from "../lib/prize-utils";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -78,27 +78,26 @@ export default function TicketPreviewModal({ ticket, config, onClose, userRole =
   const [sharing, setSharing] = useState(false);
   const ticketRenderRef = useRef<HTMLDivElement>(null);
 
-  // Compute server-synced reference time for draw close check
-  const syncedNow = (() => {
+  // Compute current time in Nicaragua timezone for draw close check
+  const nicNow = (() => {
     if (serverTime) {
-      const serverMs = new Date(serverTime).getTime();
-      if (!isNaN(serverMs)) {
-        // Apply the offset between server and local clock at mount time
-        const offset = serverMs - Date.now();
-        return new Date(Date.now() + offset);
+      // Parse the time parts directly from the server ISO string (timezone-independent)
+      const parts = parseISOTimeParts(serverTime);
+      if (parts.hours !== 0 || parts.minutes !== 0) {
+        return { hours: parts.hours, minutes: parts.minutes };
       }
     }
-    return new Date();
+    // Fallback: use Nicaragua timezone via Intl
+    const d = getNicaraguaNow();
+    return { hours: d.getHours(), minutes: d.getMinutes() };
   })();
 
   const isBlocked = (() => {
     if (userRole === "admin" || userRole === "administrador") return false;
     const s = config.sorteos?.find(x => x.nombre === ticket.sorteo && x.juego === ticket.juego);
-    if (!s) return false; // Falback if draw not found
+    if (!s) return false; // Fallback if draw not found
     const [cierreHour, cierreMin] = s.hora_cierre.split(":").map(Number);
-    const currentHour = syncedNow.getHours();
-    const currentMin = syncedNow.getMinutes();
-    return (currentHour > cierreHour) || (currentHour === cierreHour && currentMin >= cierreMin);
+    return (nicNow.hours > cierreHour) || (nicNow.hours === cierreHour && nicNow.minutes >= cierreMin);
   })();
 
   const multiplier = calculatePrizeMultiplier(ticket.juego, ticket.sorteo);

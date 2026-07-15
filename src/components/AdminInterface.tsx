@@ -38,7 +38,7 @@ import {
   EyeOff
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
-import { toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr, getNicaraguaISOString } from "../lib/date-utils";
+import { toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr, getNicaraguaISOString, parseISOTimeParts } from "../lib/date-utils";
 import { calculatePrizeMultiplier, getTicketTheoreticalPrize } from "../lib/prize-utils";
 import { createPortal } from "react-dom";
 import { jsPDF } from "jspdf";
@@ -75,7 +75,7 @@ const formatTo12Hour = (time24: string): string => {
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
     const isoStr = typeof dateInput === "string" ? dateInput : 
-                   dateInput instanceof Date ? dateInput.toISOString() : String(dateInput);
+                   dateInput instanceof Date ? getNicaraguaISOString(dateInput) : String(dateInput);
     
     // For ISO strings from server (with -06:00 offset), parse directly to avoid timezone drift
     if (typeof isoStr === "string" && isoStr.includes("T")) {
@@ -678,11 +678,7 @@ export default function AdminInterface({
 
   // Helper to format Date as YYYY-MM-DD
   const getTodayString = () => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
+    return getLocalTodayStr();
   };
 
   // Aggregated sales by hour for the current day
@@ -693,8 +689,8 @@ export default function AdminInterface({
     const hourStr = String(i).padStart(2, "0");
     const hourSales = todaySales.filter(s => {
       try {
-        const dateObj = new Date(s.timestamp_servidor);
-        return dateObj.getHours() === i;
+        const { hours } = parseISOTimeParts(s.timestamp_servidor);
+        return hours === i;
       } catch (e) {
         return false;
       }
@@ -762,9 +758,11 @@ export default function AdminInterface({
       y += 1;
       drawSeparator("=");
       
-      const now = new Date();
-      printRow("FECHA REPORTE:", now.toLocaleDateString("es-ES"), 8, true);
-      printRow("HORA:", formatTo12HourTime(now), 8, false);
+      const nowNic = getNicaraguaISOString();
+      const nicParts = parseISOTimeParts(nowNic);
+      const printDate = `${String(nicParts.day).padStart(2,"0")}/${String(nicParts.month).padStart(2,"0")}/${nicParts.year}`;
+      printRow("FECHA REPORTE:", printDate, 8, true);
+      printRow("HORA:", formatTo12HourTime(nowNic), 8, false);
       printRow("TASA CAMBIO:", `C$ ${config.tasa_cambio.toFixed(2)}`, 8, false);
       printRow("GENERADO POR:", user.nombre.substring(0, 18).toUpperCase(), 8, false);
       drawSeparator("-");

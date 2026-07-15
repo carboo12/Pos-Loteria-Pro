@@ -37,13 +37,13 @@ import { firestore } from "../lib/firebase";
 import { BluetoothPrinterService, PrinterStatus } from "../services/BluetoothPrinterService";
 import { buildTicketBuffer, ticketDataFromVenta, loadLogoBitmap } from "../services/escpos-builder";
 import { isSorteoHabilitado, getDiasHabilitadosShortLabel, isDateValidForSorteo, getNextValidDate } from "../lib/sorteo-utils";
-import { toDateSafe, toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr, getNicaraguaISOString } from "../lib/date-utils";
+import { toDateSafe, toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr, getNicaraguaISOString, getNicaraguaNow } from "../lib/date-utils";
 import { calculatePrizeMultiplier, getTicketTheoreticalPrize } from "../lib/prize-utils";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
     const isoStr = typeof dateInput === "string" ? dateInput : 
-                   dateInput instanceof Date ? dateInput.toISOString() : String(dateInput);
+                   dateInput instanceof Date ? getNicaraguaISOString(dateInput) : String(dateInput);
     
     // For ISO strings from server (with -06:00 offset), parse directly to avoid timezone drift
     if (typeof isoStr === "string" && isoStr.includes("T")) {
@@ -145,8 +145,8 @@ export default function VendedorInterface({
   const [moneda, setMoneda] = useState<"C$" | "USD">("C$");
   const [nombreCliente, setNombreCliente] = useState("Genérico");
   const [fechaVenta, setFechaVenta] = useState<{ dia: string; mes: string; anio: number }>(() => {
-    const now = new Date();
-    return { dia: String(now.getDate()).padStart(2, "0"), mes: MESES[now.getMonth()], anio: now.getFullYear() };
+    const nicNow = getNicaraguaNow();
+    return { dia: String(nicNow.getDate()).padStart(2, "0"), mes: MESES[nicNow.getMonth()], anio: nicNow.getFullYear() };
   });
   
   // Connection state
@@ -323,19 +323,39 @@ export default function VendedorInterface({
     const multiplier = calculatePrizeMultiplier(selectedJuego, selectedSorteo);
     const montoInCs = moneda === "USD" ? numericAmount * (config.tasa_cambio || 36.50) : numericAmount;
     const premioPosibleCs = montoInCs * multiplier;
+    const fechaVenta = fechaVentaToDateStr(fechaVenta);
 
-    const nuevaJugada = {
-      numero: numeroJugado,
-      monto: numericAmount,
-      premio_posible: premioPosibleCs,
-      fecha_venta: fechaVentaToDateStr(fechaVenta)
-    };
+    // Group identical numbers: if same number already in cart, sum monto and recalculate prize
+    const existingIndex = jugadas.findIndex(
+      (j) => j.numero === numeroJugado && j.fecha_venta === fechaVenta
+    );
 
-    setJugadas([...jugadas, nuevaJugada]);
+    if (existingIndex > -1) {
+      const updated = [...jugadas];
+      const existing = updated[existingIndex];
+      const newMonto = existing.monto + numericAmount;
+      const newMontoInCs = moneda === "USD" ? newMonto * (config.tasa_cambio || 36.50) : newMonto;
+      updated[existingIndex] = {
+        ...existing,
+        monto: newMonto,
+        premio_posible: newMontoInCs * multiplier,
+      };
+      setJugadas(updated);
+      toast.success(`Número ${numeroJugado} actualizado: C$ ${newMonto.toFixed(2)}`, { position: 'top-center' });
+    } else {
+      const nuevaJugada = {
+        numero: numeroJugado,
+        monto: numericAmount,
+        premio_posible: premioPosibleCs,
+        fecha_venta,
+      };
+      setJugadas([...jugadas, nuevaJugada]);
+      toast.success("¡Número añadido con éxito!", { position: 'top-center' });
+    }
+
     setNumeroJugado("");
     setMontoPago("");
     setActiveField("numero");
-    toast.success("¡Número añadido con éxito!", { position: 'top-center' });
     setTimeout(() => numeroInputRef.current?.focus(), 0);
   };
 
@@ -346,8 +366,8 @@ export default function VendedorInterface({
   const clearForm = () => {
     setNumeroJugado("");
     setMontoPago("");
-    const now = new Date();
-    setFechaVenta({ dia: String(now.getDate()).padStart(2, "0"), mes: MESES[now.getMonth()], anio: now.getFullYear() });
+    const nicNow = getNicaraguaNow();
+    setFechaVenta({ dia: String(nicNow.getDate()).padStart(2, "0"), mes: MESES[nicNow.getMonth()], anio: nicNow.getFullYear() });
     setErrorMessage(null);
     setSuccessMessage(null);
     setActiveField("numero");
@@ -674,7 +694,6 @@ export default function VendedorInterface({
 
   // Reactive "A Pagar" total computed from real-time ticket data
   const liveAPagar = useMemo(() => {
-    const now = new Date();
     return reportTickets
       .filter(t => t.estado !== "anulado")
       .reduce((acc, t) => {
@@ -940,15 +959,15 @@ export default function VendedorInterface({
     // Reset fecha to valid date for the selected sorteo
     const newActiveDraw = getSorteosByGame(selectedJuego).find(s => !isSorteoCerrado(s)) || getSorteosByGame(selectedJuego)[0];
     if (newActiveDraw) {
-      setFechaVenta(parseDateStrToFechaVenta(getNextValidDate(newActiveDraw, new Date())));
+      setFechaVenta(parseDateStrToFechaVenta(getNextValidDate(newActiveDraw, getNicaraguaNow())));
     } else {
-      const now = new Date();
-      setFechaVenta({ dia: String(now.getDate()).padStart(2, "0"), mes: MESES[now.getMonth()], anio: now.getFullYear() });
+      const nicNow = getNicaraguaNow();
+      setFechaVenta({ dia: String(nicNow.getDate()).padStart(2, "0"), mes: MESES[nicNow.getMonth()], anio: nicNow.getFullYear() });
     }
     
     // Set default value for Fechas
     if (selectedJuego === "Fechas") {
-      const fechaStr = newActiveDraw ? getNextValidDate(newActiveDraw, new Date()) : getLocalTodayStr();
+      const fechaStr = newActiveDraw ? getNextValidDate(newActiveDraw, getNicaraguaNow()) : getLocalTodayStr();
       const d = new Date(fechaStr + "T12:00:00");
       const diaF = String(d.getDate()).padStart(2, "0");
       setNumeroJugado(`${diaF}-${MESES[d.getMonth()]}`);
@@ -2248,7 +2267,7 @@ export default function VendedorInterface({
                                 const tempVenta: Venta = {
                                   id: t.id,
                                   numero_ticket: t.numero_ticket || t.id_ticket || t.id.substring(0, 7).toUpperCase(),
-                                  timestamp_servidor: t.fecha_emision_date ? t.fecha_emision_date.toISOString() : new Date().toISOString(),
+                                  timestamp_servidor: t.fecha_emision_date ? t.fecha_emision_date.toISOString() : getNicaraguaISOString(),
                                   juego: game,
                                   sorteo: draw,
                                   numero_jugado: t.jugadas && t.jugadas[0] ? t.jugadas[0].numero : (t.numero_jugado || "?"),

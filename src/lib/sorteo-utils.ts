@@ -1,4 +1,5 @@
 import { Sorteo } from "../types";
+import { getNicaraguaNow } from "./date-utils";
 
 const DIA_NAMES = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
@@ -8,7 +9,7 @@ const DIA_NAMES = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Vierne
  */
 export function isSorteoHabilitado(sorteo: Sorteo, date?: Date): boolean {
   if (!sorteo.dias_habilitados || sorteo.dias_habilitados.length === 0) return true;
-  const dayOfWeek = (date || new Date()).getDay(); // 0=Sun..6=Sat
+  const dayOfWeek = (date || getNicaraguaNow()).getDay(); // 0=Sun..6=Sat
   return sorteo.dias_habilitados.includes(dayOfWeek);
 }
 
@@ -26,7 +27,7 @@ export function isDateValidForSorteo(sorteo: Sorteo, dateStr: string): boolean {
  * If `from` itself is valid, returns it.
  */
 export function getNextValidDate(sorteo: Sorteo, from?: Date): string {
-  const base = from || new Date();
+  const base = from || getNicaraguaNow();
   const d = new Date(base);
   for (let i = 0; i < 8; i++) {
     const yyyy = d.getFullYear();

@@ -26,7 +26,7 @@ import {
   WifiOff
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, CobroVendedor } from "../types";
-import { toDateStr, getTicketDate, getLocalTodayStr } from "../lib/date-utils";
+import { toDateStr, getTicketDate, getLocalTodayStr, getNicaraguaISOString, getNicaraguaNow } from "../lib/date-utils";
 import { getTicketTheoreticalPrize } from "../lib/prize-utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
@@ -37,7 +37,7 @@ import ResumenFacturacionCard from "./ResumenFacturacionCard";
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
     const isoStr = typeof dateInput === "string" ? dateInput : 
-                   dateInput instanceof Date ? dateInput.toISOString() : String(dateInput);
+                   dateInput instanceof Date ? getNicaraguaISOString(dateInput) : String(dateInput);
     
     // For ISO strings from server (with -06:00 offset), parse directly to avoid timezone drift
     if (typeof isoStr === "string" && isoStr.includes("T")) {
@@ -116,7 +116,7 @@ export default function SupervisorInterface({
   const [showFilters, setShowFilters] = useState(false);
   const [selectedVendedorFilter, setSelectedVendedorFilter] = useState("TODOS");
   const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => {
-    const d = new Date();
+    const d = getNicaraguaNow();
     d.setDate(d.getDate() - 7);
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
