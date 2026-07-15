@@ -7,6 +7,26 @@ import { toDateStr, parseISOTimeParts, getNicaraguaNow } from "../lib/date-utils
 import { calculatePrizeMultiplier } from "../lib/prize-utils";
 import { QRCodeSVG } from "qrcode.react";
 
+const MESES_ABREV: Record<string, string> = {
+  "ENERO": "ENE", "FEBRERO": "FEB", "MARZO": "MAR",
+  "ABRIL": "ABR", "MAYO": "MAY", "JUNIO": "JUN",
+  "JULIO": "JUL", "AGOSTO": "AGO", "SEPTIEMBRE": "SEP",
+  "OCTUBRE": "OCT", "NOVIEMBRE": "NOV", "DICIEMBRE": "DIC",
+};
+
+const abrevMes = (nombreCompleto: string): string => {
+  return MESES_ABREV[nombreCompleto.toUpperCase()] || nombreCompleto.substring(0, 3);
+};
+
+const MESES_PATTERN = new RegExp(
+  `(\\d+)[-\\s]?(Enero|Febrero|Marzo|Abril|Mayo|Junio|Julio|Agosto|Septiembre|Octubre|Noviembre|Diciembre)`,
+  "gi"
+);
+
+const abrevMesEnNumero = (numero: string): string => {
+  return numero.replace(MESES_PATTERN, (_, dia, mes) => `${dia}-${abrevMes(mes)}`);
+};
+
 
 /**
  * Safe helper to parse a time string (can be "11:00 AM", "3:00 PM", "15:00", "11:00")
@@ -130,9 +150,13 @@ export default function TicketPreviewModal({ ticket, config, onClose, userRole =
   };
 
   // Determine jugadas list (fallback to single legacy field)
-  const jugadasList = ticket.jugadas && ticket.jugadas.length > 0
+  const jugadasList = (ticket.jugadas && ticket.jugadas.length > 0
     ? ticket.jugadas
-    : [{ numero: ticket.numero_jugado || 'N/A', monto: ticket.monto_pago || 0, premio_posible: potentialPrizeCs }];
+    : [{ numero: ticket.numero_jugado || 'N/A', monto: ticket.monto_pago || 0, premio_posible: potentialPrizeCs }]
+  ).map(j => ({
+    ...j,
+    numero: ticket.juego.trim() === "Fechas" && j.numero ? abrevMesEnNumero(j.numero) : j.numero
+  }));
 
   const padRight = (s: string, len: number) => s.length >= len ? s.substring(0, len) : s + " ".repeat(len - s.length);
   const padLeft = (s: string, len: number) => s.length >= len ? s.substring(0, len) : " ".repeat(len - s.length) + s;
@@ -192,9 +216,7 @@ ${config.formato_ticket.mensaje_pie}
     t += "[L]<b>NUM.</b>[C]<b>MONTO</b>[R]<b>PREMIO</b>\n";
     t += "[C]--------------------------------\n";
 
-    const jugadas = ticket.jugadas && ticket.jugadas.length > 0
-      ? ticket.jugadas
-      : [{ numero: ticket.numero_jugado || 'N/A', monto: ticket.monto_pago || 0, premio_posible: potentialPrizeCs }];
+    const jugadas = jugadasList;
 
     // Filas alineadas por columnas
     jugadas.forEach((j: any) => {
@@ -383,9 +405,7 @@ ${config.formato_ticket.mensaje_pie}
               <div className="text-xs text-black font-bold mt-0.5 text-center">{ticket.sorteo}</div>
               
               {(() => {
-                const jugadas = ticket.jugadas && ticket.jugadas.length > 0
-                  ? ticket.jugadas
-                  : [{ numero: ticket.numero_jugado || 'N/A', monto: ticket.monto_pago || 0, premio_posible: potentialPrizeCs }];
+                const jugadas = jugadasList;
 
                 return (
                   <div className="mt-2 bg-transparent">

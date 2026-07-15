@@ -362,7 +362,7 @@ export function ticketDataFromVenta(venta: Venta, config: Configuracion): Ticket
     ? venta.jugadas.map((j) => {
       const amtInCs = venta.moneda === "USD" ? j.monto * (config.tasa_cambio || 36.50) : j.monto;
       return {
-        numero: j.numero,
+        numero: venta.juego.trim() === "Fechas" ? abrevMesEnNumero(j.numero) : j.numero,
         monto: j.monto,
         premio_posible: j.premio_posible || (amtInCs * multiplier)
       };
@@ -375,7 +375,7 @@ export function ticketDataFromVenta(venta: Venta, config: Configuracion): Ticket
 
   const finalJugadas = jugadasFromVenta.length > 0
     ? jugadasFromVenta
-    : [{ numero: venta.numero_jugado || "?", monto: venta.monto_pago || 0, premio_posible: potentialPrizeCs }];
+    : [{ numero: (venta.juego.trim() === "Fechas" && venta.numero_jugado) ? abrevMesEnNumero(venta.numero_jugado) : (venta.numero_jugado || "?"), monto: venta.monto_pago || 0, premio_posible: potentialPrizeCs }];
 
   const origin = typeof window !== "undefined" ? window.location.origin : "https://loteria-pro.web.app";
   const numTicket = venta.numero_ticket || venta.id.substring(0, 7).toUpperCase();
