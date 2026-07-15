@@ -1352,6 +1352,14 @@ app.post("/api/resultados", requireAdmin, async (req, res) => {
   db.configuracion.resultados.push(newResult);
   saveToDB();
 
+  // Sync to Firestore 'resultados' collection
+  try {
+    const firestoreDb = getFirestoreInstance();
+    await firestoreDb.collection("resultados").doc(newResult.id).set(newResult);
+  } catch (errSync) {
+    console.error("[Firestore Sync] Error al crear resultado en Firestore:", errSync);
+  }
+
   // Auto-trigger escrutinio after saving the result
   try {
     await escrutarTickets(id_sorteo, newResult.sorteo, fecha, numero_ganador);
@@ -1362,7 +1370,7 @@ app.post("/api/resultados", requireAdmin, async (req, res) => {
   res.status(201).json(newResult);
 });
 
-app.put("/api/resultados/:id", requireAdmin, (req, res) => {
+app.put("/api/resultados/:id", requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { id_sorteo, fecha, numero_ganador, sorteo, pais } = req.body;
   if (!id_sorteo || !fecha || !numero_ganador) {
@@ -1382,13 +1390,31 @@ app.put("/api/resultados/:id", requireAdmin, (req, res) => {
   db.configuracion.resultados[idx].numero_ganador = numero_ganador;
 
   saveToDB();
+
+  // Sync to Firestore 'resultados' collection
+  try {
+    const firestoreDb = getFirestoreInstance();
+    await firestoreDb.collection("resultados").doc(id).set(db.configuracion.resultados[idx]);
+  } catch (errSync) {
+    console.error("[Firestore Sync] Error al actualizar resultado en Firestore:", errSync);
+  }
+
   res.json(db.configuracion.resultados[idx]);
 });
 
-app.delete("/api/resultados/:id", requireAdmin, (req, res) => {
+app.delete("/api/resultados/:id", requireAdmin, async (req, res) => {
   const { id } = req.params;
   db.configuracion.resultados = (db.configuracion.resultados || []).filter((r: any) => r.id !== id);
   saveToDB();
+
+  // Sync to Firestore 'resultados' collection
+  try {
+    const firestoreDb = getFirestoreInstance();
+    await firestoreDb.collection("resultados").doc(id).delete();
+  } catch (errSync) {
+    console.error("[Firestore Sync] Error al eliminar resultado de Firestore:", errSync);
+  }
+
   res.json({ success: true, message: "Resultado de sorteo eliminado." });
 });
 

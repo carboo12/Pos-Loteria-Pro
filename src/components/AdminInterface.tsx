@@ -1269,55 +1269,57 @@ export default function AdminInterface({
 
     setSubmitting(true);
     try {
-      const docRef = await addDoc(collection(firestore, "resultados"), {
-        id_sorteo: selectedSorteoResultados,
-        sorteo: matchedSorteo ? matchedSorteo.nombre : "",
-        pais: selectedPaisResultados,
-        fecha: fechaResultadosInput,
-        numero_ganador: winningNum,
-        timestamp: getNicaraguaISOString()
+      // Call server API which writes to Firestore on backend
+      const res = await fetch("/api/resultados", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id_sorteo: selectedSorteoResultados,
+          sorteo: matchedSorteo ? matchedSorteo.nombre : "",
+          pais: selectedPaisResultados,
+          fecha: fechaResultadosInput,
+          numero_ganador: winningNum
+        })
       });
-      console.log("Resultado guardado en Firestore:", docRef.id);
 
-      // Background sync to server API — triggers server-side escrutinio automatically
-      try {
-        await fetch("/api/resultados", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id_sorteo: selectedSorteoResultados,
-            sorteo: matchedSorteo ? matchedSorteo.nombre : "",
-            pais: selectedPaisResultados,
-            fecha: fechaResultadosInput,
-            numero_ganador: winningNum
-          })
-        });
-      } catch (errSync) {
-        console.warn("Server escrutinio sync failed:", errSync);
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Error al guardar el resultado.");
       }
 
       setSuccessText("Resultado del sorteo guardado y publicado exitosamente.");
       setWinningNumberInput("");
-    } catch (err) {
-      console.error("Error guardando resultado en Firestore:", err);
-      setAlertText("Error al guardar el resultado en la nube.");
+    } catch (err: any) {
+      console.error("Error guardando resultado:", err);
+      setAlertText(err.message || "Error al guardar el resultado.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Delete winning number from Firestore directly
+  // Delete winning number from Firestore via API
   const handleDeleteResultado = async (resId: string) => {
+    if (!window.confirm("¿Está seguro que desea eliminar este resultado? Esta acción es irreversible.")) {
+      return;
+    }
     setAlertText(null);
     setSuccessText(null);
 
     try {
-      await deleteDoc(doc(firestore, "resultados", resId));
-      console.log("Resultado eliminado de Firestore:", resId);
+      const res = await fetch(`/api/resultados/${resId}`, {
+        method: "DELETE"
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Error al eliminar el resultado.");
+      }
+
+      console.log("Resultado eliminado:", resId);
       setSuccessText("Resultado eliminado correctamente.");
-    } catch (err) {
-      console.error("Error eliminando resultado de Firestore:", err);
-      setAlertText("Error al eliminar el resultado.");
+    } catch (err: any) {
+      console.error("Error eliminando resultado:", err);
+      setAlertText(err.message || "Error al eliminar el resultado.");
     }
   };
 

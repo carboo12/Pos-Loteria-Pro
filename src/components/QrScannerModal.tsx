@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Camera, AlertTriangle, Loader2, Zap, ZapOff, CheckCircle2, Scan, Aperture } from "lucide-react";
+import { X, Camera, AlertTriangle, Loader2, Zap, ZapOff, CheckCircle2, Aperture, RefreshCw } from "lucide-react";
 import jsQR from "jsqr";
 
 interface QrScannerModalProps {
@@ -52,8 +52,8 @@ function enhanceForQR(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.putImageData(imageData, 0, 0);
 }
 
-/** Try to decode QR from canvas, with optional image enhancement */
-function decodeQR(canvas: HTMLCanvasElement, enhance: boolean): string | null {
+/** Try to decode QR from canvas, with image enhancement */
+function decodeQR(canvas: HTMLCanvasElement): string | null {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
@@ -64,33 +64,29 @@ function decodeQR(canvas: HTMLCanvasElement, enhance: boolean): string | null {
   });
   if (code?.data) return code.data;
 
-  // Attempt 2: enhanced (grayscale + contrast) — only if requested
-  if (enhance) {
-    enhanceForQR(ctx, canvas.width, canvas.height);
-    imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    code = jsQR(imageData.data, imageData.width, canvas.height, {
-      inversionAttempts: "attemptBoth",
-    });
-    if (code?.data) return code.data;
+  // Attempt 2: enhanced (grayscale + contrast)
+  enhanceForQR(ctx, canvas.width, canvas.height);
+  imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  code = jsQR(imageData.data, imageData.width, canvas.height, {
+    inversionAttempts: "attemptBoth",
+  });
+  if (code?.data) return code.data;
 
-    // Attempt 3: inverted colors on enhanced
-    const d = imageData.data;
-    for (let i = 0; i < d.length; i += 4) {
-      d[i] = 255 - d[i];
-      d[i + 1] = 255 - d[i + 1];
-      d[i + 2] = 255 - d[i + 2];
-    }
-    ctx.putImageData(imageData, 0, 0);
-    code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: "attemptBoth",
-    });
-    if (code?.data) return code.data;
+  // Attempt 3: inverted colors on enhanced
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = 255 - d[i];
+    d[i + 1] = 255 - d[i + 1];
+    d[i + 2] = 255 - d[i + 2];
   }
+  ctx.putImageData(imageData, 0, 0);
+  code = jsQR(imageData.data, imageData.width, imageData.height, {
+    inversionAttempts: "attemptBoth",
+  });
+  if (code?.data) return code.data;
 
   return null;
 }
-
-type ScanMode = "capture" | "live";
 
 export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -101,21 +97,16 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
   const [torchOn, setTorchOn] = useState(false);
   const [streamReady, setStreamReady] = useState(false);
   const [scanned, setScanned] = useState(false);
-  const [scanLineY, setScanLineY] = useState(0);
-  const [mode, setMode] = useState<ScanMode>("capture");
   const [processing, setProcessing] = useState(false);
+  const [frozen, setFrozen] = useState(false);
+  const [scanFailed, setScanFailed] = useState(false);
+  
   const streamRef = useRef<MediaStream | null>(null);
   const torchTrackRef = useRef<MediaStreamTrack | null>(null);
-  const requestRef = useRef<number>();
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
-  const zoomStepRef = useRef(0);
-  const scanStartRef = useRef(0);
-  const lastFrameTimeRef = useRef(0);
-  const frameCountRef = useRef(0);
 
   const stopCamera = useCallback(() => {
-    if (requestRef.current) cancelAnimationFrame(requestRef.current);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -127,7 +118,6 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
   }, []);
 
   // ─── Camera Setup ────────────────────────────────────────────────────
-
   useEffect(() => {
     let active = true;
 
@@ -138,9 +128,6 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
           setLoading(false);
           return;
         }
-
-        scanStartRef.current = Date.now();
-        zoomStepRef.current = 0;
 
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -166,29 +153,22 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
         }
 
         // Wait 500ms for stream to stabilize before checking torch capability
-        // Browsers block torch requests if checked too early after getUserMedia
         await new Promise((r) => setTimeout(r, 500));
 
         if (!active) return;
 
-        // Capability check: only show torch button if hardware supports it
+        // Capability check
         if (track) {
           try {
             const capabilities = track.getCapabilities() as any;
             if (capabilities?.torch === true) {
               setHasTorch(true);
             }
-          } catch { /* getCapabilities not supported — hide torch */ }
+          } catch { /* ignore */ }
         }
 
-        // Mark stream as ready — torch button is now interactive
         setStreamReady(true);
         setLoading(false);
-
-        // Only start live tick if in live mode
-        if (mode === "live") {
-          requestRef.current = requestAnimationFrame(tick);
-        }
       } catch (err: any) {
         if (!active) return;
         setLoading(false);
@@ -204,118 +184,18 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
       }
     };
 
-    // ─── Live scan tick ──────────────────────────────────────────────
-    const tick = () => {
-      if (!active || !videoRef.current || !canvasRef.current) return;
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-
-      // Staged smart zoom
-      const elapsed = Date.now() - scanStartRef.current;
-      if (elapsed > 2000 && zoomStepRef.current === 0) { zoomStepRef.current = 1; applyZoom(1.2); }
-      else if (elapsed > 4000 && zoomStepRef.current === 1) { zoomStepRef.current = 2; applyZoom(1.5); }
-      else if (elapsed > 6000 && zoomStepRef.current === 2) { zoomStepRef.current = 3; applyZoom(1.8); }
-
-      // Animate scan line
-      if (elapsed % 2000 < 16) setScanLineY(0);
-      else setScanLineY(((elapsed % 2000) / 2000) * 100);
-
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const code = decodeQR(canvas, false); // no enhance for live (too slow)
-
-          const now = performance.now();
-          if (code && now - lastFrameTimeRef.current > 100) {
-            lastFrameTimeRef.current = now;
-            frameCountRef.current++;
-            if (frameCountRef.current >= 2) {
-              playBeep();
-              setScanned(true);
-              setTimeout(() => onScanRef.current(code), 800);
-              return;
-            }
-          } else if (!code) {
-            frameCountRef.current = 0;
-          }
-        }
-      }
-      requestRef.current = requestAnimationFrame(tick);
-    };
-
-    const applyZoom = (level: number) => {
-      const track = streamRef.current?.getVideoTracks()[0];
-      if (!track) return;
-      try {
-        const caps = track.getCapabilities() as any;
-        if (caps?.zoom) {
-          track.applyConstraints({ advanced: [{ zoom: Math.min(level, caps.zoom.max || 1) }] } as any);
-        }
-      } catch { /* ignore */ }
-    };
-
     startCamera();
 
     return () => {
       active = false;
       stopCamera();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stopCamera]);
 
-  // ─── Mode switching: start/stop live tick ─────────────────────────────
-
-  useEffect(() => {
-    if (mode === "live" && streamRef.current && videoRef.current && !loading && !error) {
-      // Start live tick
-      const tick = () => {
-        if (!videoRef.current || !canvasRef.current) return;
-        const video = videoRef.current;
-        const canvas = canvasRef.current;
-
-        const elapsed = Date.now() - scanStartRef.current;
-        if (elapsed % 2000 < 16) setScanLineY(0);
-        else setScanLineY(((elapsed % 2000) / 2000) * 100);
-
-        if (video.readyState === video.HAVE_ENOUGH_DATA) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const code = decodeQR(canvas, false);
-            const now = performance.now();
-            if (code && now - lastFrameTimeRef.current > 100) {
-              lastFrameTimeRef.current = now;
-              frameCountRef.current++;
-              if (frameCountRef.current >= 2) {
-                playBeep();
-                setScanned(true);
-                setTimeout(() => onScanRef.current(code), 800);
-                return;
-              }
-            } else if (!code) {
-              frameCountRef.current = 0;
-            }
-          }
-        }
-        requestRef.current = requestAnimationFrame(tick);
-      };
-      requestRef.current = requestAnimationFrame(tick);
-    } else {
-      // Stop live tick when in capture mode
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
-    }
-  }, [mode, loading, error, onScanRef]);
-
-  // ─── Capture & Process ───────────────────────────────────────────────
+  // ─── Capture & Process (Snapshot mode) ────────────────────────────────
 
   const captureAndScan = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current || processing || scanned) return;
+    if (!videoRef.current || !canvasRef.current || processing || scanned || scanFailed) return;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -325,31 +205,57 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
     }
 
     setProcessing(true);
+    setScanFailed(false);
+    setFrozen(true);
 
     try {
-      // Capture frame from live video
+      // 1. Freeze the video stream
+      video.pause();
+
+      // 2. Copy current frame to canvas
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext("2d");
-      if (!ctx) { setProcessing(false); return; }
-
+      if (!ctx) {
+        setProcessing(false);
+        setFrozen(false);
+        video.play().catch(() => {});
+        return;
+      }
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Process with enhancement
-      const code = decodeQR(canvas, true);
+      // 3. Brief delay for visual transition feedback
+      await new Promise((r) => setTimeout(r, 200));
+
+      // 4. Try to decode QR from canvas with enhancements
+      const code = decodeQR(canvas);
+
+      setProcessing(false);
 
       if (code) {
         playBeep();
         setScanned(true);
         setTimeout(() => onScanRef.current(code), 800);
       } else {
-        // Brief flash to indicate "no QR found"
-        setProcessing(false);
+        setScanFailed(true);
       }
-    } catch {
+    } catch (err) {
+      console.error("Scan error:", err);
       setProcessing(false);
+      setScanFailed(true);
     }
-  }, [processing, scanned, onScanRef]);
+  }, [processing, scanned, scanFailed]);
+
+  const handleRetry = useCallback(() => {
+    setScanFailed(false);
+    setFrozen(false);
+    setProcessing(false);
+    if (videoRef.current) {
+      videoRef.current.play().catch((err) => {
+        console.error("Error resuming video:", err);
+      });
+    }
+  }, []);
 
   // ─── Torch ───────────────────────────────────────────────────────────
 
@@ -362,15 +268,12 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
 
       const nextState = !torchOn;
 
-      // Apply torch constraint — some browsers need 'advanced' array
       try {
         await track.applyConstraints({ advanced: [{ torch: nextState }] } as any);
       } catch {
-        // Fallback: try basic constraints
         try {
           await track.applyConstraints({ torch: nextState } as any);
         } catch {
-          // Torch not supported on this device — hide the button
           setHasTorch(false);
           setTorchOn(false);
           return;
@@ -378,12 +281,8 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
       }
 
       setTorchOn(nextState);
-    } catch {
-      // Silent fail — torch is a nice-to-have
-    }
+    } catch { /* ignore */ }
   };
-
-  // ─── Render ──────────────────────────────────────────────────────────
 
   return (
     <AnimatePresence>
@@ -404,11 +303,11 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
             <div className="flex items-center space-x-2 text-white/90">
               <Camera className="w-5 h-5" />
               <span className="font-display font-bold tracking-wide text-sm">
-                {scanned ? "Escaneado" : processing ? "Procesando..." : "Escáner QR"}
+                {scanned ? "Escaneado" : processing ? "Procesando..." : scanFailed ? "Intento Fallido" : "Capturar QR"}
               </span>
             </div>
             <div className="flex items-center space-x-2">
-              {!scanned && hasTorch && (
+              {!scanned && hasTorch && !frozen && (
                 <button
                   onClick={toggleTorch}
                   className={`p-2 rounded-full transition-all focus:outline-none ${
@@ -454,27 +353,26 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
               </div>
             )}
 
-            <canvas ref={canvasRef} className="hidden" />
+            <canvas
+              ref={canvasRef}
+              className={`w-full h-full object-cover ${frozen ? "block" : "hidden"}`}
+            />
 
             <video
               ref={videoRef}
-              className={"w-full h-full object-cover transition-opacity duration-500 " + (loading || error ? "opacity-0" : "opacity-100")}
+              className={`w-full h-full object-cover transition-opacity duration-500 ${
+                loading || error || frozen ? "hidden" : "block"
+              }`}
             />
 
-            {/* Scanning Overlay */}
-            {!loading && !error && !scanned && (
+            {/* Scanning Target Overlay */}
+            {!loading && !error && !scanned && !frozen && (
               <div className="absolute inset-0 z-10 pointer-events-none">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[70%] aspect-square">
                   <div className="absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 border-blue-500 rounded-tl-xl shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
                   <div className="absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 border-blue-500 rounded-tr-xl shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
                   <div className="absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 border-blue-500 rounded-bl-xl shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
                   <div className="absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 border-blue-500 rounded-br-xl shadow-[0_0_15px_rgba(59,130,246,0.5)]" />
-                  {mode === "live" && (
-                    <div
-                      className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_8px_rgba(96,165,250,0.6)]"
-                      style={{ top: `${scanLineY}%`, transition: "top 0.05s linear" }}
-                    />
-                  )}
                 </div>
               </div>
             )}
@@ -500,59 +398,38 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
             )}
           </div>
 
-          {/* Footer: Mode Toggle + Capture Button */}
-          <div className="bg-gray-900 p-4 space-y-3">
-            {/* Mode toggle */}
-            {!scanned && !loading && !error && (
-              <div className="flex items-center justify-center space-x-2">
-                <button
-                  onClick={() => setMode("capture")}
-                  className={`flex items-center space-x-1.5 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider transition-all ${
-                    mode === "capture"
-                      ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
-                      : "bg-white/10 text-white/50 hover:bg-white/15 hover:text-white/70"
-                  }`}
-                >
-                  <Aperture className="w-4 h-4" />
-                  <span>Capturar</span>
-                </button>
-                <button
-                  onClick={() => setMode("live")}
-                  className={`flex items-center space-x-1.5 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider transition-all ${
-                    mode === "live"
-                      ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
-                      : "bg-white/10 text-white/50 hover:bg-white/15 hover:text-white/70"
-                  }`}
-                >
-                  <Scan className="w-4 h-4" />
-                  <span>En vivo</span>
-                </button>
-              </div>
+          {/* Footer controls */}
+          <div className="bg-gray-900 p-6 space-y-4 flex flex-col items-center">
+            {scanFailed && !scanned && (
+              <button
+                onClick={handleRetry}
+                className="px-6 py-3 min-h-[44px] bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-display font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md flex items-center space-x-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Reintentar</span>
+              </button>
             )}
 
-            {/* Capture button */}
-            {mode === "capture" && !scanned && !loading && !error && (
-              <div className="flex justify-center">
-                <button
-                  onClick={captureAndScan}
-                  disabled={processing}
-                  className="w-20 h-20 rounded-full bg-white border-4 border-blue-500 flex items-center justify-center shadow-[0_0_20px_rgba(59,130,246,0.4)] active:scale-95 transition-transform disabled:opacity-50"
-                >
-                  <div className="w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center">
-                    <Aperture className="w-8 h-8 text-white" />
-                  </div>
-                </button>
-              </div>
+            {!scanFailed && !scanned && !loading && !error && (
+              <button
+                onClick={captureAndScan}
+                disabled={processing}
+                className="w-20 h-20 rounded-full bg-white border-4 border-blue-500 flex items-center justify-center shadow-[0_0_20px_rgba(59,130,246,0.4)] active:scale-95 transition-transform disabled:opacity-50 cursor-pointer"
+              >
+                <div className="w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center">
+                  <Aperture className="w-8 h-8 text-white animate-pulse" />
+                </div>
+              </button>
             )}
 
-            <p className="text-xs text-gray-400 font-sans text-center">
+            <p className="text-xs text-gray-400 font-sans text-center max-w-[80%]">
               {scanned
                 ? "Procesando ticket..."
                 : processing
                   ? "Analizando imagen..."
-                  : mode === "capture"
-                    ? "Centra el QR en el recuadro y presiona el botón."
-                    : "Apunte la cámara al código QR. Se escaneará automáticamente."}
+                  : scanFailed
+                    ? "No se encontró ningún código QR. Ajusta la iluminación/distancia e intenta de nuevo."
+                    : "Centra el código QR en el recuadro y presiona el botón azul para capturar."}
             </p>
           </div>
         </motion.div>

@@ -310,7 +310,7 @@ export default function VendedorInterface({
       return;
     }
 
-    if (matchingSorteo && !isSorteoHabilitado(matchingSorteo, getSyncedNow())) {
+    if (matchingSorteo && !isSorteoHabilitado(matchingSorteo, getNicaraguaNow())) {
       setErrorMessage(`BLOQUEADO: El sorteo ${selectedSorteo} no está habilitado hoy. ${getDiasHabilitadosShortLabel(matchingSorteo)}.`);
       return;
     }
@@ -883,17 +883,25 @@ export default function VendedorInterface({
     return `${hourStr}:${min} ${ampm}`;
   };
 
-  // Helper to check if a draw is closed based on serverTime or local clock
+  // Helper to check if a draw is closed based on Nicaragua time (timezone-independent)
   function isSorteoCerrado(s: Sorteo) {
     try {
-      const now = getSyncedNow();
+      // Use Nicaragua time via Intl.DateTimeFormat — NOT browser-local .getHours()
+      const nicNow = getNicaraguaNow();
       const [cierreHour, cierreMin] = s.hora_cierre.split(":").map(Number);
-      const currentHour = now.getHours();
-      const currentMin = now.getMinutes();
-      
-      const passedCierre = (currentHour > cierreHour) || (currentHour === cierreHour && currentMin >= cierreMin);
+      const currentHour = nicNow.getHours();
+      const currentMin = nicNow.getMinutes();
+
+      // Convert to minutes-since-midnight for bulletproof numeric comparison
+      const cierreTotalMin = cierreHour * 60 + cierreMin;
+      const currentTotalMin = currentHour * 60 + currentMin;
+      const passedCierre = currentTotalMin >= cierreTotalMin;
+
+      console.log(`[isSorteoCerrado] ${s.nombre} | hora_cierre="${s.hora_cierre}" → ${cierreHour}:${String(cierreMin).padStart(2,"0")} (min=${cierreTotalMin}) | nicNow=${currentHour}:${String(currentMin).padStart(2,"0")} (min=${currentTotalMin}) | ${passedCierre ? "CERRADO" : "ABIERTO"}`);
+
       return passedCierre;
     } catch (e) {
+      console.error(`[isSorteoCerrado] Error:`, e);
       return false;
     }
   };
@@ -909,13 +917,9 @@ export default function VendedorInterface({
   const [declaradoUsdManual, setDeclaradoUsdManual] = useState<string>("");
   const [cierreEnviado, setCierreEnviado] = useState(false);
 
-  // Helper to format Date as YYYY-MM-DD
+  // Helper to format Date as YYYY-MM-DD in Nicaragua time
   const getTodayString = () => {
-    const d = getSyncedNow();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
+    return getLocalTodayStr();
   };
 
   const [filterDate, setFilterDate] = useState<string>(getTodayString());
@@ -930,7 +934,7 @@ export default function VendedorInterface({
     else if (selectedPais === "El Salvador") suffix = "(SV)";
     else if (selectedPais === "La Primera") suffix = "(LP)";
     else if (selectedPais === "Costa Rica") suffix = "(CR)";
-    const now = getSyncedNow();
+    const now = getNicaraguaNow();
     return config?.sorteos?.filter(s =>
       s.juego === game && s.nombre.includes(suffix) && isSorteoHabilitado(s, now)
     );
@@ -1210,7 +1214,7 @@ export default function VendedorInterface({
     }
 
     // 3b. Validate sorteo is enabled today
-    if (matchingSorteo && !isSorteoHabilitado(matchingSorteo, getSyncedNow())) {
+    if (matchingSorteo && !isSorteoHabilitado(matchingSorteo, getNicaraguaNow())) {
       toast.error(`BLOQUEADO: El sorteo ${selectedSorteo} no está habilitado hoy. ${getDiasHabilitadosShortLabel(matchingSorteo)}.`, { duration: 4000, position: 'top-center' });
       return;
     }
@@ -1621,7 +1625,7 @@ export default function VendedorInterface({
               <div className="grid grid-cols-3 gap-1.5">
                 {PAISES_GAMES[selectedPais as keyof typeof PAISES_GAMES]?.map((juego) => {
                   const isSabadito = juego === "Sabadito";
-                  const isWeekend = [0, 6].includes(getSyncedNow().getDay());
+                  const isWeekend = [0, 6].includes(getNicaraguaNow().getDay());
                   const disabled = isSabadito && !isWeekend;
 
                   return (
