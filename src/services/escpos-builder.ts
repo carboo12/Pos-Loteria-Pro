@@ -59,19 +59,19 @@ const encoder = (text: string): number[] => {
   return bytes;
 };
 
+import { parseISOTimeParts } from "../lib/date-utils";
+
 const formatTicketDate = (isoString: string): string => {
   try {
-    const date = new Date(isoString);
-    const weekday = date.toLocaleDateString("es-ES", { weekday: "long" });
-    const day = String(date.getDate()).padStart(2, "0");
-    const month = date.toLocaleDateString("es-ES", { month: "long" }).toUpperCase();
-    const year = date.getFullYear();
-    let hours = date.getHours();
-    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const { year, month, day, hours, minutes } = parseISOTimeParts(isoString);
+    // Build a local Date for weekday/month names (locale formatting)
+    const dateObj = new Date(year, month - 1, day);
+    const weekday = dateObj.toLocaleDateString("es-ES", { weekday: "long" });
+    const monthName = dateObj.toLocaleDateString("es-ES", { month: "long" }).toUpperCase();
     const ampm = hours >= 12 ? "pm" : "am";
-    hours = hours % 12;
-    hours = hours ? hours : 12;
-    return `${weekday} ${day} ${month} del ${year}, hora del registro del ticket: ${hours}:${minutes} ${ampm}`;
+    let h12 = hours % 12;
+    if (h12 === 0) h12 = 12;
+    return `${weekday} ${String(day).padStart(2, "0")} ${monthName} del ${year}, hora del registro del ticket: ${h12}:${String(minutes).padStart(2, "0")} ${ampm}`;
   } catch {
     return isoString;
   }

@@ -42,6 +42,33 @@ import { calculatePrizeMultiplier, getTicketTheoreticalPrize } from "../lib/priz
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
+    const isoStr = typeof dateInput === "string" ? dateInput : 
+                   dateInput instanceof Date ? dateInput.toISOString() : String(dateInput);
+    
+    // For ISO strings from server (with -06:00 offset), parse directly to avoid timezone drift
+    if (typeof isoStr === "string" && isoStr.includes("T")) {
+      const { hours, minutes, seconds } = (() => {
+        try {
+          const m = isoStr.match(/T(\d{2}):(\d{2}):(\d{2})/);
+          if (m) return { hours: parseInt(m[1], 10), minutes: parseInt(m[2], 10), seconds: parseInt(m[3], 10) };
+        } catch { /* fallback */ }
+        const d = new Date(isoStr);
+        return { hours: d.getHours(), minutes: d.getMinutes(), seconds: d.getSeconds() };
+      })();
+      
+      const ampm = hours >= 12 ? "PM" : "AM";
+      let h12 = hours % 12;
+      if (h12 === 0) h12 = 12;
+      const hStr = String(h12).padStart(2, "0");
+      const mStr = String(minutes).padStart(2, "0");
+      
+      if (includeSeconds) {
+        return `${hStr}:${mStr}:${String(seconds).padStart(2, "0")} ${ampm}`;
+      }
+      return `${hStr}:${mStr} ${ampm}`;
+    }
+    
+    // Fallback for non-ISO inputs
     const date = typeof dateInput === "object" ? dateInput : new Date(dateInput);
     if (isNaN(date.getTime())) return String(dateInput);
     
@@ -49,7 +76,7 @@ const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: b
     const minutes = String(date.getMinutes()).padStart(2, "0");
     const ampm = hours >= 12 ? "PM" : "AM";
     hours = hours % 12;
-    hours = hours ? hours : 12; // the hour '0' should be '12'
+    hours = hours ? hours : 12;
     const hoursStr = String(hours).padStart(2, "0");
     
     if (includeSeconds) {
@@ -183,7 +210,7 @@ export default function VendedorInterface({
 
   useEffect(() => {
     return () => {
-      printerRef.current?.disconnect();
+      printerRef.current?.destroy();
       printerRef.current = undefined;
     };
   }, []);
@@ -206,7 +233,8 @@ export default function VendedorInterface({
         printerStatus !== "connecting" &&
         printerStatus !== "printing"
       ) {
-        printerRef.current.connect();
+        // Auto-reconnect using saved deviceId (no user gesture needed)
+        printerRef.current.reconnectSaved();
       }
     };
     document.addEventListener("visibilitychange", onVisible);

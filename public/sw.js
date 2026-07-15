@@ -1,4 +1,4 @@
-const CACHE_NAME = "loto-pos-cache-v9";
+const CACHE_NAME = "loto-pos-cache-v11";
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
@@ -43,6 +43,7 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
+  // Navigation requests: network-first, no-cache for HTML
   if (e.request.mode === "navigate") {
     e.respondWith(
       fetch(e.request).then((networkResponse) => {
@@ -56,8 +57,29 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  const isImage = e.request.destination === 'image' || e.request.url.match(/\.(png|jpg|jpeg|gif|svg)$/i);
-  
+  // Static assets (JS/CSS with hashes): cache-first, but always fetch new
+  const url = new URL(e.request.url);
+  const isAsset = url.pathname.match(/\.(js|css)(\?|$)/);
+
+  if (isAsset) {
+    e.respondWith(
+      caches.match(e.request).then((cached) => {
+        if (cached) return cached;
+        return fetch(e.request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
+          }
+          return networkResponse;
+        });
+      })
+    );
+    return;
+  }
+
+  // Images: stale-while-revalidate
+  const isImage = e.request.destination === 'image' || url.pathname.match(/\.(png|jpg|jpeg|gif|svg)$/i);
+
   if (isImage) {
     e.respondWith(
       fetch(e.request).then((networkResponse) => {
@@ -71,6 +93,7 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
+  // Everything else: network-first
   e.respondWith(
     fetch(e.request).then((networkResponse) => {
       if (networkResponse && networkResponse.status === 200 &&

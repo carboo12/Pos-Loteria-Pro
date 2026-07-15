@@ -2410,10 +2410,30 @@ function registerCatchAllRoutes() {
   const distPath = path.join(process.cwd(), "dist");
 
   if (process.env.NODE_ENV === "production") {
-    app.use(express.static(distPath));
-    app.use('/assets', express.static(path.join(distPath, "assets")));
+    // Hashed assets (JS/CSS): immutable long cache
+    app.use('/assets', express.static(path.join(distPath, "assets"), {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.js') || filePath.endsWith('.css')) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      }
+    }));
     app.use('/assets', (_req, res) => { res.status(404).send('Asset no encontrado'); });
-    app.get("*", (_req, res) => { res.sendFile(path.join(distPath, "index.html")); });
+
+    // sw.js: never cache
+    app.get('/sw.js', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Service-Worker-Allowed', '/');
+      res.sendFile(path.join(distPath, 'sw.js'));
+    });
+
+    // index.html: never cache (forces browser to check for new hashed assets)
+    app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
 }
 

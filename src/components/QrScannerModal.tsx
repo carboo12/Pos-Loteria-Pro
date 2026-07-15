@@ -32,12 +32,15 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
   const [hasTorch, setHasTorch] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [scanned, setScanned] = useState(false);
+  const [scanLineY, setScanLineY] = useState(0);
   const streamRef = useRef<MediaStream | null>(null);
   const requestRef = useRef<number>();
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
-  const zoomAppliedRef = useRef(false);
+  const zoomStepRef = useRef(0);
   const scanStartRef = useRef(0);
+  const lastFrameTimeRef = useRef(0);
+  const frameCountRef = useRef(0);
 
   const stopCamera = useCallback(() => {
     if (requestRef.current) cancelAnimationFrame(requestRef.current);
@@ -53,19 +56,21 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
     const startCamera = async () => {
       try {
         if (!window.isSecureContext) {
-          setError("La cámara requiere una conexión segura (HTTPS). Si estás en desarrollo local, usa un túnel como ngrok o configura certificados SSL locales.");
+          setError("La cámara requiere HTTPS. En desarrollo local usa ngrok o certificados SSL.");
           setLoading(false);
           return;
         }
 
         scanStartRef.current = Date.now();
-        zoomAppliedRef.current = false;
+        zoomStepRef.current = 0;
 
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "environment",
             frameRate: { ideal: 30, max: 60 },
             focusMode: "continuous",
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
           },
         });
 
@@ -92,7 +97,7 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
         if (!active) return;
         setLoading(false);
         if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-          setError("Permiso de cámara denegado. Ve a la configuración de Chrome/Navegador en tu celular, busca 'Configuración de sitios' y permite el acceso a la cámara para esta página.");
+          setError("Permiso de cámara denegado. Ve a la configuración del navegador y permite el acceso a la cámara.");
         } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
           setError("No se encontró ninguna cámara en este dispositivo.");
         } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
@@ -109,21 +114,22 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
 
-      // Smart zoom: after 2s without detection, apply 1.3x digital zoom
-      if (!zoomAppliedRef.current && Date.now() - scanStartRef.current > 2000) {
-        zoomAppliedRef.current = true;
-        const track = streamRef.current?.getVideoTracks()[0];
-        if (track) {
-          try {
-            const caps = track.getCapabilities() as any;
-            if (caps?.zoom) {
-              const maxZoom = caps.zoom.max || 1;
-              const targetZoom = Math.min(1.3, maxZoom);
-              track.applyConstraints({ advanced: [{ zoom: targetZoom }] } as any);
-            }
-          } catch { /* ignore — not all devices support zoom */ }
-        }
+      // Staged smart zoom escalation for aggressive QR detection
+      const elapsed = Date.now() - scanStartRef.current;
+      if (elapsed > 2000 && zoomStepRef.current === 0) {
+        zoomStepRef.current = 1;
+        applyZoom(1.2);
+      } else if (elapsed > 4000 && zoomStepRef.current === 1) {
+        zoomStepRef.current = 2;
+        applyZoom(1.5);
+      } else if (elapsed > 6000 && zoomStepRef.current === 2) {
+        zoomStepRef.current = 3;
+        applyZoom(1.8);
       }
+
+      // Animate scan line
+      if (elapsed % 2000 < 16) setScanLineY(0);
+      else setScanLineY(((elapsed % 2000) / 2000) * 100);
 
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
         canvas.width = video.videoWidth;
@@ -134,19 +140,41 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
+          // attemptBoth: scans both normal and inverted QR codes for maximum compatibility
           const code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: "dontInvert",
+            inversionAttempts: "attemptBoth",
           });
 
-          if (code && code.data) {
-            playBeep();
-            setScanned(true);
-            setTimeout(() => onScanRef.current(code.data), 800);
-            return;
+          // Throttle: max one successful scan per 100ms
+          const now = performance.now();
+          if (code && code.data && now - lastFrameTimeRef.current > 100) {
+            lastFrameTimeRef.current = now;
+            frameCountRef.current++;
+            // Require 2 consecutive matches to avoid false positives
+            if (frameCountRef.current >= 2) {
+              playBeep();
+              setScanned(true);
+              setTimeout(() => onScanRef.current(code.data), 800);
+              return;
+            }
+          } else if (!code || !code.data) {
+            frameCountRef.current = 0;
           }
         }
       }
       requestRef.current = requestAnimationFrame(tick);
+    };
+
+    const applyZoom = (level: number) => {
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (!track) return;
+      try {
+        const caps = track.getCapabilities() as any;
+        if (caps?.zoom) {
+          const maxZoom = caps.zoom.max || 1;
+          track.applyConstraints({ advanced: [{ zoom: Math.min(level, maxZoom) }] } as any);
+        }
+      } catch { /* not all devices support zoom */ }
     };
 
     startCamera();
@@ -191,13 +219,20 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
               </span>
             </div>
             <div className="flex items-center space-x-2">
-              {!scanned && hasTorch && (
+              {!scanned && (
                 <button
                   onClick={toggleTorch}
-                  className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors focus:outline-none"
-                  title={torchOn ? "Apagar linterna" : "Encender linterna"}
+                  className={`p-2 rounded-full transition-all focus:outline-none ${
+                    torchOn
+                      ? "bg-yellow-400/20 hover:bg-yellow-400/30 text-yellow-400 ring-2 ring-yellow-400/50 shadow-[0_0_12px_rgba(250,204,21,0.3)]"
+                      : hasTorch
+                        ? "bg-white/10 hover:bg-white/20 text-white/70"
+                        : "bg-white/5 text-white/30 cursor-not-allowed"
+                  }`}
+                  title={torchOn ? "Apagar linterna" : hasTorch ? "Encender linterna" : "Linterna no disponible en este dispositivo"}
+                  disabled={!hasTorch}
                 >
-                  {torchOn ? <Zap className="w-5 h-5 text-yellow-400 fill-yellow-400" /> : <ZapOff className="w-5 h-5 text-white/70" />}
+                  {torchOn ? <Zap className="w-5 h-5 fill-yellow-400" /> : <ZapOff className="w-5 h-5" />}
                 </button>
               )}
               <button
@@ -210,7 +245,7 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
           </div>
 
           {/* Camera Viewport */}
-          <div className="relative aspect-[3/4] w-full bg-black flex items-center justify-center">
+          <div className="relative aspect-[3/4] w-full bg-black flex items-center justify-center overflow-hidden">
 
             {loading && !error && (
               <div className="absolute inset-0 flex flex-col items-center justify-center space-y-3 z-10">
@@ -239,14 +274,20 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
               className={"w-full h-full object-cover transition-opacity duration-500 " + (loading || error ? "opacity-0" : "opacity-100")}
             />
 
-            {/* Targeting Overlay — static corners, no scanning line animation */}
+            {/* Scanning Overlay with animated line */}
             {!loading && !error && !scanned && (
               <div className="absolute inset-0 z-10 pointer-events-none">
+                {/* Corner brackets */}
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[70%] aspect-square">
                   <div className="absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 border-blue-500 rounded-tl-xl shadow-[0_0_15px_rgba(59,130,246,0.5)]"></div>
                   <div className="absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 border-blue-500 rounded-tr-xl shadow-[0_0_15px_rgba(59,130,246,0.5)]"></div>
                   <div className="absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 border-blue-500 rounded-bl-xl shadow-[0_0_15px_rgba(59,130,246,0.5)]"></div>
                   <div className="absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 border-blue-500 rounded-br-xl shadow-[0_0_15px_rgba(59,130,246,0.5)]"></div>
+                  {/* Animated scan line */}
+                  <div
+                    className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_8px_rgba(96,165,250,0.6)]"
+                    style={{ top: `${scanLineY}%`, transition: "top 0.05s linear" }}
+                  />
                 </div>
               </div>
             )}

@@ -107,3 +107,45 @@ function getNicaraguaNow(date: Date = new Date()): Date {
   const utcMs = date.getTime() + (date.getTimezoneOffset() * 60000);
   return new Date(utcMs + (-6 * 3600000));
 }
+
+/**
+ * Parse date/time parts DIRECTLY from an ISO string, ignoring the browser's timezone.
+ * This is critical because `new Date(iso).getHours()` returns the browser's local hour,
+ * NOT the hour encoded in the ISO string. For strings like "2026-07-14T18:29:00.000-06:00",
+ * this returns { year:2026, month:7, day:14, hours:18, minutes:29, seconds:0 }.
+ */
+export function parseISOTimeParts(isoString: string): {
+  year: number; month: number; day: number;
+  hours: number; minutes: number; seconds: number;
+} {
+  try {
+    const match = isoString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+    if (match) {
+      return {
+        year: parseInt(match[1], 10),
+        month: parseInt(match[2], 10),
+        day: parseInt(match[3], 10),
+        hours: parseInt(match[4], 10),
+        minutes: parseInt(match[5], 10),
+        seconds: parseInt(match[6], 10),
+      };
+    }
+    // Fallback: use Date object (browser timezone dependent)
+    const d = new Date(isoString);
+    return {
+      year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(),
+      hours: d.getHours(), minutes: d.getMinutes(), seconds: d.getSeconds(),
+    };
+  } catch {
+    return { year: 0, month: 0, day: 0, hours: 0, minutes: 0, seconds: 0 };
+  }
+}
+
+/** Get 12-hour time parts {h, mm, ampm} from ISO string, timezone-independent. */
+export function get12HourFromISO(isoString: string): { h: number; mm: string; ampm: string } {
+  const { hours, minutes } = parseISOTimeParts(isoString);
+  const ampm = hours >= 12 ? "PM" : "AM";
+  let h = hours % 12;
+  if (h === 0) h = 12;
+  return { h, mm: String(minutes).padStart(2, "0"), ampm };
+}

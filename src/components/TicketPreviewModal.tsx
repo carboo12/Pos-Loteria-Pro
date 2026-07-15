@@ -3,7 +3,7 @@ import { useState, useRef, useCallback } from "react";
 import { toBlob } from "html-to-image";
 
 import { Venta, Configuracion } from "../types";
-import { toDateStr } from "../lib/date-utils";
+import { toDateStr, parseISOTimeParts } from "../lib/date-utils";
 import { calculatePrizeMultiplier } from "../lib/prize-utils";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -110,28 +110,18 @@ export default function TicketPreviewModal({ ticket, config, onClose, userRole =
 
   const formatTicketDate = (isoString: string) => {
     try {
-      const date = new Date(isoString);
+      const { year, month, day, hours, minutes } = parseISOTimeParts(isoString);
       
-      // Get weekday name in Spanish
-      const weekday = date.toLocaleDateString("es-ES", { weekday: "long" });
+      // Build a local Date for weekday/month names (locale formatting)
+      const dateObj = new Date(year, month - 1, day);
+      const weekday = dateObj.toLocaleDateString("es-ES", { weekday: "long" });
+      const monthName = dateObj.toLocaleDateString("es-ES", { month: "long" }).toUpperCase();
       
-      // Get day
-      const day = String(date.getDate()).padStart(2, "0");
-      
-      // Get month name in uppercase
-      const month = date.toLocaleDateString("es-ES", { month: "long" }).toUpperCase();
-      
-      // Get year
-      const year = date.getFullYear();
-      
-      // Get hours and minutes
-      let hours = date.getHours();
-      const minutes = String(date.getMinutes()).padStart(2, "0");
       const ampm = hours >= 12 ? "pm" : "am";
-      hours = hours % 12;
-      hours = hours ? hours : 12; // the hour '0' should be '12'
+      let h12 = hours % 12;
+      if (h12 === 0) h12 = 12;
       
-      return `${weekday} ${day} ${month} del ${year}, hora del registro del ticket: ${hours}:${minutes} ${ampm}`;
+      return `${weekday} ${String(day).padStart(2, "0")} ${monthName} del ${year}, hora del registro del ticket: ${h12}:${String(minutes).padStart(2, "0")} ${ampm}`;
     } catch {
       return isoString;
     }

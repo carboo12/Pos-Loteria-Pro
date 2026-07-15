@@ -8,7 +8,7 @@ import './index.css';
 // APP_VERSION — must match CACHE_NAME in public/sw.js
 // Increment on every deploy that changes frontend assets.
 // ──────────────────────────────────────────────────────
-const APP_VERSION = "v10";
+const APP_VERSION = "v11";
 const VERSION_KEY = "sw_version";
 
 // ──────────────────────────────────────────────────────
