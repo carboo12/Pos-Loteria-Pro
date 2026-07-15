@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent, useMemo } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { 
   Users, 
   History, 
@@ -26,13 +26,13 @@ import {
   WifiOff
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, CobroVendedor } from "../types";
-import { toDateStr, getTicketDate, getLocalTodayStr, getNicaraguaISOString, getNicaraguaNow } from "../lib/date-utils";
-import { getTicketTheoreticalPrize } from "../lib/prize-utils";
+import { toDateStr, getLocalTodayStr, getNicaraguaISOString, getNicaraguaNow } from "../lib/date-utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
 import FacturacionVendedorCard from "./FacturacionVendedorCard";
 import ResumenFacturacionCard from "./ResumenFacturacionCard";
+import { useFacturacion } from "../hooks/useFacturacion";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -434,52 +434,14 @@ export default function SupervisorInterface({
   const totalPendingUsd = linkedSellers.reduce((sum, s) => sum + getSellerSummary(s.id).pendingUsd, 0);
 
   // Arqueo data pre-computado con useMemo para evitar filtrado redundante en render
-  const arqueoData = useMemo(() => {
-    const sellers = linkedSellers.filter(s => selectedVendedorFilter === "TODOS" || s.id === selectedVendedorFilter);
-    return sellers.map(seller => {
-      const sellerSales = sales.filter(s => {
-        const saleDateStr = getTicketDate(s);
-        const dateMatch = saleDateStr >= reportFilterFechaInicio && saleDateStr <= reportFilterFechaFin;
-        const activeMatch = !s.anulado;
-        const sellerMatch = s.id_vendedor === seller.id;
-        return dateMatch && activeMatch && sellerMatch;
-      });
-      const sumCs = sellerSales.filter(s => s.moneda === "C$").reduce((sum, s) => sum + s.monto_pago, 0);
-      const sumUsd = sellerSales.filter(s => s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0);
-      const vendido = sumCs + (sumUsd * config.tasa_cambio);
-      let totalAPagar = 0;
-      let totalPremios = 0;
-      sellerSales.forEach(s => {
-        // Use shared prize logic — handles multi-jugada + single-number tickets
-        const theoreticalPrize = getTicketTheoreticalPrize(s, config);
-        if (theoreticalPrize > 0) {
-          totalAPagar += theoreticalPrize;
-        }
-        // Prefer persisted monto_premio from escrutinio (server-authoritative)
-        if (typeof s.monto_premio === "number" && s.monto_premio > 0) {
-          totalPremios += s.monto_premio;
-        }
-      });
-      const pagado = sellerSales
-        .filter(s => s.estado === 'pagado')
-        .reduce((sum, s) => sum + ((typeof s.monto_premio === "number" && s.monto_premio > 0) ? s.monto_premio : getTicketTheoreticalPrize(s, config)), 0);
-      const sellerIngresos = ((config as any).ingresos || []).filter((i: any) => {
-        const isSeller = i.id_vendedor === seller.id;
-        const inRange = i.fecha >= reportFilterFechaInicio && i.fecha <= reportFilterFechaFin;
-        return isSeller && inRange;
-      });
-      const ingresos = sellerIngresos.reduce((sum: number, i: any) => sum + i.monto_cs + (i.monto_usd * config.tasa_cambio), 0);
-      const sellerCobros = (allCobros || []).filter((c: any) => {
-        const isSeller = c.id_vendedor === seller.id;
-        const inRange = c.fecha >= reportFilterFechaInicio && c.fecha <= reportFilterFechaFin;
-        return isSeller && inRange;
-      });
-      const cobrado = sellerCobros.reduce((sum: number, c: any) => sum + c.monto_cs + (c.monto_usd * config.tasa_cambio), 0);
-      const ganancia = (vendido - totalAPagar) + ingresos;
-      const total = (vendido - pagado) + ingresos - cobrado;
-      return { seller, vendido, totalAPagar, totalPremios, pagado, ingresos, cobrado, ganancia, total };
-    });
-  }, [linkedSellers, selectedVendedorFilter, sales, reportFilterFechaInicio, reportFilterFechaFin, config, allCobros]);
+  const arqueoData = useFacturacion(
+    linkedSellers.filter(s => selectedVendedorFilter === "TODOS" || s.id === selectedVendedorFilter),
+    reportFilterFechaInicio,
+    reportFilterFechaFin,
+    sales,
+    config,
+    allCobros
+  );
 
   return (
     <div id="supervisor-container" className="flex flex-col bg-[#F3F4F6] flex-1 w-full">
@@ -822,12 +784,12 @@ export default function SupervisorInterface({
           <div className="p-4 space-y-4 overflow-y-auto flex-1">
             {arqueoData.map(ad => (
               <FacturacionVendedorCard
-                key={ad.seller.id}
-                nombreVendedor={ad.seller.nombre}
+                key={ad.id}
+                nombreVendedor={ad.nombre}
                 vendido={ad.vendido}
                 pagado={ad.pagado}
                 ingresos={ad.ingresos}
-                totalAPagar={ad.totalAPagar}
+                totalAPagar={ad.aPagar}
                 totalPremios={ad.totalPremios}
                 cobrado={ad.cobrado}
                 ganancia={ad.ganancia}
@@ -840,7 +802,7 @@ export default function SupervisorInterface({
           {(() => {
             const sumFacturado = arqueoData.reduce((a, d) => a + d.vendido, 0);
             const sumIngresos = arqueoData.reduce((a, d) => a + d.ingresos, 0);
-            const sumAPagar = arqueoData.reduce((a, d) => a + d.totalAPagar, 0);
+            const sumAPagar = arqueoData.reduce((a, d) => a + d.aPagar, 0);
             const sumPremios = arqueoData.reduce((a, d) => a + (d.totalPremios || 0), 0);
             const sumCobro = arqueoData.reduce((a, d) => a + d.cobrado, 0);
             const sumPagado = arqueoData.reduce((a, d) => a + d.pagado, 0);

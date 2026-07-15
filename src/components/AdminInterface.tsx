@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, FormEvent, useMemo } from "react";
 import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
 import { 
@@ -38,8 +38,9 @@ import {
   EyeOff
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
-import { toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr, getNicaraguaISOString, parseISOTimeParts } from "../lib/date-utils";
-import { calculatePrizeMultiplier, getTicketTheoreticalPrize } from "../lib/prize-utils";
+import { toDateStr, getTicketDate, getLocalTodayStr, getNicaraguaISOString, parseISOTimeParts } from "../lib/date-utils";
+
+import { useFacturacion } from "../hooks/useFacturacion";
 import { createPortal } from "react-dom";
 import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
@@ -241,6 +242,15 @@ export default function AdminInterface({
   const [reportFilterVendedor, setReportFilterVendedor] = useState("TODOS");
   const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(getLocalTodayStr());
   const [reportFilterFechaFin, setReportFilterFechaFin] = useState(getLocalTodayStr());
+  const vendedoresReporte = useMemo(() => users.filter(u => u.rol === "vendedor"), [users]);
+  const facturacionData = useFacturacion(
+    vendedoresReporte,
+    reportFilterFechaInicio,
+    reportFilterFechaFin,
+    sales,
+    config,
+    config.cobros || []
+  );
 
   // Finanzas / Cobros states
   const [finanzasVendedor, setFinanzasVendedor] = useState("");
@@ -3204,58 +3214,13 @@ export default function AdminInterface({
               <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block">Facturación por Vendedor</span>
               
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {users
-                  .filter(u => u.rol === "vendedor")
+                {vendedoresReporte
                   .filter(u => reportFilterVendedor === "TODOS" || u.id === reportFilterVendedor)
                   .map(seller => {
-                    const sellerSales = sales.filter(s => {
-                      const saleDateStr = getTicketDate(s);
-                      const dateMatch = saleDateStr >= reportFilterFechaInicio && saleDateStr <= reportFilterFechaFin;
-                      const activeMatch = !s.anulado;
-                      const sellerMatch = s.id_vendedor === seller.id;
-                      return dateMatch && activeMatch && sellerMatch;
-                    });
-
-                    const sumCs = sellerSales.filter(s => s.moneda === "C$").reduce((sum, s) => sum + s.monto_pago, 0);
-                    const sumUsd = sellerSales.filter(s => s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0);
-                    const totalVendidoCs = sumCs + (sumUsd * config.tasa_cambio);
-
-                    // Total a Pagar: premios teóricos de tickets vendidos por este vendedor en el rango
-                    let totalAPagarCs = 0;
-                    sellerSales.forEach(s => {
-                      // Use shared prize logic — handles multi-jugada + single-number tickets
-                      const theoreticalPrize = getTicketTheoreticalPrize(s, config);
-                      if (theoreticalPrize > 0) {
-                        totalAPagarCs += theoreticalPrize;
-                      }
-                    });
-
-                    // Pagado Real: suma de premios efectivamente pagados por este vendedor en el rango
-                    const totalPagadoRealCs = sellerSales
-                      .filter(s => s.estado === 'pagado')
-                      .reduce((sum, s) => sum + ((typeof s.monto_premio === "number" && s.monto_premio > 0) ? s.monto_premio : getTicketTheoreticalPrize(s, config)), 0);
-
-                    // Ingresos: inyecciones de caja del supervisor/administrador
-                    const sellerIngresos = ((config as any).ingresos || []).filter((i: any) => {
-                      const isSeller = i.id_vendedor === seller.id;
-                      const inRange = i.fecha >= reportFilterFechaInicio && i.fecha <= reportFilterFechaFin;
-                      return isSeller && inRange;
-                    });
-                    const sumIngresosCs = sellerIngresos.reduce((sum: number, i: any) => sum + i.monto_cs + (i.monto_usd * config.tasa_cambio), 0);
-
-                    // Cobrado: dinero retirado por el supervisor
-                    const sellerCobros = (config.cobros || []).filter((c: any) => {
-                      const isSeller = c.id_vendedor === seller.id;
-                      const inRange = c.fecha >= reportFilterFechaInicio && c.fecha <= reportFilterFechaFin;
-                      return isSeller && inRange;
-                    });
-                    const sumCobradoCs = sellerCobros.reduce((sum: number, c: any) => sum + c.monto_cs + (c.monto_usd * config.tasa_cambio), 0);
-
-                    // Fórmula 1: Ganancia = (Vendido - Total a Pagar) + Ingresos
-                    const gananciaCs = (totalVendidoCs - totalAPagarCs) + sumIngresosCs;
-
-                    // Fórmula 2: Total (Efectivo Neto) = (Vendido - Pagado Real) + Ingresos - Cobrado
-                    const totalNetCs = (totalVendidoCs - totalPagadoRealCs) + sumIngresosCs - sumCobradoCs;
+                    const fd = facturacionData.find(d => d.id === seller.id) || {
+                      vendido: 0, pagado: 0, ingresos: 0, aPagar: 0, cobrado: 0, ganancia: 0, total: 0, totalPremios: 0,
+                      id: seller.id, nombre: seller.nombre
+                    };
 
                     return (
                       <div key={seller.id} className="bg-white p-6 rounded-2xl border border-gray-300 shadow-xs flex flex-col justify-between font-sans">
@@ -3267,7 +3232,7 @@ export default function AdminInterface({
                           </div>
                           <div className="text-right">
                             <span className="text-xs font-mono text-gray-500 block">Vendido:</span>
-                            <span className="text-base font-mono font-black text-gray-900">C$ {totalVendidoCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
+                            <span className="text-base font-mono font-black text-gray-900">C$ {fd.vendido.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
                           </div>
                         </div>
 
@@ -3277,19 +3242,19 @@ export default function AdminInterface({
                           <div className="space-y-1.5 text-gray-600">
                             <div>
                               <span>Pagado: </span>
-                              <span className="font-mono font-bold text-gray-950">C$ {totalPagadoRealCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
+                              <span className="font-mono font-bold text-gray-950">C$ {fd.pagado.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
                             </div>
                             <div>
                               <span>Ingresos: </span>
-                              <span className="font-mono font-bold text-gray-950">C$ {sumIngresosCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
+                              <span className="font-mono font-bold text-gray-950">C$ {fd.ingresos.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
                             </div>
                             <div>
                               <span>Total a pagar: </span>
-                              <span className="font-mono font-bold text-gray-950">C$ {totalAPagarCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
+                              <span className="font-mono font-bold text-gray-950">C$ {fd.aPagar.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
                             </div>
                             <div>
                               <span>Cobrado: </span>
-                              <span className="font-mono font-bold text-gray-950">C$ {sumCobradoCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
+                              <span className="font-mono font-bold text-gray-950">C$ {fd.cobrado.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
                             </div>
                           </div>
 
@@ -3298,13 +3263,13 @@ export default function AdminInterface({
                             <div className="text-right">
                               <span className="text-[10px] text-gray-400 block">Ganancia:</span>
                               <span className="text-sm font-mono font-black text-blue-900">
-                                C$ {gananciaCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
+                                C$ {fd.ganancia.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
                               </span>
                             </div>
                             <div className="text-right pt-1 border-t border-gray-100 w-full">
                               <span className="text-[10px] text-gray-400 block">Total:</span>
                               <span className="text-sm font-mono font-black text-blue-900">
-                                C$ {totalNetCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
+                                C$ {fd.total.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
                               </span>
                             </div>
                           </div>

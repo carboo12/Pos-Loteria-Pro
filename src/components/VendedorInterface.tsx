@@ -31,7 +31,7 @@ import { Usuario, Configuracion, Venta, Sorteo, Jugada } from "../types";
 import TicketPreviewModal from "./TicketPreviewModal";
 import { QrScannerModal } from "./QrScannerModal";
 import ResumenFacturacionCard from "./ResumenFacturacionCard";
-import FacturacionVendedorCard from "./FacturacionVendedorCard";
+import { useFacturacion } from "../hooks/useFacturacion";
 import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
 import { BluetoothPrinterService, PrinterStatus } from "../services/BluetoothPrinterService";
@@ -132,6 +132,14 @@ export default function VendedorInterface({
   const [reportFilterFechaFin, setReportFilterFechaFin] = useState(() => getLocalTodayStr());
   const [reportTickets, setReportTickets] = useState<any[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
+  const vendedorFacturacion = useFacturacion(
+    [{ id: user.id, nombre: user.nombre }],
+    reportFilterFechaInicio,
+    reportFilterFechaFin,
+    reportTickets,
+    config,
+    config.cobros || []
+  );
   
   // País state
   const [selectedPais, setSelectedPais] = useState<"Nicaragua" | "Honduras" | "El Salvador" | "La Primera" | "Costa Rica">("Nicaragua");
@@ -2042,42 +2050,13 @@ export default function VendedorInterface({
 
         {/* TAB 2: REPORTES */}
         {activeTab === "reportes" && (() => {
-          // Filter tickets by fecha_venta string (YYYY-MM-DD) — String vs String
-          const rangeTickets = reportTickets.filter(t => {
+          const [factData] = vendedorFacturacion;
+          const { vendido: facturado, pagado, ingresos, aPagar, cobrado: cobro, total, ganancia } = factData || { vendido: 0, pagado: 0, ingresos: 0, aPagar: 0, cobrado: 0, total: 0, ganancia: 0 };
+
+          const rangeTicketCount = reportTickets.filter(t => {
             const ticketDateStr = getTicketDate(t);
             return ticketDateStr >= reportFilterFechaInicio && ticketDateStr <= reportFilterFechaFin;
-          });
-
-          // Calculate totals (normalize field names: total_apostado or monto_pago)
-          const facturado = rangeTickets.filter(t => t.estado !== "anulado").reduce((sum, t) => sum + getTicketAmount(t), 0);
-          const sellerIngresos = ((config as any).ingresos || []).filter((i: any) => {
-            const isSeller = i.id_vendedor === user.id;
-            const inRange = i.fecha >= reportFilterFechaInicio && i.fecha <= reportFilterFechaFin;
-            return isSeller && inRange;
-          });
-          const ingresos = sellerIngresos.reduce((sum: number, i: any) => sum + i.monto_cs + (i.monto_usd * config.tasa_cambio), 0);
-          
-          // Calculate theoretical prizes (A Pagar) — prefer persisted monto_premio from escrutinio
-          let aPagar = 0;
-          rangeTickets.forEach(t => {
-            aPagar += (typeof t.monto_premio === "number" && t.monto_premio > 0) ? t.monto_premio : getTicketTheoreticalPrize(t, config);
-          });
-
-          // Calculate actually paid/cobrado prizes (Pagado)
-          const pagado = rangeTickets
-            .filter(t => t.estado === "pagado" || t.estado === "cobrado")
-            .reduce((sum, t) => sum + ((typeof t.monto_premio === "number" && t.monto_premio > 0) ? t.monto_premio : getTicketTheoreticalPrize(t, config)), 0);
-
-          // Calculate withdrawals made by supervisor (Cobro)
-          const sellerCobros = (config.cobros || []).filter(c => {
-            const isSeller = c.id_vendedor === user.id;
-            const inRange = c.fecha >= reportFilterFechaInicio && c.fecha <= reportFilterFechaFin;
-            return isSeller && inRange;
-          });
-          const cobro = sellerCobros.reduce((sum, c) => sum + c.monto_cs + (c.monto_usd * config.tasa_cambio), 0);
-
-          const total = (facturado - pagado) + ingresos - cobro;
-          const ganancia = (facturado - aPagar) + ingresos;
+          }).length;
 
           const formatCurrency = (val: number) => {
             return `C$ ${val.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -2132,7 +2111,7 @@ export default function VendedorInterface({
               {/* Lista de Boletos (UI Stitch) */}
               <div className="space-y-3">
                 <span className="block text-[10px] font-display font-black text-gray-500 uppercase tracking-wider">
-                  Boletos Emitidos ({rangeTickets.length})
+                  Boletos Emitidos ({rangeTicketCount})
                 </span>
                 
                 {reportLoading ? (
