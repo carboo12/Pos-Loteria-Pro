@@ -8,7 +8,7 @@ import './index.css';
 // APP_VERSION — must match CACHE_NAME in public/sw.js
 // Increment on every deploy that changes frontend assets.
 // ──────────────────────────────────────────────────────
-const APP_VERSION = "v11";
+const APP_VERSION = "v12";
 const VERSION_KEY = "sw_version";
 
 // ──────────────────────────────────────────────────────
@@ -19,22 +19,20 @@ const runKillSwitch = async (): Promise<boolean> => {
   if (!("serviceWorker" in navigator)) return false;
 
   const stored = localStorage.getItem(VERSION_KEY);
+
+  // Force-clean on first deploy with new version (fixes corrupted manifest.json cache)
+  if (stored !== APP_VERSION) {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const r of regs) await r.unregister();
+      const cacheNames = await caches.keys();
+      for (const name of cacheNames) await caches.delete(name);
+    } catch {}
+  }
+
   if (stored === APP_VERSION) return false;
 
   console.log(`[Kill Switch] Versión desactualizada (stored=${stored}, current=${APP_VERSION}). Limpiando...`);
-
-  try {
-    const regs = await navigator.serviceWorker.getRegistrations();
-    for (const reg of regs) {
-      await reg.unregister();
-    }
-    const cacheNames = await caches.keys();
-    for (const name of cacheNames) {
-      await caches.delete(name);
-    }
-  } catch (e) {
-    console.warn("[Kill Switch] Error limpiando caches:", e);
-  }
 
   localStorage.setItem(VERSION_KEY, APP_VERSION);
   window.location.reload();

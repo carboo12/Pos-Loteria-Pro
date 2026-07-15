@@ -1,4 +1,4 @@
-const CACHE_NAME = "loto-pos-cache-v11";
+const CACHE_NAME = "loto-pos-cache-v12";
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
