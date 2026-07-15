@@ -1762,7 +1762,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
   }
 
   // 3. ATOMIC COUNTER: Firestore transaction to get sequential ticket ID
-  const serverTimeStr = getNicaraguaISOString(now);
+  const serverTimeStr = getNicaraguaISOString();
   let numero_ticket = "";
   let firestoreCreated = false;
 
