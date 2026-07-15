@@ -2405,6 +2405,16 @@ export default function VendedorInterface({
               <p className="text-[10px] text-gray-400 font-sans mt-0.5">Escanea el código QR del ticket o ingresa el ID manualmente.</p>
             </div>
 
+            {/* Single manual ID input */}
+            <form onSubmit={(e) => { e.preventDefault(); if (qrSearchInput.trim()) processPayment(qrSearchInput); }}>
+              <input
+                type="text"
+                value={qrSearchInput}
+                onChange={(e) => setQrSearchInput(e.target.value)}
+                placeholder="Ingresar ID del ticket y presionar Enter..."
+                className="w-full p-2.5 text-xs font-mono font-bold bg-white border border-gray-300 rounded-xl focus:outline-none focus:border-blue-900 shadow-sm"
+              />
+            </form>
 
             {/* QR Scanner Activation */}
             <button
@@ -2414,29 +2424,6 @@ export default function VendedorInterface({
               <QrCode className="w-5 h-5" />
               <span className="text-xs font-black uppercase tracking-wider">Abrir Escáner de Cámara</span>
             </button>
-
-            {/* Manual ID Input Section */}
-            <div className="bg-white rounded-2xl p-4 border border-gray-300 shadow-sm">
-              <div className="w-full">
-                <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Ingresar ID del Ticket</label>
-                <form onSubmit={(e) => { e.preventDefault(); processPayment(qrSearchInput); }} className="flex space-x-2">
-                  <input
-                    type="text"
-                    value={qrSearchInput}
-                    onChange={(e) => setQrSearchInput(e.target.value)}
-                    placeholder="ID del ticket (ej: ZNH9H02)..."
-                    className="flex-1 p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
-                  />
-                  <button
-                    type="submit"
-                    disabled={loading || !qrSearchInput}
-                    className="px-4 bg-[#1E3A8A] hover:bg-blue-800 text-white rounded-lg font-bold flex items-center justify-center cursor-pointer disabled:opacity-50"
-                  >
-                    Validar
-                  </button>
-                </form>
-              </div>
-            </div>
             
             {/* Payment Animation Modals */}
             <AnimatePresence>
