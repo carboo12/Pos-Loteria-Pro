@@ -2209,7 +2209,7 @@ app.post("/api/admin/backfill-resumenes", requireAdmin, (req, res) => {
   const groups: Record<string, { id_vendedor: string, nombre_vendedor: string, fecha: string, vendido: number, pagado: number }> = {};
 
   ventasValidas.forEach((v: any) => {
-    const dateStr = getLocalDateString(new Date(v.timestamp));
+    const dateStr = getLocalDateString(new Date(v.timestamp_servidor));
     const key = `${v.id_vendedor}_${dateStr}`;
 
     if (!groups[key]) {
@@ -2318,13 +2318,13 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
   }
 
   const ventasPeriodo = db.ventas.filter((v: any) => {
-    const vDateStr = getLocalDateString(new Date(v.timestamp));
+    const vDateStr = getLocalDateString(new Date(v.timestamp_servidor));
     return v.id_vendedor === id_vendedor && vDateStr >= (fecha_inicio as string) && vDateStr <= (fecha_fin as string);
   });
 
   const grouped: Record<string, any> = {};
   ventasPeriodo.forEach((v: any) => {
-    const dateStr = getLocalDateString(new Date(v.timestamp));
+    const dateStr = getLocalDateString(new Date(v.timestamp_servidor));
     if (!grouped[dateStr]) {
       grouped[dateStr] = { vendido: 0, pagado: 0 };
     }

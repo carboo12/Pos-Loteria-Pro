@@ -267,6 +267,16 @@ export default function VendedorInterface({
   const totalTicketMonto = jugadas.reduce((acc, j) => acc + j.monto, 0);
   const totalTicketPremio = jugadas.reduce((acc, j) => acc + j.premio_posible, 0);
 
+  // Limit modal state
+  const [limitModalInfo, setLimitModalInfo] = useState<{
+    show: boolean;
+    numero: string;
+    limitMontoCs: number;
+    totalVendidoCs: number;
+    disponibleCs: number;
+    sorteo: string;
+  }>({ show: false, numero: '', limitMontoCs: 0, totalVendidoCs: 0, disponibleCs: 0, sorteo: '' });
+
   // Pre-declared variables to avoid temporal dead zone compile errors
   let limitCheckResult: any = null;
   let isLimitBlocked = false;
@@ -300,7 +310,14 @@ export default function VendedorInterface({
     }
 
     if (isLimitBlocked && limitCheckResult) {
-      setErrorMessage(`NÚMERO BLOQUEADO: Límite de C$ ${limitCheckResult.limitMontoCs.toLocaleString("es-ES")} alcanzado.`);
+      setLimitModalInfo({
+        show: true,
+        numero: numeroJugado,
+        limitMontoCs: limitCheckResult.limitMontoCs,
+        totalVendidoCs: limitCheckResult.totalPrevSalesCs + (limitCheckResult.cartMatchingSum || 0),
+        disponibleCs: limitCheckResult.disponibleCs ?? Math.max(0, limitCheckResult.limitMontoCs - limitCheckResult.totalPrevSalesCs - (limitCheckResult.cartMatchingSum || 0)),
+        sorteo: selectedSorteo
+      });
       return;
     }
 
@@ -449,10 +466,10 @@ export default function VendedorInterface({
         return;
       }
 
-      if (ticket.estado === "cobrado") {
+      if (ticket.estado === "pagado" || ticket.estado === "cobrado") {
         setPaymentResult({
           ganador: false,
-          estado: "cobrado",
+          estado: "pagado",
           message: "Ticket ya pagado anteriormente.",
           monto: 0
         } as any);
@@ -570,19 +587,14 @@ export default function VendedorInterface({
     }
   };
 
-  const handleEfectuarPago = async (tId: string) => {
+  const handleEfectuarPago = async (tId: string, montoPremio?: number) => {
     setLoading(true);
     try {
       const docRef = doc(firestore, "tickets", tId);
-      await updateDoc(docRef, { estado: "cobrado" });
-      
-      try {
-        await fetch(`/api/ventas/${tId}/pagar`, {
-          method: "POST"
-        });
-      } catch (errSync) {
-        console.warn("REST API sync failed (possibly offline). Ticket is marked as cobrado in Firestore.", errSync);
-      }
+      await updateDoc(docRef, {
+        estado: "pagado",
+        ...(montoPremio != null && montoPremio > 0 ? { monto_premio: montoPremio } : {})
+      });
 
       toast.success("¡Pago registrado con éxito!");
       setPaymentResult(null);
@@ -640,9 +652,6 @@ export default function VendedorInterface({
 
     const todayStr = getLocalTodayStr();
     if (ticketDate < todayStr) return true;
-    if (ticketDate === todayStr) {
-      return isSorteoCerrado(sObj);
-    }
     return false;
   };
 
@@ -713,7 +722,7 @@ export default function VendedorInterface({
   // Verificar premio de un ticket contra resultados oficiales
   const verificarPremioTicket = async (ticket: Venta) => {
     // 1. Verificar si ya fue pagado
-    if (ticket.estado === 'pagado') {
+    if (ticket.estado === 'pagado' || ticket.estado === 'cobrado') {
       setPrizeResult({
         show: true,
         type: 'already_paid',
@@ -1122,14 +1131,24 @@ export default function VendedorInterface({
       return sum + amtInCs;
     }, 0);
 
+    // Accumulated cart total for this number matching the limit criteria
+    const limitNum = matchedLimit.numero ?? matchedLimit.numero_jugado ?? "TODOS";
+    const cartMatchingSum = jugadas
+      .filter(j => limitNum === "TODOS" || j.numero === limitNum)
+      .reduce((sum, j) => sum + (moneda === "C$" ? j.monto : j.monto * (config?.tasa_cambio || 36)), 0);
+
     const numericAmount = Number(montoPago) || 0;
-    const requestedMontoCs = moneda === "C$" ? numericAmount : numericAmount * (config?.tasa_cambio || 36);
+    const currentInputCs = moneda === "C$" ? numericAmount : numericAmount * (config?.tasa_cambio || 36);
+    const requestedMontoCs = cartMatchingSum + currentInputCs;
+    const disponibleCs = Math.max(0, limitMontoCs - totalPrevSalesCs - cartMatchingSum);
     const isExceeded = (totalPrevSalesCs + requestedMontoCs) > limitMontoCs;
 
     return {
       limitMontoCs,
       totalPrevSalesCs,
       requestedMontoCs,
+      cartMatchingSum,
+      disponibleCs,
       isExceeded,
       rule: matchedLimit
     };
@@ -1227,7 +1246,14 @@ export default function VendedorInterface({
 
     // 4. Validate limit not exceeded for this batch
     if (isLimitBlocked && limitCheckResult) {
-      toast.error(`NÚMERO BLOQUEADO: Límite de C$ ${limitCheckResult.limitMontoCs.toLocaleString("es-ES")} alcanzado para este vendedor en este sorteo. Vendido hoy: C$ ${limitCheckResult.totalPrevSalesCs.toLocaleString("es-ES")}.`, { duration: 5000, position: 'top-center' });
+      setLimitModalInfo({
+        show: true,
+        numero: jugadas[0]?.numero || '',
+        limitMontoCs: limitCheckResult.limitMontoCs,
+        totalVendidoCs: limitCheckResult.totalPrevSalesCs + (limitCheckResult.cartMatchingSum || 0),
+        disponibleCs: limitCheckResult.disponibleCs ?? Math.max(0, limitCheckResult.limitMontoCs - limitCheckResult.totalPrevSalesCs - (limitCheckResult.cartMatchingSum || 0)),
+        sorteo: selectedSorteo
+      });
       return;
     }
 
@@ -2006,7 +2032,7 @@ export default function VendedorInterface({
               <div id="monto-max-alerta" className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-2 text-xs text-red-950 font-sans font-bold shadow-xs animate-pulse">
                 <AlertCircle className="w-4.5 h-4.5 text-[#EF4444] shrink-0 mt-0.5" />
                 <span>
-                  NÚMERO BLOQUEADO: Límite de C$ {limitCheckResult.limitMontoCs.toLocaleString("es-ES")} alcanzado para este vendedor en este sorteo. Vendido hoy: C$ {limitCheckResult.totalPrevSalesCs.toLocaleString("es-ES")}.
+                  NÚMERO BLOQUEADO: Límite de C$ {limitCheckResult.limitMontoCs.toLocaleString("es-ES")} alcanzado. Vendido hoy: C$ {limitCheckResult.totalPrevSalesCs.toLocaleString("es-ES")} | En carrito: C$ {(limitCheckResult.cartMatchingSum || 0).toLocaleString("es-ES")} | Disponible: C$ {(limitCheckResult.disponibleCs ?? 0).toLocaleString("es-ES")}.
                 </span>
               </div>
             )}
@@ -2039,7 +2065,7 @@ export default function VendedorInterface({
 
           // Calculate actually paid/cobrado prizes (Pagado)
           const pagado = rangeTickets
-            .filter(t => t.estado === "pagado")
+            .filter(t => t.estado === "pagado" || t.estado === "cobrado")
             .reduce((sum, t) => sum + ((typeof t.monto_premio === "number" && t.monto_premio > 0) ? t.monto_premio : getTicketTheoreticalPrize(t, config)), 0);
 
           // Calculate withdrawals made by supervisor (Cobro)
@@ -2187,7 +2213,7 @@ export default function VendedorInterface({
                                 </span>
                               )}
                               <span className={`text-[9px] font-black uppercase px-2.5 py-0.5 rounded ${
-                                t.estado === "cobrado" ? "bg-emerald-100 text-emerald-800" :
+                                t.estado === "pagado" || t.estado === "cobrado" ? "bg-emerald-100 text-emerald-800" :
                                 t.estado === "anulado" ? "bg-red-100 text-red-800" :
                                 "bg-amber-100 text-amber-800"
                               }`}>
@@ -2448,7 +2474,7 @@ export default function VendedorInterface({
                   )}
 
                   {/* 1. YA COBRADO (RED ALERT LOCK SCREEN) */}
-                  {paymentResult.estado === "cobrado" && (
+                  {paymentResult.estado === "pagado" && (
                     <motion.div
                       initial={{ scale: 0.9, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
@@ -2558,7 +2584,7 @@ export default function VendedorInterface({
 
                       <div className="space-y-2">
                         <button
-                          onClick={() => handleEfectuarPago(paymentResult.ticketId)}
+                          onClick={() => handleEfectuarPago(paymentResult.ticketId, paymentResult.monto)}
                           disabled={loading}
                           className="w-full py-3 bg-white hover:bg-emerald-50 text-emerald-700 rounded-xl font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center space-x-2"
                         >
@@ -2601,7 +2627,38 @@ export default function VendedorInterface({
                   )}
                 </div>
               )}
-            </AnimatePresence>
+      </AnimatePresence>
+
+      {/* Limit Exceeded Modal */}
+      {limitModalInfo.show && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 animate-fade-in text-center">
+            <div className="bg-red-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-8 h-8 text-[#EF4444]" />
+            </div>
+            <h3 className="font-display font-black text-base text-gray-950 uppercase tracking-wide mb-2">Límite de Techo Alcanzado</h3>
+            <p className="text-sm font-sans text-gray-700 leading-relaxed mb-4">
+              El número <strong className="text-gray-950 font-bold">{limitModalInfo.numero}</strong> ha alcanzado su límite de techo (<strong className="text-[#EF4444]">C$ {limitModalInfo.limitMontoCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</strong>) en el sorteo <strong className="text-gray-950 font-bold">{limitModalInfo.sorteo}</strong>.
+            </p>
+            <div className="bg-gray-50 rounded-xl p-3 mb-4 space-y-1">
+              <div className="flex justify-between text-xs font-sans">
+                <span className="text-gray-500">Vendido hoy:</span>
+                <span className="font-bold text-gray-800">C$ {limitModalInfo.totalVendidoCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div className="flex justify-between text-xs font-sans">
+                <span className="text-gray-500">Disponible:</span>
+                <span className="font-bold text-[#EF4444]">C$ {limitModalInfo.disponibleCs.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+            <button
+              onClick={() => setLimitModalInfo(p => ({ ...p, show: false }))}
+              className="w-full py-3 rounded-xl bg-gray-700 hover:bg-gray-600 text-white font-display font-black text-sm uppercase tracking-wider cursor-pointer transition-all"
+            >
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
           </div>
         )}
 
@@ -2735,7 +2792,7 @@ export default function VendedorInterface({
               <button
                 onClick={async () => {
                   if (prizeResult.type === 'winner' && prizeResult.ticket?.id) {
-                    await handleEfectuarPago(prizeResult.ticket.id);
+                    await handleEfectuarPago(prizeResult.ticket.id, prizeResult.monto_premio);
                   }
                   setPrizeResult(p => ({ ...p, show: false }));
                 }}
