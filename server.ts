@@ -9,13 +9,21 @@ import { getMessaging } from "firebase-admin/messaging";
 import { createRequire } from "node:module";
 import dotenv from "dotenv";
 
-// ─── ENVIRONMENT: load .env.local for local development ─────────────
-// Production (App Hosting) inyecta FIREBASE_CONFIG_JSON via Secret Manager.
-// Local development lee desde .env.local (NO versionado).
-dotenv.config({ path: ".env.local" });
+// ─── ENVIRONMENT: load .env.local ONLY for local development ────────
+// App Hosting inyecta FIREBASE_CONFIG_JSON via Secret Manager — NO usa archivos.
+if (process.env.NODE_ENV !== "production") {
+  dotenv.config({ path: ".env.local" });
+}
 
-// ─── FIREBASE ADMIN: import compatible CJS/ESM ──────────────────────
-const _require = createRequire(import.meta.url);
+// ─── FIREBASE ADMIN: safe dynamic import for ESM (tsx) and CJS (esbuild) ──
+// createRequire(import.meta.url) falla en CJS bundler cuando import.meta.url
+// no está disponible. Usamos un try-catch con fallback a process.cwd().
+let _require: ReturnType<typeof createRequire>;
+try {
+  _require = createRequire(import.meta.url);
+} catch {
+  _require = createRequire(process.cwd() + "/server.ts");
+}
 const firebaseAdmin: any = (() => {
   try {
     const mod = _require("firebase-admin");
