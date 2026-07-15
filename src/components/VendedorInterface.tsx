@@ -652,7 +652,10 @@ export default function VendedorInterface({
       }
     }
     const ticketDate = ticket.timestamp_servidor ? toDateStr(ticket.timestamp_servidor) : getLocalTodayStr();
-    const sObj = config?.sorteos?.find(s => s.nombre === draw && s.juego === game);
+    const sObj = config?.sorteos?.find(s =>
+      (ticket.id_sorteo && s.id === ticket.id_sorteo) ||
+      (s.nombre === draw && s.juego === game)
+    );
     if (!sObj) return true;
 
     const rObj = sObj

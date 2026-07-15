@@ -61,6 +61,26 @@ const encoder = (text: string): number[] => {
 
 import { parseISOTimeParts } from "../lib/date-utils";
 
+const MESES_ABREV: Record<string, string> = {
+  "ENERO": "ENE", "FEBRERO": "FEB", "MARZO": "MAR",
+  "ABRIL": "ABR", "MAYO": "MAY", "JUNIO": "JUN",
+  "JULIO": "JUL", "AGOSTO": "AGO", "SEPTIEMBRE": "SEP",
+  "OCTUBRE": "OCT", "NOVIEMBRE": "NOV", "DICIEMBRE": "DIC",
+};
+
+const abrevMes = (nombreCompleto: string): string => {
+  return MESES_ABREV[nombreCompleto.toUpperCase()] || nombreCompleto.substring(0, 3);
+};
+
+const MESES_PATTERN = new RegExp(
+  `(\\d+)[-\\s]?(Enero|Febrero|Marzo|Abril|Mayo|Junio|Julio|Agosto|Septiembre|Octubre|Noviembre|Diciembre)`,
+  "gi"
+);
+
+const abrevMesEnNumero = (numero: string): string => {
+  return numero.replace(MESES_PATTERN, (_, dia, mes) => `${dia}-${abrevMes(mes)}`);
+};
+
 const formatTicketDate = (isoString: string): string => {
   try {
     const { year, month, day, hours, minutes } = parseISOTimeParts(isoString);
@@ -71,7 +91,7 @@ const formatTicketDate = (isoString: string): string => {
     const ampm = hours >= 12 ? "pm" : "am";
     let h12 = hours % 12;
     if (h12 === 0) h12 = 12;
-    return `${weekday} ${String(day).padStart(2, "0")} ${monthName} del ${year}, hora del registro del ticket: ${h12}:${String(minutes).padStart(2, "0")} ${ampm}`;
+    return `${weekday} ${String(day).padStart(2, "0")}/${abrevMes(monthName)}/${year} ${h12}:${String(minutes).padStart(2, "0")} ${ampm}`;
   } catch {
     return isoString;
   }
@@ -87,7 +107,7 @@ const justifyLine = (left: string, right: string, maxLen: number = 32): string =
 
 const justify3Columns = (col1: string, col2: string, col3: string, maxLen: number = 32): string => {
   const c1 = col1.padEnd(6);
-  const c3 = col3.padStart(12);
+  const c3 = col3.padStart(10);
   const remainingSpace = maxLen - c1.length - c3.length;
   const c2Len = col2.length;
   const padLeft = Math.max(0, Math.floor((remainingSpace - c2Len) / 2));
@@ -182,8 +202,15 @@ export async function loadLogoBitmap(url: string, maxWidthBytes: number = 48): P
             const col = bx * 8 + bit;
             if (col < w) {
               const idx = (y * w + col) * 4;
-              const gray = px[idx] * 0.299 + px[idx + 1] * 0.587 + px[idx + 2] * 0.114;
-              if (gray < 128) byte |= (1 << (7 - bit));
+              const r = px[idx];
+              const g = px[idx + 1];
+              const b = px[idx + 2];
+              const a = px[idx + 3];
+              // If pixel is transparent (alpha < 128), treat as white (no ink)
+              if (a >= 128) {
+                const gray = r * 0.299 + g * 0.587 + b * 0.114;
+                if (gray < 128) byte |= (1 << (7 - bit));
+              }
             }
           }
           bitmap.push(byte);
@@ -268,8 +295,8 @@ export function buildTicketBuffer(data: TicketPrintData): Uint8Array {
   // Lista de jugadas (3 columnas)
   if (data.jugadas.length > 0) {
     for (const j of data.jugadas) {
-      const num = j.numero;
-      const monto = `${data.moneda} ${j.monto.toFixed(2)}`;
+      const num = abrevMesEnNumero(j.numero);
+      const monto = `C$ ${j.monto.toFixed(2)}`;
       const premio = `C$ ${j.premio_posible.toFixed(0)}`;
       bytes.push(...line(justify3Columns(num, monto, premio), "L"));
     }
