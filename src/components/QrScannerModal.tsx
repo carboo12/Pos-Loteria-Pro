@@ -136,7 +136,7 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
             focusMode: "continuous",
             width: { ideal: 1280 },
             height: { ideal: 720 },
-          },
+          } as any,
         });
 
         if (!active) { stream.getTracks().forEach((t) => t.stop()); return; }

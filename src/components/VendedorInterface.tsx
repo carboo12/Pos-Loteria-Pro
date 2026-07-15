@@ -2271,7 +2271,7 @@ export default function VendedorInterface({
                                 const tempVenta: Venta = {
                                   id: t.id,
                                   numero_ticket: t.numero_ticket || t.id_ticket || t.id.substring(0, 7).toUpperCase(),
-                                  timestamp_servidor: t.fecha_emision_date ? t.fecha_emision_date.toISOString() : getNicaraguaISOString(),
+                                  timestamp_servidor: getNicaraguaISOString(t.fecha_emision_date),
                                   juego: game,
                                   sorteo: draw,
                                   numero_jugado: t.jugadas && t.jugadas[0] ? t.jugadas[0].numero : (t.numero_jugado || "?"),
