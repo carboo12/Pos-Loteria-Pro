@@ -100,7 +100,7 @@ export interface Venta {
   premio_posible_cs?: number; // Premio total del ticket en C$
   firma_digital: string; // e.g. "A9X-2M"
   anulado: boolean;
-  estado?: 'pendiente' | 'pagado' | 'anulado' | 'perdedor';
+  estado?: 'pendiente' | 'pagado' | 'anulado' | 'perdedor' | 'cobrado';
   jugadas?: Jugada[]; // Lista de jugadas individuales (multi-número)
   es_premiado?: boolean;   // Marcado por escrutinio server-side
   monto_premio?: number;   // Monto del premio en C$ calculado por escrutinio

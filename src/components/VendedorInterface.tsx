@@ -1535,35 +1535,6 @@ export default function VendedorInterface({
           </div>
         )}
 
-        {/* Búsqueda de Ticket QR / ID (Anti-Fraude) */}
-        <div className="bg-white p-3 rounded-2xl border border-gray-300 shadow-xs mb-4 space-y-2">
-          <form onSubmit={handleTicketQrSearch} className="flex space-x-2">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                value={qrSearchInput}
-                onChange={(e) => setQrSearchInput(e.target.value)}
-                placeholder="ID del Ticket (ej: T-00001, o escanee QR)..."
-                className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs font-sans font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
-              />
-              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
-            </div>
-             <button
-              type="button"
-              onClick={() => setIsQrScannerOpen(true)}
-              className="px-3 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-display font-black tracking-wider uppercase transition-colors flex items-center space-x-1 cursor-pointer shrink-0"
-            >
-              <QrCode className="w-3.5 h-3.5" />
-              <span>Buscar QR</span>
-            </button>
-          </form>
-          {qrSearchError && (
-            <div className="text-[10px] text-red-600 font-sans font-medium animate-pulse">
-              ⚠️ {qrSearchError}
-            </div>
-          )}
-        </div>
-
         {/* TAB 1: PANTALLA DE VENTA */}
         {activeTab === "venta" && (
           <div className="space-y-4 animate-fade-in pb-6">
@@ -2423,6 +2394,35 @@ export default function VendedorInterface({
         {/* TAB 3: PAGOS (QR SCANNERS) */}
         {activeTab === "pagos" && (
           <div className="space-y-4 animate-fade-in">
+            {/* Búsqueda de Ticket QR / ID (Anti-Fraude) */}
+            <div className="bg-white p-3 rounded-2xl border border-gray-300 shadow-xs mb-4 space-y-2">
+              <form onSubmit={handleTicketQrSearch} className="flex space-x-2">
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={qrSearchInput}
+                    onChange={(e) => setQrSearchInput(e.target.value)}
+                    placeholder="ID del Ticket (ej: T-00001, o escanee QR)..."
+                    className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs font-sans font-medium text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                  />
+                  <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
+                </div>
+                 <button
+                  type="button"
+                  onClick={() => setIsQrScannerOpen(true)}
+                  className="px-3 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-display font-black tracking-wider uppercase transition-colors flex items-center space-x-1 cursor-pointer shrink-0"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Buscar QR</span>
+                </button>
+              </form>
+              {qrSearchError && (
+                <div className="text-[10px] text-red-600 font-sans font-medium animate-pulse">
+                  ⚠️ {qrSearchError}
+                </div>
+              )}
+            </div>
+
             {/* Payment Animation Modals */}
             <AnimatePresence>
               {paymentResult && (
