@@ -52,39 +52,50 @@ function enhanceForQR(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.putImageData(imageData, 0, 0);
 }
 
+/** Performance measurement helper — only active with ?debug=perf */
+const PERF_ENABLED = typeof window !== "undefined" && window.location.search.includes("debug=perf");
+function perfLog(label: string, t0: number) {
+  if (!PERF_ENABLED) return;
+  const elapsed = (performance.now() - t0).toFixed(1);
+  console.log(`[perf] ${label}: ${elapsed}ms`);
+}
+
 /** Try to decode QR from canvas, with image enhancement */
 function decodeQR(canvas: HTMLCanvasElement): string | null {
+  const t0 = performance.now();
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
-  // Attempt 1: raw image
-  let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  // Enhance FIRST (always — safe and improves detection on wrinkled/faded thermal paper)
+  // Analysis: contrast stretch is a no-op when min=0/max=255, and grayscale never harms QR detection.
+  const tEnhance = performance.now();
+  enhanceForQR(ctx, canvas.width, canvas.height);
+  perfLog("enhanceForQR", tEnhance);
+
+  // Attempt 1: enhanced image with both inversion attempts handled by jsQR
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const tDecode = performance.now();
   let code = jsQR(imageData.data, imageData.width, imageData.height, {
     inversionAttempts: "attemptBoth",
   });
-  if (code?.data) return code.data;
+  perfLog("jsQR (attempt 1)", tDecode);
+  if (code?.data) { perfLog("decodeQR total", t0); return code.data; }
 
-  // Attempt 2: enhanced (grayscale + contrast)
-  enhanceForQR(ctx, canvas.width, canvas.height);
-  imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  code = jsQR(imageData.data, imageData.width, canvas.height, {
-    inversionAttempts: "attemptBoth",
-  });
-  if (code?.data) return code.data;
-
-  // Attempt 3: inverted colors on enhanced
+  // Attempt 2: inverted colors (fallback for negatively-printed QR)
   const d = imageData.data;
   for (let i = 0; i < d.length; i += 4) {
     d[i] = 255 - d[i];
     d[i + 1] = 255 - d[i + 1];
     d[i + 2] = 255 - d[i + 2];
   }
-  ctx.putImageData(imageData, 0, 0);
-  code = jsQR(imageData.data, imageData.width, imageData.height, {
+  const tInvert = performance.now();
+  code = jsQR(d, imageData.width, imageData.height, {
     inversionAttempts: "attemptBoth",
   });
-  if (code?.data) return code.data;
+  perfLog("jsQR (attempt 2 — inverted)", tInvert);
+  if (code?.data) { perfLog("decodeQR total", t0); return code.data; }
 
+  perfLog("decodeQR total (FAILED)", t0);
   return null;
 }
 
@@ -195,6 +206,7 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
   // ─── Capture & Process (Snapshot mode) ────────────────────────────────
 
   const captureAndScan = useCallback(async () => {
+    const t0 = performance.now();
     if (!videoRef.current || !canvasRef.current || processing || scanned || scanFailed) return;
 
     const video = videoRef.current;
@@ -215,6 +227,10 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
       // 2. Copy current frame to canvas
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
+      perfLog("resolution", canvas.width * canvas.height);
+      perfLog("resolution_width", canvas.width);
+      perfLog("resolution_height", canvas.height);
+      const tCanvas = performance.now();
       const ctx = canvas.getContext("2d");
       if (!ctx) {
         setProcessing(false);
@@ -223,11 +239,9 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
         return;
       }
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      perfLog("canvas draw", tCanvas);
 
-      // 3. Brief delay for visual transition feedback
-      await new Promise((r) => setTimeout(r, 200));
-
-      // 4. Try to decode QR from canvas with enhancements
+      // 3. Decode QR (enhance + jsQR)
       const code = decodeQR(canvas);
 
       setProcessing(false);
@@ -235,9 +249,11 @@ export function QrScannerModal({ onScan, onClose }: QrScannerModalProps) {
       if (code) {
         playBeep();
         setScanned(true);
-        setTimeout(() => onScanRef.current(code), 800);
+        setTimeout(() => onScanRef.current(code), 300);
+        perfLog("captureAndScan total (SUCCESS)", t0);
       } else {
         setScanFailed(true);
+        perfLog("captureAndScan total (FAILED)", t0);
       }
     } catch (err) {
       console.error("Scan error:", err);

@@ -441,7 +441,7 @@ ${config.formato_ticket.mensaje_pie}
                 <QRCodeSVG
                   value={ticket.numero_ticket || ticket.id}
                   size={120}
-                  level="L"
+                  level="Q"
                   bgColor="#ffffff"
                   fgColor="#000000"
                   marginSize={2}

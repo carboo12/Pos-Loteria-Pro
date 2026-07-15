@@ -1,0 +1,30 @@
+rules_version = '2';
+
+// ─── REGLAS DE DESARROLLO ────────────────────────────────────────────
+// Las reglas de producción (firestore.rules) requieren autenticación.
+// Estas reglas de desarrollo ADEMÁS restringen por IP local.
+//
+// Uso: Desplegar SOLO en la base de datos de desarrollo:
+//   firebase deploy --only firestore:devDatabase
+//
+// IP permitida: 200.62.67.82 (tu IP pública local)
+// Si cambias de red, actualiza este valor.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Restricción de IP para desarrollo:
+    // Solo permite acceso desde tu IP local en Nicaragua
+    function isDevIP() {
+      return request.ip.matches('^200\\.62\\.67\\.82$')
+          || request.ip.matches('^192\\.168\\..*')
+          || request.ip.matches('^10\\..*')
+          || request.ip.matches('^127\\.0\\.0\\.1$')
+          || request.ip.matches('^::1$');
+    }
+
+    match /{document=**} {
+      allow read, write: if request.auth != null && isDevIP();
+    }
+  }
+}

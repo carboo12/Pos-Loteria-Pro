@@ -2400,31 +2400,6 @@ export default function VendedorInterface({
         {/* TAB 3: PAGOS (QR SCANNERS) */}
         {activeTab === "pagos" && (
           <div className="space-y-4 animate-fade-in">
-            <div className="border-b border-gray-200 pb-2">
-              <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider">Validar y Pagar Premios</h3>
-              <p className="text-[10px] text-gray-400 font-sans mt-0.5">Escanea el código QR del ticket o ingresa el ID manualmente.</p>
-            </div>
-
-            {/* Single manual ID input */}
-            <form onSubmit={(e) => { e.preventDefault(); if (qrSearchInput.trim()) processPayment(qrSearchInput); }}>
-              <input
-                type="text"
-                value={qrSearchInput}
-                onChange={(e) => setQrSearchInput(e.target.value)}
-                placeholder="Ingresar ID del ticket y presionar Enter..."
-                className="w-full p-2.5 text-xs font-mono font-bold bg-white border border-gray-300 rounded-xl focus:outline-none focus:border-blue-900 shadow-sm"
-              />
-            </form>
-
-            {/* QR Scanner Activation */}
-            <button
-              onClick={() => setIsQrScannerOpen(true)}
-              className="w-full py-4 bg-blue-900 hover:bg-blue-800 text-white rounded-2xl flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-md"
-            >
-              <QrCode className="w-5 h-5" />
-              <span className="text-xs font-black uppercase tracking-wider">Abrir Escáner de Cámara</span>
-            </button>
-            
             {/* Payment Animation Modals */}
             <AnimatePresence>
               {paymentResult && (

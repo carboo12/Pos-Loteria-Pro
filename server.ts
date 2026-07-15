@@ -6,13 +6,19 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
+import { createRequire } from "node:module";
+import dotenv from "dotenv";
 
-// ─── FIREBASE ADMIN: import segura para esbuild CJS ─────────────────
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+// ─── ENVIRONMENT: load .env.local for local development ─────────────
+// Production (App Hosting) inyecta FIREBASE_CONFIG_JSON via Secret Manager.
+// Local development lee desde .env.local (NO versionado).
+dotenv.config({ path: ".env.local" });
+
+// ─── FIREBASE ADMIN: import compatible CJS/ESM ──────────────────────
+const _require = createRequire(import.meta.url);
 const firebaseAdmin: any = (() => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require("firebase-admin");
+    const mod = _require("firebase-admin");
     return mod?.default || mod;
   } catch {
     return null;
@@ -149,10 +155,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// ─── FIREBASE CONFIGURATION (hardcoded — no editable) ────────────────
+// ─── FIREBASE CONFIGURATION (env-configurable) ──────────────────────
 const FIREBASE_PROJECT_ID = "rapigestion-2";
-const FIRESTORE_DATABASE_ID = "ai-studio-puntodeventadelo-99bc134f-793f-40a0-acdb-49f626766fdc";
-console.log(`[Firebase] Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID}`);
+// En desarrollo, sobreescribe FIRESTORE_DATABASE_ID en .env.local
+// para apuntar a una base de datos de prueba. Por defecto → producción.
+const FIRESTORE_DATABASE_ID = process.env.FIRESTORE_DATABASE_ID || "ai-studio-puntodeventadelo-99bc134f-793f-40a0-acdb-49f626766fdc";
+const NODE_ENV = process.env.NODE_ENV || "development";
+console.log(`[Firebase] Proyecto: ${FIREBASE_PROJECT_ID} | Database: ${FIRESTORE_DATABASE_ID} | Entorno: ${NODE_ENV}`);
 
 function getFirestoreInstance() {
   const firestoreDb = getFirestore(FIRESTORE_DATABASE_ID);
