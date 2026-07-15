@@ -323,11 +323,11 @@ export default function VendedorInterface({
     const multiplier = calculatePrizeMultiplier(selectedJuego, selectedSorteo);
     const montoInCs = moneda === "USD" ? numericAmount * (config.tasa_cambio || 36.50) : numericAmount;
     const premioPosibleCs = montoInCs * multiplier;
-    const fechaVenta = fechaVentaToDateStr(fechaVenta);
+    const fechaVentaStr = fechaVentaToDateStr(fechaVenta);
 
     // Group identical numbers: if same number already in cart, sum monto and recalculate prize
     const existingIndex = jugadas.findIndex(
-      (j) => j.numero === numeroJugado && j.fecha_venta === fechaVenta
+      (j) => j.numero === numeroJugado && j.fecha_venta === fechaVentaStr
     );
 
     if (existingIndex > -1) {
@@ -347,7 +347,7 @@ export default function VendedorInterface({
         numero: numeroJugado,
         monto: numericAmount,
         premio_posible: premioPosibleCs,
-        fecha_venta,
+        fecha_venta: fechaVentaStr,
       };
       setJugadas([...jugadas, nuevaJugada]);
       toast.success("¡Número añadido con éxito!", { position: 'top-center' });

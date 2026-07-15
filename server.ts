@@ -2439,6 +2439,9 @@ function registerCatchAllRoutes() {
     }));
     app.use('/assets', (_req, res) => { res.status(404).send('Asset no encontrado'); });
 
+    // Serve root static assets (logo.png, manifest.json, etc.)
+    app.use(express.static(distPath, { index: false }));
+
     // sw.js: never cache
     app.get('/sw.js', (_req, res) => {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
