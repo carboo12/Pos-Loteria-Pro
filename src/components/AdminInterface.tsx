@@ -38,7 +38,7 @@ import {
   EyeOff
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
-import { toDateStr, getTicketDate, getLocalTodayStr, getNicaraguaISOString, parseISOTimeParts } from "../lib/date-utils";
+import { toDateStr, getTicketDate, getLocalTodayStr, getNicaraguaISOString, parseISOTimeParts, getNicaraguaNow } from "../lib/date-utils";
 
 import { useFacturacion } from "../hooks/useFacturacion";
 import { createPortal } from "react-dom";
@@ -834,7 +834,8 @@ export default function AdminInterface({
       printCenter("FIN DEL REPORTE", 8, true);
       const ticketFooter = config?.formato_ticket?.mensaje_pie || "¡Gracias por su preferencia!";
       printCenter(ticketFooter, 7, false);
-      printCenter(now.toLocaleDateString("es-ES") + " " + now.toLocaleTimeString("es-ES"), 6, false);
+      const nowObj = getNicaraguaNow();
+      printCenter(nowObj.toLocaleDateString("es-ES") + " " + nowObj.toLocaleTimeString("es-ES"), 6, false);
 
       // Save PDF
       doc.save(`reporte_termico_80mm_${getLocalTodayStr()}.pdf`);
@@ -1259,8 +1260,8 @@ export default function AdminInterface({
         return;
       }
     } else if (matchedJuego === "Pega 3") {
-      if (!/^\d{6}$/.test(winningNum)) {
-        setAlertText("Pega 3 requiere ingresar exactamente tres números de 2 dígitos (total 6 dígitos).");
+      if (!/^\d{3}$/.test(winningNum)) {
+        setAlertText("Pega 3 requiere ingresar exactamente un número de 3 dígitos.");
         return;
       }
     } else if (matchedJuego === "Súper Premio") {

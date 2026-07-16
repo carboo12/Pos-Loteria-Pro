@@ -913,7 +913,7 @@ export default function VendedorInterface({
   // Mappings of games by country
   const PAISES_GAMES = {
     Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"],
-    Honduras: ["La Diaria", "Premia2", "Pega 3", "Súper Premio"],
+    Honduras: ["La Diaria", "Premia2", "Pega 3"],
     "El Salvador": ["Diaria"],
     "La Primera": ["La Primera"],
     "Costa Rica": ["3 Monazos", "Tica"]
