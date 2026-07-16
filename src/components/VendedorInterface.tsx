@@ -142,6 +142,15 @@ export default function VendedorInterface({
     config.cobros || []
   );
   const [showDetalleFacturacion, setShowDetalleFacturacion] = useState(false);
+
+  // rango de tickets memoizado para la vista Reportes (solo id_vendedor + fecha)
+  const rangeTickets = useMemo(() => {
+    return reportTickets.filter(t => {
+      if (t.id_vendedor !== user.id) return false;
+      const ticketDateStr = getTicketDate(t);
+      return ticketDateStr >= reportFilterFechaInicio && ticketDateStr <= reportFilterFechaFin;
+    });
+  }, [reportTickets, user.id, reportFilterFechaInicio, reportFilterFechaFin]);
   
   // País state
   const [selectedPais, setSelectedPais] = useState<"Nicaragua" | "Honduras" | "El Salvador" | "La Primera" | "Costa Rica">("Nicaragua");
@@ -918,8 +927,6 @@ export default function VendedorInterface({
       const cierreTotalMin = cierreHour * 60 + cierreMin;
       const currentTotalMin = currentHour * 60 + currentMin;
       const passedCierre = currentTotalMin >= cierreTotalMin;
-
-      console.log(`[isSorteoCerrado] ${s.nombre} | hora_cierre="${s.hora_cierre}" → ${cierreHour}:${String(cierreMin).padStart(2,"0")} (min=${cierreTotalMin}) | nicNow=${currentHour}:${String(currentMin).padStart(2,"0")} (min=${currentTotalMin}) | ${passedCierre ? "CERRADO" : "ABIERTO"}`);
 
       return passedCierre;
     } catch (e) {
@@ -2032,11 +2039,6 @@ export default function VendedorInterface({
           const [factData] = vendedorFacturacion;
           const { vendido: facturado, pagado, ingresos, aPagar, cobrado: cobro, total, ganancia } = factData || { vendido: 0, pagado: 0, ingresos: 0, aPagar: 0, cobrado: 0, total: 0, ganancia: 0 };
 
-          const rangeTickets = reportTickets.filter(t => {
-            const ticketDateStr = getTicketDate(t);
-            return ticketDateStr >= reportFilterFechaInicio && ticketDateStr <= reportFilterFechaFin;
-          });
-
           const formatCurrency = (val: number) => {
             return `C$ ${val.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
           };
@@ -2184,6 +2186,21 @@ export default function VendedorInterface({
                         draw = parts.slice(1).join(" ");
                       }
 
+                      // Buscar objeto sorteo para control de impresión
+                      const sObj = config?.sorteos?.find(s =>
+                        (t.id_sorteo && s.id === t.id_sorteo) ||
+                        (s.nombre === draw && s.juego === game)
+                      );
+                      const isImpresionBloqueada = user.rol !== "administrador" && sObj
+                        ? (() => {
+                            const nicNow = getNicaraguaNow();
+                            const [hora, min] = (sObj.hora_sorteo || "00:00").split(":").map(Number);
+                            const sorteoTotalMin = hora * 60 + min;
+                            const currentTotalMin = nicNow.getHours() * 60 + nicNow.getMinutes();
+                            return currentTotalMin > sorteoTotalMin;
+                          })()
+                        : false;
+
                       const ticketPrize = (typeof t.monto_premio === "number" && t.monto_premio > 0) ? t.monto_premio : getTicketTheoreticalPrize(t, config);
                       const isWinner = (typeof t.monto_premio === "number" && t.monto_premio > 0) || ticketPrize > 0;
 
@@ -2290,6 +2307,10 @@ export default function VendedorInterface({
                                   toast.error("No se puede reimprimir un ticket anulado.", { position: 'top-center' });
                                   return;
                                 }
+                                if (isImpresionBloqueada) {
+                                  toast.error("El horario del sorteo ya pasó. No se puede reimprimir.", { position: 'top-center' });
+                                  return;
+                                }
                                 if (printerStatus !== "connected" || !printerRef.current) {
                                   toast.error("La impresora Bluetooth no está conectada.", { position: 'top-center' });
                                   return;
@@ -2326,11 +2347,12 @@ export default function VendedorInterface({
                                   toast.error("Error inesperado al imprimir", { position: 'top-center' });
                                 });
                               }}
-                              className={`py-1.5 px-0.5 rounded-lg text-[9px] font-black uppercase transition-all border text-center flex items-center justify-center cursor-pointer ${
-                                t.estado === "anulado"
-                                  ? "bg-gray-100 text-gray-400 border-gray-200"
-                                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                              className={`py-1.5 px-0.5 rounded-lg text-[9px] font-black uppercase transition-all border text-center flex items-center justify-center ${
+                                t.estado === "anulado" || isImpresionBloqueada
+                                  ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
+                                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 cursor-pointer"
                               }`}
+                              disabled={t.estado === "anulado" || isImpresionBloqueada}
                             >
                               Imprimir
                             </button>
