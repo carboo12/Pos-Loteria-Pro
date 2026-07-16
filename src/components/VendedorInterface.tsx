@@ -145,11 +145,30 @@ export default function VendedorInterface({
 
   // rango de tickets memoizado para la vista Reportes (solo id_vendedor + fecha)
   const rangeTickets = useMemo(() => {
-    return reportTickets.filter(t => {
+    const filtered = reportTickets.filter(t => {
       if (t.id_vendedor !== user.id) return false;
       const ticketDateStr = getTicketDate(t);
       return ticketDateStr >= reportFilterFechaInicio && ticketDateStr <= reportFilterFechaFin;
     });
+    // DEBUG: inspeccionar ticket #001145
+    const ticket145 = reportTickets.find(t => t.id === "001145" || t.numero_ticket === "001145");
+    if (ticket145) {
+      console.log("[Reportes DEBUG] ticket #001145 ENCONTRADO en reportTickets:", {
+        id_vendedor: ticket145.id_vendedor,
+        user_id: user.id,
+        match_vendedor: ticket145.id_vendedor === user.id,
+        fecha_venta: ticket145.fecha_venta,
+        timestamp_servidor: ticket145.timestamp_servidor,
+        ticketDateStr: getTicketDate(ticket145),
+        filterInicio: reportFilterFechaInicio,
+        filterFin: reportFilterFechaFin,
+        pasaFecha: getTicketDate(ticket145) >= reportFilterFechaInicio && getTicketDate(ticket145) <= reportFilterFechaFin,
+        estaEnResultado: filtered.some(t => t.id === "001145" || t.numero_ticket === "001145")
+      });
+    } else {
+      console.log("[Reportes DEBUG] ticket #001145 NO está en reportTickets. reportTickets.length:", reportTickets.length);
+    }
+    return filtered;
   }, [reportTickets, user.id, reportFilterFechaInicio, reportFilterFechaFin]);
   
   // País state
