@@ -1570,6 +1570,16 @@ export default function VendedorInterface({
         {/* Live Rate and clock display */}
         <div className="mt-2 pt-2 border-t border-blue-800 flex justify-between items-center text-[11px] font-mono font-bold text-blue-200">
           <span>T. CAMBIO: C$ {(config?.tasa_cambio ?? 36.50).toFixed(2)}</span>
+
+          {/* Sorteo activo — centro */}
+          <span className="flex items-center gap-1.5 text-[11px] font-black text-white uppercase tracking-wide">
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${selectedSorteo ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
+            {selectedSorteo
+              ? selectedSorteo
+              : <span className="text-blue-400 font-normal normal-case tracking-normal">— Sin sorteo —</span>
+            }
+          </span>
+
           <span className="bg-blue-950 px-2 py-0.5 rounded text-white animate-pulse">Reloj: {timeText}</span>
         </div>
       </div>
