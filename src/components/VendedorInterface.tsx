@@ -365,11 +365,13 @@ export default function VendedorInterface({
     const multiplier = calculatePrizeMultiplier(selectedJuego, selectedSorteo);
     const montoInCs = moneda === "USD" ? numericAmount * (config.tasa_cambio || 36.50) : numericAmount;
     const premioPosibleCs = montoInCs * multiplier;
-    const fechaVentaStr = fechaVentaToDateStr(fechaVenta);
+    // fecha_apuesta: la fecha del sorteo para el que se apuesta (ej: "16-Julio" en juego Fechas).
+    // IMPORTANTE: esto NO es la fecha de venta del ticket — se guarda en jugada.fecha_apuesta, no en ticket.fecha_venta.
+    const fechaApuestaStr = fechaVentaToDateStr(fechaVenta);
 
     // Group identical numbers: if same number already in cart, sum monto and recalculate prize
     const existingIndex = jugadas.findIndex(
-      (j) => j.numero === numeroJugado && j.fecha_venta === fechaVentaStr
+      (j) => j.numero === numeroJugado && j.fecha_apuesta === fechaApuestaStr
     );
 
     if (existingIndex > -1) {
@@ -389,7 +391,9 @@ export default function VendedorInterface({
         numero: numeroJugado,
         monto: numericAmount,
         premio_posible: premioPosibleCs,
-        fecha_venta: fechaVentaStr,
+        // fecha_apuesta: fecha del sorteo a jugar (puede ser futura en juego Fechas).
+        // Usar nombre distinto a fecha_venta para evitar colisión con el campo raíz del ticket.
+        fecha_apuesta: fechaApuestaStr,
       };
       setJugadas([...jugadas, nuevaJugada]);
       toast.success("¡Número añadido con éxito!", { position: 'top-center' });
@@ -1312,10 +1316,9 @@ export default function VendedorInterface({
       setIsSubmittingTicket(true);
       try {
         // Send ticket data to server — server creates atomically in Firestore + local DB
-      const response = await fetch("/api/ventas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      // AUDITORÍA: fecha_venta es SIEMPRE la fecha real de hoy (getLocalTodayStr()).
+      // La fecha del sorteo apostado (juego Fechas) va en jugada.fecha_apuesta, NUNCA en ticket.fecha_venta.
+      const ticketPayload = {
           juego: selectedJuego,
           sorteo: selectedSorteo,
           id_sorteo: config?.sorteos?.find(s => s.nombre === selectedSorteo && s.juego === selectedJuego)?.id || "",
@@ -1325,10 +1328,22 @@ export default function VendedorInterface({
           id_vendedor: user.id,
           nombre_cliente: nombreCliente.trim() || "Genérico",
           premio_posible_cs: totalPremioCs,
-          jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto })),
-          fecha_venta: fechaVentaToDateStr(fechaVenta),
+          // jugadas: solo numero, monto y fecha_apuesta (la fecha del sorteo a jugar).
+          // NUNCA incluir fecha_venta aquí — ese campo pertenece al nivel raíz del ticket.
+          jugadas: jugadas.map(j => ({
+            numero: j.numero,
+            monto: j.monto,
+            ...(j.fecha_apuesta ? { fecha_apuesta: j.fecha_apuesta } : {})
+          })),
+          // fecha_venta = fecha real de emisión del ticket (hoy), independiente de la fecha apostada.
+          fecha_venta: getLocalTodayStr(),
           pais: ""
-        })
+      };
+      console.log("[AUDIT ticketPayload]", JSON.stringify(ticketPayload, null, 2));
+      const response = await fetch("/api/ventas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ticketPayload)
       });
 
       if (!response.ok) {
@@ -1342,7 +1357,8 @@ export default function VendedorInterface({
         id_ticket: createdSale.numero_ticket,
         numero_ticket: createdSale.numero_ticket,
         timestamp_servidor: createdSale.timestamp_servidor,
-        fecha_venta: createdSale.fecha_venta || fechaVentaToDateStr(fechaVenta),
+        // fecha_venta: siempre la fecha real del servidor (hoy), nunca la fecha del sorteo apostado.
+        fecha_venta: createdSale.fecha_venta || getLocalTodayStr(),
         juego: selectedJuego,
         sorteo: selectedSorteo,
         numero_jugado: jugadas[0].numero,
@@ -1355,7 +1371,8 @@ export default function VendedorInterface({
         firma_digital: createdSale.firma_digital,
         anulado: false,
         estado: "pendiente",
-        jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto, premio_posible: j.premio_posible, fecha_venta: j.fecha_venta || fechaVentaToDateStr(fechaVenta) }))
+        // jugadas: fecha_apuesta (no fecha_venta) para evitar colisión con el campo raíz.
+        jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto, premio_posible: j.premio_posible, ...(j.fecha_apuesta ? { fecha_apuesta: j.fecha_apuesta } : {}) }))
       };
 
       onNewSaleCreated(syncedTicket);

@@ -1639,7 +1639,8 @@ app.get("/api/ventas", (req, res) => {
 });
 
 app.post("/api/ventas", checkAuth(), async (req, res) => {
-  const { juego, sorteo, id_sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente, premio_posible_cs, jugadas, fecha_venta } = req.body;
+  const { juego, sorteo, id_sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente,
+          premio_posible_cs, jugadas, fecha_venta } = req.body;
 
   if (!juego || !sorteo || !numero_jugado || !monto_pago || !moneda || !id_vendedor) {
     console.log("Validación de venta fallida, detalles:", { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente });
@@ -1661,6 +1662,9 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     ? db.configuracion.sorteos.find((s: any) => s.id === id_sorteo)
     : db.configuracion.sorteos.find((s: any) => s.nombre === sorteo && s.juego === juego);
   const now = getNicaraguaNow();
+  // fecha_venta_servidor: SIEMPRE la fecha real del servidor (hoy).
+  // No confiamos en fecha_venta del cliente — en juego Fechas puede ser la fecha del sorteo apostado.
+  const fecha_venta_servidor = getLocalDateString(now);
 
   if (!selectedSorteo) {
     return res.status(400).json({
@@ -1846,16 +1850,30 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
       const ticketRef = firestoreDb.collection("tickets").doc(numero_ticket);
       const signature = generateDigitalSignature(numero_ticket, serverTimeStr, juego, numero_jugado, monto_pago, moneda);
 
+      // Normalize jugadas: preserve fecha_apuesta if present, but NEVER let a jugada's date
+      // pollute the ticket root's fecha_venta.
+      const jugadasNormalized = Array.isArray(jugadas)
+        ? jugadas.map((j: any) => ({
+            numero: j.numero,
+            monto: Number(j.monto),
+            ...(j.fecha_apuesta ? { fecha_apuesta: j.fecha_apuesta } : {})
+          }))
+        : [{ numero: numero_jugado, monto: Number(monto_pago) }];
+
+      // AUDIT: verify fecha_venta is today before writing to Firestore
+      process.stdout.write(`[AUDIT Firestore] ticket ${numero_ticket}: fecha_venta_servidor=${fecha_venta_servidor} | jugadas=${JSON.stringify(jugadasNormalized)}\n`);
+
       transaction.set(ticketRef, {
         // ── New canonical fields ──
         id_ticket: numero_ticket,
         id_vendedor,
         fecha_emision: serverTimeStr,
-        fecha_venta: fecha_venta || "",
+        // fecha_venta: SIEMPRE la fecha real del servidor. Nunca la fecha del sorteo apostado (juego Fechas).
+        fecha_venta: fecha_venta_servidor,
         id_juego: juego,
         id_sorteo: selectedSorteo?.id || id_sorteo || sorteo,
         juego_sorteo: `${juego} ${sorteo}`,
-        jugadas: Array.isArray(jugadas) ? jugadas : [{ numero: numero_jugado, monto: Number(monto_pago) }],
+        jugadas: jugadasNormalized,
         estado: "pendiente",
         total_apostado: Number(monto_pago),
         nombre_vendedor: (user.nombre || '').toUpperCase().trim(),
@@ -1894,7 +1912,8 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     id_ticket: ticketId,
     numero_ticket: ticketId,
     timestamp_servidor: serverTimeStr,
-    fecha_venta: fecha_venta || "",
+    // fecha_venta: SIEMPRE la fecha del servidor. Nunca la del sorteo apostado.
+    fecha_venta: fecha_venta_servidor,
     juego,
     sorteo,
     id_sorteo: selectedSorteo?.id || id_sorteo || "",
@@ -1908,8 +1927,8 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     firma_digital: signature,
     anulado: false,
     estado: "pendiente",
-    // Multi-número: persistir jugadas si vienen
-    ...(Array.isArray(jugadas) && jugadas.length > 0 ? { jugadas } : {})
+    // Multi-número: persistir jugadas con fecha_apuesta si vienen
+    ...(Array.isArray(jugadas) && jugadas.length > 0 ? { jugadas: jugadas.map((j: any) => ({ numero: j.numero, monto: Number(j.monto), ...(j.fecha_apuesta ? { fecha_apuesta: j.fecha_apuesta } : {}) })) } : {})
   };
 
   db.ventas.push(newSale);
