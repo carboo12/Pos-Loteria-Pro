@@ -1204,6 +1204,57 @@ app.post("/api/limites-numeros", requireAdmin, (req, res) => {
   res.status(201).json(newLimit);
 });
 
+app.put("/api/limites-numeros/:id", requireAdmin, (req, res) => {
+  const { id } = req.params;
+  const {
+    juego,
+    numero,
+    max_monto,
+    id_vendedor,
+    vendedorId,
+    pais,
+    sorteo,
+    hora,
+    montoMaximo,
+    hora_limite,
+    numero_jugado,
+    techo_dinero
+  } = req.body;
+
+  db.configuracion.limites_numeros = db.configuracion.limites_numeros || [];
+  const index = db.configuracion.limites_numeros.findIndex((l: any) => l.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "Límite no encontrado." });
+  }
+
+  const resolvedJuego = juego || sorteo || "TODOS";
+  const resolvedNumero = numero !== undefined ? numero : (numero_jugado !== undefined ? numero_jugado : "TODOS");
+  const resolvedMonto = max_monto !== undefined ? Number(max_monto) : (montoMaximo !== undefined ? Number(montoMaximo) : (techo_dinero !== undefined ? Number(techo_dinero) : 0));
+  const resolvedVendedor = id_vendedor || vendedorId || "";
+
+  const updatedLimit = {
+    ...db.configuracion.limites_numeros[index],
+    juego: resolvedJuego,
+    numero: resolvedNumero,
+    max_monto: resolvedMonto,
+    id_vendedor: resolvedVendedor,
+    vendedorId: resolvedVendedor,
+    pais: pais || "",
+    sorteo: sorteo || resolvedJuego,
+    hora: hora || hora_limite || "TODOS",
+    montoMaximo: resolvedMonto,
+    techo_dinero: resolvedMonto,
+    numero_jugado: resolvedNumero,
+    hora_limite: hora || hora_limite || "TODOS"
+  };
+
+  db.configuracion.limites_numeros[index] = updatedLimit;
+  saveToDB();
+  res.json(updatedLimit);
+});
+
+
 app.delete("/api/limites-numeros", requireAdmin, (req, res) => {
   const id = req.query.id;
   if (!id) {
@@ -1369,6 +1420,12 @@ app.post("/api/resultados", requireAdmin, async (req, res) => {
     return res.status(400).json({ error: "Sorteo, Fecha y Número ganador son requeridos." });
   }
 
+  db.configuracion.resultados = db.configuracion.resultados || [];
+  const exists = db.configuracion.resultados.some((r: any) => r.id_sorteo === id_sorteo && r.fecha === fecha);
+  if (exists) {
+    return res.status(400).json({ error: "Ya existe un resultado registrado para este sorteo en la fecha seleccionada." });
+  }
+
   const newResult = {
     id: "res_" + Math.random().toString(36).substring(2, 9),
     id_sorteo,
@@ -1412,6 +1469,11 @@ app.put("/api/resultados/:id", requireAdmin, async (req, res) => {
   const idx = db.configuracion.resultados.findIndex((r: any) => r.id === id);
   if (idx === -1) {
     return res.status(404).json({ error: "Resultado no encontrado." });
+  }
+
+  const exists = db.configuracion.resultados.some((r: any) => r.id_sorteo === id_sorteo && r.fecha === fecha && r.id !== id);
+  if (exists) {
+    return res.status(400).json({ error: "Ya existe un resultado registrado para este sorteo en la fecha seleccionada." });
   }
 
   db.configuracion.resultados[idx].id_sorteo = id_sorteo;

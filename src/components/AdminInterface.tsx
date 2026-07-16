@@ -237,6 +237,7 @@ export default function AdminInterface({
   const [numeroLimiteInput, setNumeroLimiteInput] = useState("");
   const [limiteDineroInput, setLimiteDineroInput] = useState("");
   const [selectedHoraLimite, setSelectedHoraLimite] = useState("TODOS");
+  const [editingLimitId, setEditingLimitId] = useState<string | null>(null);
 
   // Reports (Reportes) Section States
   const [reportFilterVendedor, setReportFilterVendedor] = useState("TODOS");
@@ -1243,6 +1244,19 @@ export default function AdminInterface({
       return;
     }
 
+    // Check if there is already a result for this sorteo and date (excluding the one being edited, if any)
+    const activeResultados = config?.resultados || [];
+    const alreadyExists = activeResultados.some(
+      (r: any) =>
+        r.id_sorteo === selectedSorteoResultados &&
+        r.fecha === fechaResultadosInput &&
+        (!resultadoEditando || r.id !== resultadoEditando.id)
+    );
+    if (alreadyExists) {
+      setAlertText("Ya existe un resultado registrado para este sorteo en la fecha seleccionada.");
+      return;
+    }
+
     // Dynamic validations by Game type
     if (matchedJuego === "Diaria" || matchedJuego === "La Diaria" || matchedJuego === "Terminación 2" || matchedJuego === "La Primera" || matchedJuego === "Tica") {
       if (!/^\d{2}$/.test(winningNum)) {
@@ -1348,11 +1362,13 @@ export default function AdminInterface({
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/limites-numeros", {
-        method: "POST",
+      const url = editingLimitId ? `/api/limites-numeros/${editingLimitId}` : "/api/limites-numeros";
+      const method = editingLimitId ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method: method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: "lim_" + Math.random().toString(36).substring(2, 9),
+          id: editingLimitId || "lim_" + Math.random().toString(36).substring(2, 9),
           id_vendedor: selectedVendedorLimite,
           vendedorId: selectedVendedorLimite,
           pais: selectedPaisLimite,
@@ -1369,9 +1385,16 @@ export default function AdminInterface({
       });
 
       if (res.ok) {
-        setSuccessText("Límite de venta guardado con éxito.");
+        setSuccessText(editingLimitId ? "Límite de venta actualizado con éxito." : "Límite de venta guardado con éxito.");
         setNumeroLimiteInput("");
         setLimiteDineroInput("");
+        setEditingLimitId(null);
+        // Reset dropdowns to defaults
+        setSelectedVendedorLimite("TODOS");
+        setSelectedPaisLimite("TODOS");
+        setSelectedJuegoLimite("TODOS");
+        setSelectedSorteoLimite("TODOS");
+        setSelectedHoraLimite("TODOS");
         await fetchLimitsList();
       } else {
         const data = await res.json();
@@ -1381,6 +1404,28 @@ export default function AdminInterface({
       setAlertText("Error de red al guardar el límite.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Start editing a number sales limit
+  const handleStartEditLimite = (lim: any) => {
+    setEditingLimitId(lim.id);
+    setSelectedVendedorLimite(lim.id_vendedor || "TODOS");
+    setSelectedPaisLimite(lim.pais || "TODOS");
+    setSelectedJuegoLimite(lim.juego || "TODOS");
+    setSelectedSorteoLimite(lim.sorteo || "TODOS");
+    setSelectedHoraLimite(lim.hora_limite || lim.hora || "TODOS");
+    
+    const limitNum = lim.numero ?? lim.numero_jugado ?? "TODOS";
+    setNumeroLimiteInput(limitNum === "TODOS" ? "" : String(limitNum));
+    
+    const limitAmt = lim.max_monto ?? lim.techo_dinero ?? 0;
+    setLimiteDineroInput(String(limitAmt));
+
+    // Scroll to the configuration form to ensure visibility
+    const formElement = document.querySelector("form");
+    if (formElement) {
+      formElement.scrollIntoView({ behavior: "smooth" });
     }
   };
 
@@ -2934,7 +2979,9 @@ export default function AdminInterface({
               
               {/* Left side: Create limit rule form */}
               <div className="lg:col-span-5 bg-white p-6 rounded-2xl border border-gray-300 shadow-xs">
-                <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block border-b border-gray-100 pb-2 mb-4">Configurar Techo o Límite</span>
+                <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block border-b border-gray-100 pb-2 mb-4">
+                  {editingLimitId ? "Editar Techo o Límite" : "Configurar Techo o Límite"}
+                </span>
                 
                 <form onSubmit={handleSaveLimite} className="space-y-4 font-sans">
                   <div className="grid grid-cols-2 gap-3">
@@ -3069,13 +3116,38 @@ export default function AdminInterface({
                     </div>
                   </div>
 
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="w-full py-3 min-h-[44px] flex items-center justify-center bg-[#1E3A8A] hover:bg-blue-800 text-white font-display font-black text-xs uppercase tracking-wider rounded-xl border-b-2 border-blue-950 shadow-xs cursor-pointer space-x-2"
-                  >
-                    <span>{submitting ? "CONFIGURANDO..." : "GUARDAR TECHO DE VENTA"}</span>
-                  </button>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="submit"
+                      disabled={submitting}
+                      className="w-full py-3 min-h-[44px] flex items-center justify-center bg-[#1E3A8A] hover:bg-blue-800 text-white font-display font-black text-xs uppercase tracking-wider rounded-xl border-b-2 border-blue-950 shadow-xs cursor-pointer space-x-2"
+                    >
+                      <span>
+                        {submitting 
+                          ? (editingLimitId ? "ACTUALIZANDO..." : "CONFIGURANDO...") 
+                          : (editingLimitId ? "ACTUALIZAR TECHO DE VENTA" : "GUARDAR TECHO DE VENTA")}
+                      </span>
+                    </button>
+
+                    {editingLimitId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingLimitId(null);
+                          setNumeroLimiteInput("");
+                          setLimiteDineroInput("");
+                          setSelectedVendedorLimite("TODOS");
+                          setSelectedPaisLimite("TODOS");
+                          setSelectedJuegoLimite("TODOS");
+                          setSelectedSorteoLimite("TODOS");
+                          setSelectedHoraLimite("TODOS");
+                        }}
+                        className="w-full py-3 min-h-[44px] flex items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 font-display font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer"
+                      >
+                        Cancelar Edición
+                      </button>
+                    )}
+                  </div>
                 </form>
               </div>
 
@@ -3132,10 +3204,18 @@ export default function AdminInterface({
                                 C$ {limitAmt.toLocaleString("es-ES")}
                               </td>
                               <td className="p-2.5 font-mono text-gray-500 uppercase">{lim.hora_limite || lim.hora || "CUALQUIERA"}</td>
-                              <td className="p-2.5 text-right">
+                              <td className="p-2.5 text-right flex items-center justify-end gap-1">
+                                <button
+                                  onClick={() => handleStartEditLimite(lim)}
+                                  className="w-11 h-11 inline-flex items-center justify-center text-blue-600 hover:bg-blue-50 rounded-lg border border-transparent hover:border-blue-200 transition-all cursor-pointer shrink-0"
+                                  title="Editar"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
                                 <button
                                   onClick={() => handleDeleteLimite(lim.id)}
                                   className="w-11 h-11 inline-flex items-center justify-center text-red-600 hover:bg-red-50 rounded-lg border border-transparent hover:border-red-200 transition-all cursor-pointer shrink-0"
+                                  title="Eliminar"
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </button>
