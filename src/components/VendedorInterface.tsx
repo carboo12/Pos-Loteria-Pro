@@ -129,7 +129,13 @@ export default function VendedorInterface({
   const [activeTab, setActiveTab] = useState<"venta" | "reportes" | "pagos">("venta");
   
   // Filtros y estados de Firestore para Reportes
-  const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => getLocalTodayStr());
+  const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => {
+    // Default: first day of current month so all month's tickets are visible
+    const now = getNicaraguaNow();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    return `${y}-${m}-01`;
+  });
   const [reportFilterFechaFin, setReportFilterFechaFin] = useState(() => getLocalTodayStr());
   const [reportTickets, setReportTickets] = useState<any[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
@@ -145,30 +151,11 @@ export default function VendedorInterface({
 
   // rango de tickets memoizado para la vista Reportes (solo id_vendedor + fecha)
   const rangeTickets = useMemo(() => {
-    const filtered = reportTickets.filter(t => {
+    return reportTickets.filter(t => {
       if (t.id_vendedor !== user.id) return false;
       const ticketDateStr = getTicketDate(t);
       return ticketDateStr >= reportFilterFechaInicio && ticketDateStr <= reportFilterFechaFin;
     });
-    // DEBUG: inspeccionar ticket #001145
-    const ticket145 = reportTickets.find(t => t.id === "001145" || t.numero_ticket === "001145");
-    if (ticket145) {
-      console.log("[Reportes DEBUG] ticket #001145 ENCONTRADO en reportTickets:", {
-        id_vendedor: ticket145.id_vendedor,
-        user_id: user.id,
-        match_vendedor: ticket145.id_vendedor === user.id,
-        fecha_venta: ticket145.fecha_venta,
-        timestamp_servidor: ticket145.timestamp_servidor,
-        ticketDateStr: getTicketDate(ticket145),
-        filterInicio: reportFilterFechaInicio,
-        filterFin: reportFilterFechaFin,
-        pasaFecha: getTicketDate(ticket145) >= reportFilterFechaInicio && getTicketDate(ticket145) <= reportFilterFechaFin,
-        estaEnResultado: filtered.some(t => t.id === "001145" || t.numero_ticket === "001145")
-      });
-    } else {
-      console.log("[Reportes DEBUG] ticket #001145 NO está en reportTickets. reportTickets.length:", reportTickets.length);
-    }
-    return filtered;
   }, [reportTickets, user.id, reportFilterFechaInicio, reportFilterFechaFin]);
   
   // País state
@@ -1027,14 +1014,20 @@ export default function VendedorInterface({
       setFechaVenta({ dia: String(nicNow.getDate()).padStart(2, "0"), mes: MESES[nicNow.getMonth()], anio: nicNow.getFullYear() });
     }
     
-    // Set default value for Fechas
+    // Set default value for Fechas and auto-focus the appropriate input
     if (selectedJuego === "Fechas") {
       const fechaStr = newActiveDraw ? getNextValidDate(newActiveDraw, getNicaraguaNow()) : getLocalTodayStr();
       const d = new Date(fechaStr + "T12:00:00");
       const diaF = String(d.getDate()).padStart(2, "0");
       setNumeroJugado(`${diaF}-${MESES[d.getMonth()]}`);
+      // Auto-focus the Día input when switching to Fechas game
+      setTimeout(() => {
+        const diaInput = document.getElementById("fecha-dia-input") as HTMLInputElement;
+        if (diaInput) diaInput.focus();
+      }, 80);
     } else {
       setNumeroJugado("");
+      setTimeout(() => numeroInputRef.current?.focus(), 80);
     }
   }, [selectedJuego, selectedPais, config.sorteos]);
 
@@ -2098,24 +2091,71 @@ export default function VendedorInterface({
               </div>
 
               {/* Rango de Fechas */}
-              <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-2xl border border-gray-200 shadow-xs">
-                <div>
-                  <label className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-1">Fecha Inicio</label>
-                  <input
-                    type="date"
-                    value={reportFilterFechaInicio}
-                    onChange={(e) => setReportFilterFechaInicio(e.target.value)}
-                    className="w-full p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
-                  />
+              <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-xs space-y-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-1">Fecha Inicio</label>
+                    <input
+                      type="date"
+                      value={reportFilterFechaInicio}
+                      onChange={(e) => setReportFilterFechaInicio(e.target.value)}
+                      className="w-full p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-1">Fecha Fin</label>
+                    <input
+                      type="date"
+                      value={reportFilterFechaFin}
+                      onChange={(e) => setReportFilterFechaFin(e.target.value)}
+                      className="w-full p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-1">Fecha Fin</label>
-                  <input
-                    type="date"
-                    value={reportFilterFechaFin}
-                    onChange={(e) => setReportFilterFechaFin(e.target.value)}
-                    className="w-full p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
-                  />
+                {/* Quick range buttons */}
+                <div className="flex gap-1.5">
+                  {([
+                    {
+                      label: "Hoy",
+                      fn: () => { const t = getLocalTodayStr(); setReportFilterFechaInicio(t); setReportFilterFechaFin(t); }
+                    },
+                    {
+                      label: "Semana",
+                      fn: () => {
+                        const now = getNicaraguaNow();
+                        const dayOfWeek = now.getDay();
+                        const diffToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                        const mon = new Date(now);
+                        mon.setDate(now.getDate() - diffToMon);
+                        const pad = (n: number) => String(n).padStart(2, "0");
+                        const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+                        setReportFilterFechaInicio(fmt(mon));
+                        setReportFilterFechaFin(getLocalTodayStr());
+                      }
+                    },
+                    {
+                      label: "Mes",
+                      fn: () => {
+                        const now = getNicaraguaNow();
+                        const y = now.getFullYear();
+                        const m = String(now.getMonth() + 1).padStart(2, "0");
+                        setReportFilterFechaInicio(`${y}-${m}-01`);
+                        setReportFilterFechaFin(getLocalTodayStr());
+                      }
+                    },
+                    {
+                      label: "Todo",
+                      fn: () => { setReportFilterFechaInicio("2025-01-01"); setReportFilterFechaFin(getLocalTodayStr()); }
+                    },
+                  ] as { label: string; fn: () => void }[]).map(({ label, fn }) => (
+                    <button
+                      key={label}
+                      onClick={fn}
+                      className="flex-1 py-1 text-[9px] font-black uppercase tracking-wider rounded-lg border border-gray-300 bg-gray-50 hover:bg-blue-900 hover:text-white hover:border-blue-900 transition-colors cursor-pointer"
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
