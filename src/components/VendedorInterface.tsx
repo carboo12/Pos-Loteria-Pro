@@ -411,7 +411,12 @@ export default function VendedorInterface({
     setNumeroJugado("");
     setMontoPago("");
     setActiveField("numero");
-    setTimeout(() => numeroInputRef.current?.focus(), 0);
+    if (selectedJuego === "Fechas") {
+      const diaInput = document.getElementById("fecha-dia-input") as HTMLInputElement;
+      if (diaInput) setTimeout(() => diaInput.focus(), 0);
+    } else {
+      setTimeout(() => numeroInputRef.current?.focus(), 0);
+    }
   };
 
   const removeJugada = (index: number) => {
@@ -426,7 +431,12 @@ export default function VendedorInterface({
     setErrorMessage(null);
     setSuccessMessage(null);
     setActiveField("numero");
-    setTimeout(() => numeroInputRef.current?.focus(), 0);
+    if (selectedJuego === "Fechas") {
+      const diaInput = document.getElementById("fecha-dia-input") as HTMLInputElement;
+      if (diaInput) setTimeout(() => diaInput.focus(), 0);
+    } else {
+      setTimeout(() => numeroInputRef.current?.focus(), 0);
+    }
   };
 
 
@@ -1365,7 +1375,12 @@ export default function VendedorInterface({
       setMontoPago("");
       setNombreCliente("Genérico");
       setActiveField("numero");
-      setTimeout(() => numeroInputRef.current?.focus(), 0);
+      if (selectedJuego === "Fechas") {
+        const diaInput = document.getElementById("fecha-dia-input") as HTMLInputElement;
+        if (diaInput) setTimeout(() => diaInput.focus(), 0);
+      } else {
+        setTimeout(() => numeroInputRef.current?.focus(), 0);
+      }
       onRefreshSales();
     } catch (err: any) {
       console.error("Error al crear ticket:", err);
@@ -1838,8 +1853,10 @@ export default function VendedorInterface({
                 <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">NÚMERO JUGADO</label>
                 <input
                   ref={numeroInputRef}
-                  id="numero-input"
+                  id="lotto-digit-input"
+                  name="lotto-digit"
                   type="text"
+                  autoComplete="off"
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={
@@ -1849,7 +1866,10 @@ export default function VendedorInterface({
                     selectedJuego === "Súper Premio" ? 12 : 2
                   }
                   value={numeroJugado}
+                  readOnly={selectedJuego === "Fechas"}
+                  tabIndex={selectedJuego === "Fechas" ? -1 : 0}
                   onChange={(e) => {
+                    if (selectedJuego === "Fechas") return;
                     const val = e.target.value.replace(/[^0-9]/g, "");
                     const maxLen = getMaxLen(selectedJuego);
                     const sliced = val.slice(0, maxLen);
@@ -1859,7 +1879,7 @@ export default function VendedorInterface({
                     }
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && numeroJugado) {
+                    if (e.key === "Enter" && numeroJugado && selectedJuego !== "Fechas") {
                       e.preventDefault();
                       montoInputRef.current?.focus();
                     }
@@ -1890,6 +1910,7 @@ export default function VendedorInterface({
                       <input
                         id="fecha-dia-input"
                         type="number"
+                        autoComplete="off"
                         inputMode="numeric"
                         min="1"
                         max="31"

@@ -8,7 +8,7 @@ const STORAGE_KEY_BT_DEVICE = "bt_printer_device_id";
 const STORAGE_KEY_BT_NAME = "bt_printer_name";
 const HEARTBEAT_INTERVAL_MS = 8000;
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 6000, 8000];
-const MAX_RECONNECT_ATTEMPTS = 5;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
 // ESC/POS NOP — non-printing command used as heartbeat
 const ESCPOS_NOP = new Uint8Array([0x1B, 0x40]);
@@ -24,6 +24,7 @@ export class BluetoothPrinterService {
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private _destroyed = false;
+  private _wakeLock: WakeLockSentinel | null = null;
 
   private static readonly SERVICE_UUIDS = [
     "000018f0-0000-1000-8000-00805f9b34fb",
@@ -53,14 +54,54 @@ export class BluetoothPrinterService {
     }
   }
 
+  // ─── Wake Lock ───────────────────────────────────────────────────────
+
+  private async _acquireWakeLock() {
+    try {
+      if ('wakeLock' in navigator) {
+        this._wakeLock = await (navigator as any).wakeLock.request('screen');
+        this._wakeLock.addEventListener('release', () => {
+          this._wakeLock = null;
+        });
+      }
+    } catch {
+      // Wake Lock no soportado o denegado — no es crítico
+    }
+  }
+
+  private _releaseWakeLock() {
+    if (this._wakeLock) {
+      try {
+        this._wakeLock.release();
+      } catch { /* ignore */ }
+      this._wakeLock = null;
+    }
+  }
+
   // ─── Heartbeat ───────────────────────────────────────────────────────
 
   private _startHeartbeat() {
     this._stopHeartbeat();
-    this._heartbeatTimer = setInterval(() => {
-      if (this.characteristic && this.device?.gatt?.connected) {
-        // Send NOP to keep GATT alive — ignore errors silently
-        this.characteristic.writeValueWithoutResponse(ESCPOS_NOP).catch(() => {});
+    this._heartbeatTimer = setInterval(async () => {
+      if (!this.device?.gatt?.connected || !this.characteristic) {
+        // Conexión muerta entre heartbeats — disparar reconexión
+        if (!this._destroyed && !this.connectionLost) {
+          this.connectionLost = true;
+          this._stopHeartbeat();
+          this.setStatus("disconnected", "Conexión perdida (heartbeat)");
+          this._scheduleReconnect();
+        }
+        return;
+      }
+      try {
+        await this.characteristic.writeValueWithoutResponse(ESCPOS_NOP);
+      } catch {
+        if (!this._destroyed && !this.connectionLost) {
+          this.connectionLost = true;
+          this._stopHeartbeat();
+          this.setStatus("disconnected", "Conexión perdida (heartbeat)");
+          this._scheduleReconnect();
+        }
       }
     }, HEARTBEAT_INTERVAL_MS);
   }
@@ -77,6 +118,7 @@ export class BluetoothPrinterService {
   private onGattDisconnected = () => {
     this.connectionLost = true;
     this._stopHeartbeat();
+    this._releaseWakeLock();
     this.characteristic = null;
     this.server = null;
     this.setStatus("disconnected", "Impresora desconectada");
@@ -101,7 +143,7 @@ export class BluetoothPrinterService {
     }
   }
 
-  // ─── Reconnect with exponential backoff ──────────────────────────────
+  // ─── Reconnect con lazo de reintentos ───────────────────────────────
 
   private _scheduleReconnect() {
     if (this._destroyed) return;
@@ -114,9 +156,15 @@ export class BluetoothPrinterService {
     this.reconnectAttempts++;
     this.setStatus("connecting", `Reconectando en ${delay / 1000}s... (intento ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
 
-    this._reconnectTimer = setTimeout(() => {
+    this._reconnectTimer = setTimeout(async () => {
       this._reconnectTimer = null;
-      this.connectInternal();
+      if (this._destroyed) return;
+
+      const ok = await this.connectInternal();
+      if (!ok && !this._destroyed) {
+        // Lazo: si falla, programa el siguiente intento con backoff
+        this._scheduleReconnect();
+      }
     }, delay);
   }
 
@@ -150,10 +198,6 @@ export class BluetoothPrinterService {
 
   // ─── Public API ──────────────────────────────────────────────────────
 
-  /**
-   * Manual connect — prompts device picker.
-   * Saves deviceId to localStorage on success.
-   */
   async connect(): Promise<boolean> {
     if (this.device && this.device.gatt?.connected) {
       this.setStatus("connected", "Ya conectado");
@@ -184,10 +228,6 @@ export class BluetoothPrinterService {
     }
   }
 
-  /**
-   * Auto-reconnect using saved deviceId — no user gesture required
-   * if the device was previously paired at OS level.
-   */
   async reconnectSaved(): Promise<boolean> {
     const savedId = this._getSavedDeviceId();
     if (!savedId) return false;
@@ -213,7 +253,6 @@ export class BluetoothPrinterService {
       if (ok) this._saveDeviceId();
       return ok;
     } catch {
-      // Auto-reconnect failed silently — user must press connect manually
       this.setStatus("disconnected");
       return false;
     }
@@ -242,6 +281,7 @@ export class BluetoothPrinterService {
               this.reconnectAttempts = 0;
               this.connectionLost = false;
               this._startHeartbeat();
+              this._acquireWakeLock();
               this.setStatus("connected", `Conectado: ${this.device?.name || "PT-210"}`);
               return true;
             }
@@ -265,7 +305,6 @@ export class BluetoothPrinterService {
         this.setStatus("connecting", "Reconectando antes de imprimir...");
         const ok = await this.connectInternal();
         if (!ok) {
-          // Try full reconnect as last resort
           const fullOk = await this.connect();
           if (!fullOk) {
             this.setStatus("error", "No se pudo reconectar para imprimir");
@@ -304,6 +343,7 @@ export class BluetoothPrinterService {
   async disconnect() {
     this._destroyed = true;
     this._stopHeartbeat();
+    this._releaseWakeLock();
 
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
@@ -325,13 +365,10 @@ export class BluetoothPrinterService {
     this.setStatus("disconnected", "Desconectado");
   }
 
-  /**
-   * Cleanup without clearing saved device — called on component unmount.
-   * Preserves the saved deviceId so next mount can auto-reconnect.
-   */
   destroy() {
     this._destroyed = true;
     this._stopHeartbeat();
+    this._releaseWakeLock();
 
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
