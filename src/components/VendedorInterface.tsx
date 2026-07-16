@@ -311,7 +311,7 @@ export default function VendedorInterface({
   const getMaxLen = (juego: string): number => {
     if (juego === "Premia2") return 4;
     if (juego === "Jugá 3" || juego === "3 Monazos") return 3;
-    if (juego === "Pega 3") return 6;
+    if (juego === "Pega 3") return 3;
     if (juego === "Súper Premio") return 12;
     return 2;
   };
@@ -1225,7 +1225,7 @@ export default function VendedorInterface({
       let maxDigits = 2;
       if (selectedJuego === "Premia2") maxDigits = 4;
       else if (selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos") maxDigits = 3;
-      else if (selectedJuego === "Pega 3") maxDigits = 6;
+      else if (selectedJuego === "Pega 3") maxDigits = 3;
       else if (selectedJuego === "Súper Premio") maxDigits = 12;
 
       if (val === "BORRAR") {
@@ -1872,7 +1872,7 @@ export default function VendedorInterface({
                   maxLength={
                     selectedJuego === "Premia2" ? 4 :
                     selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos" ? 3 :
-                    selectedJuego === "Pega 3" ? 6 :
+                    selectedJuego === "Pega 3" ? 3 :
                     selectedJuego === "Súper Premio" ? 12 : 2
                   }
                   value={numeroJugado}
