@@ -209,6 +209,7 @@ export default function SupervisorInterface({
 
   // 2. Transactions of linked vendedores
   const linkedSellersIds = linkedSellers.map(s => s.id);
+  const linkedSellerNames = new Set(linkedSellers.map(s => (s.nombre || '').toUpperCase().trim()));
 
   // Real-time Firestore listener: watches the `tickets` collection for changes made by the
   // server during escrutinio (es_premiado / monto_premio updates) and payment status changes.
@@ -256,7 +257,10 @@ export default function SupervisorInterface({
   }, [linkedSellersIds.join(",")]);
 
   const linkedSales = sales
-    .filter(s => linkedSellersIds.includes(s.id_vendedor))
+    .filter(s => {
+      if (s.id_vendedor) return linkedSellersIds.includes(s.id_vendedor);
+      return linkedSellerNames.has((s.nombre_vendedor || '').toUpperCase().trim());
+    })
     .sort((a, b) => new Date(b.timestamp_servidor).getTime() - new Date(a.timestamp_servidor).getTime());
 
   // 3. Closures of linked vendedores

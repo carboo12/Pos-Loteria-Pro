@@ -132,11 +132,25 @@ const requireAdmin = checkAuth(["administrador"]);
 
 function calculatePrizeMultiplier(juego: string, sorteo: string): number {
   const cleanJuego = juego.trim();
-  if (cleanJuego === "Premia2" && sorteo.includes("(NI)")) return 4000;
-  if (cleanJuego === "Jugá 3") return 600;
-  if (cleanJuego === "Fechas") return 210;
-  if (cleanJuego === "3 Monazos") return 650;
-  return 80;
+
+  if (cleanJuego === "Súper Premio (HN)") throw new Error("Sorteo eliminado de la plataforma");
+
+  const multipliers: Record<string, number> = {
+    "Jugá 3": 610,
+    "Pega 3": 600,
+    "Premia2": 4000,
+    "Fechas": 210,
+    "3 Monazos": 650,
+    "Diaria": 80,
+    "La Diaria": 80,
+    "Tica": 80,
+    "Terminación 2": 80,
+    "Sabadito": 80,
+    "La Primera": 80,
+  };
+
+  if (cleanJuego in multipliers) return multipliers[cleanJuego];
+  throw new Error(`Sorteo no definido: juego="${juego}" sorteo="${sorteo}"`);
 }
 
 const PORT = parseInt(process.env.PORT || "8080", 10);
@@ -1450,7 +1464,7 @@ app.post("/api/cobros", checkAuth(), (req, res) => {
   const newCobro = {
     id: "cob_" + Math.random().toString(36).substring(2, 9),
     id_vendedor,
-    nombre_vendedor: user ? user.nombre : "Vendedor Desconocido",
+    nombre_vendedor: user ? (user.nombre || '').toUpperCase().trim() : "VENDEDOR DESCONOCIDO",
     id_supervisor,
     monto_cs: Number(monto_cs),
     monto_usd: Number(monto_usd),
@@ -1490,7 +1504,7 @@ app.post("/api/ingresos", checkAuth(), (req, res) => {
   const newIngreso = {
     id: "ing_" + Math.random().toString(36).substring(2, 9),
     id_vendedor,
-    nombre_vendedor: user ? user.nombre : "Vendedor Desconocido",
+    nombre_vendedor: user ? (user.nombre || '').toUpperCase().trim() : "VENDEDOR DESCONOCIDO",
     id_supervisor,
     monto_cs: Number(monto_cs) || 0,
     monto_usd: Number(monto_usd) || 0,
@@ -1844,7 +1858,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
         jugadas: Array.isArray(jugadas) ? jugadas : [{ numero: numero_jugado, monto: Number(monto_pago) }],
         estado: "pendiente",
         total_apostado: Number(monto_pago),
-        nombre_vendedor: user.nombre,
+        nombre_vendedor: (user.nombre || '').toUpperCase().trim(),
         nombre_cliente: nombre_cliente || "Genérico",
         premio_posible_cs: Number(premio_posible_cs) || 0,
         firma_digital: signature,
@@ -1888,7 +1902,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     monto_pago: Number(monto_pago),
     moneda,
     id_vendedor,
-    nombre_vendedor: user.nombre,
+    nombre_vendedor: (user.nombre || '').toUpperCase().trim(),
     nombre_cliente: nombre_cliente || "Genérico",
     premio_posible_cs: Number(premio_posible_cs) || 0,
     firma_digital: signature,
@@ -2368,7 +2382,7 @@ app.get("/api/resumen-diario/pendientes", (req, res) => {
     resumenes.push({
       id,
       id_vendedor,
-      nombre_vendedor: vendedorInfo ? vendedorInfo.nombre : "Desconocido",
+      nombre_vendedor: vendedorInfo ? (vendedorInfo.nombre || '').toUpperCase().trim() : "DESCONOCIDO",
       fecha: dateStr,
       vendido: grouped[dateStr].vendido,
       pagado: grouped[dateStr].pagado,
@@ -2401,7 +2415,7 @@ app.post("/api/cobros/procesar", requireAdmin, (req, res) => {
     id_admin: procesadorId, // backward compatible, stores who processed it
     nombre_admin: admin ? admin.nombre : (id_supervisor ? "Supervisor" : "Admin"),
     id_vendedor,
-    nombre_vendedor: vendedor ? vendedor.nombre : "Vendedor",
+    nombre_vendedor: vendedor ? (vendedor.nombre || '').toUpperCase().trim() : "VENDEDOR",
     rango_inicio,
     rango_fin,
     total_vendido,
@@ -2439,7 +2453,7 @@ app.post("/api/pagos/registrar", requireAdmin, (req, res) => {
     id: `pago_${Date.now()}`,
     id_admin,
     id_vendedor,
-    nombre_vendedor: vendedor ? vendedor.nombre : "Vendedor",
+    nombre_vendedor: vendedor ? (vendedor.nombre || '').toUpperCase().trim() : "VENDEDOR",
     monto_pago,
     concepto,
     id_cobro_relacionado,

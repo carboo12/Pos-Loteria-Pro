@@ -28,11 +28,14 @@ export function useFacturacion(
     if (!config || !tickets) return [];
 
     return vendedores.map(v => {
+      const vNameNorm = (v.nombre || '').toUpperCase().trim();
       const sellerTickets = tickets.filter(s => {
         const ticketDateStr = getTicketDate(s);
         const dateMatch = ticketDateStr >= fechaInicio && ticketDateStr <= fechaFin;
         const activeMatch = !s.anulado;
-        const sellerMatch = s.id_vendedor === v.id;
+        const sellerMatch = s.id_vendedor
+          ? s.id_vendedor === v.id
+          : (s.nombre_vendedor || '').toUpperCase().trim() === vNameNorm;
         return dateMatch && activeMatch && sellerMatch;
       });
 

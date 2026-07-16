@@ -43,11 +43,25 @@ export function parseGameDraw(ticket: {
 /** Prize multiplier table — the authoritative rules for all games. */
 export function calculatePrizeMultiplier(juego: string, sorteo: string): number {
   const cleanJuego = juego.trim();
-  if (cleanJuego === "Premia2" && sorteo.includes("(NI)")) return 4000;
-  if (cleanJuego === "Jugá 3") return 600;
-  if (cleanJuego === "Fechas") return 210;
-  if (cleanJuego === "3 Monazos") return 650;
-  return 80;
+
+  if (cleanJuego === "Súper Premio (HN)") throw new Error("Sorteo eliminado de la plataforma");
+
+  const multipliers: Record<string, number> = {
+    "Jugá 3": 610,
+    "Pega 3": 600,
+    "Premia2": 4000,
+    "Fechas": 210,
+    "3 Monazos": 650,
+    "Diaria": 80,
+    "La Diaria": 80,
+    "Tica": 80,
+    "Terminación 2": 80,
+    "Sabadito": 80,
+    "La Primera": 80,
+  };
+
+  if (cleanJuego in multipliers) return multipliers[cleanJuego];
+  throw new Error(`Sorteo no definido: juego="${juego}" sorteo="${sorteo}"`);
 }
 
 /**

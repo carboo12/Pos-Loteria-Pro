@@ -650,24 +650,24 @@ export default function AdminInterface({
 
   const today = getLocalTodayStr();
 
+  const ticketMatchesToday = (s: Venta) => getTicketDate(s) === today;
+
+  const ticketMatchesSupervisor = (s: Venta) => {
+    if (!simulatedSupervisorId) return true;
+    const seller = users.find(u => u.id === s.id_vendedor);
+    return seller && seller.id_supervisor === simulatedSupervisorId;
+  };
+
   const activeSales = sales.filter(s => {
     if (s.anulado) return false;
-    if (s.timestamp_servidor && !s.timestamp_servidor.startsWith(today)) return false;
-    if (simulatedSupervisorId) {
-      const seller = users.find(u => u.id === s.id_vendedor);
-      return seller && seller.id_supervisor === simulatedSupervisorId;
-    }
-    return true;
+    if (!ticketMatchesToday(s)) return false;
+    return ticketMatchesSupervisor(s);
   });
   
   const voidedSales = sales.filter(s => {
     if (!s.anulado) return false;
-    if (s.timestamp_servidor && !s.timestamp_servidor.startsWith(today)) return false;
-    if (simulatedSupervisorId) {
-      const seller = users.find(u => u.id === s.id_vendedor);
-      return seller && seller.id_supervisor === simulatedSupervisorId;
-    }
-    return true;
+    if (!ticketMatchesToday(s)) return false;
+    return ticketMatchesSupervisor(s);
   });
 
   // Aggregate currency revenue (converting USD to C$ where appropriate to get Grand Total)

@@ -1011,9 +1011,12 @@ export default function VendedorInterface({
     return () => clearInterval(timer);
   }, []);
 
-  // Filter vendor sales
+  // Filter vendor sales: primary by id_vendedor, fallback by normalized name for legacy tickets
   const allMySales = sales
-    .filter(s => s.id_vendedor === user.id)
+    .filter(s => {
+      if (s.id_vendedor) return s.id_vendedor === user.id;
+      return (s.nombre_vendedor || '').toUpperCase().trim() === (user.nombre || '').toUpperCase().trim();
+    })
     .sort((a, b) => new Date(b.timestamp_servidor).getTime() - new Date(a.timestamp_servidor).getTime());
 
   // Filtered list based on Search and Date
@@ -1317,7 +1320,7 @@ export default function VendedorInterface({
         monto_pago: totalMontoCs,
         moneda,
         id_vendedor: user.id,
-        nombre_vendedor: user.nombre,
+        nombre_vendedor: (user.nombre || '').toUpperCase().trim(),
         nombre_cliente: nombreCliente.trim() || "Genérico",
         premio_posible_cs: totalPremioCs,
         firma_digital: createdSale.firma_digital,
