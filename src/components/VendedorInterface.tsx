@@ -2374,36 +2374,28 @@ export default function VendedorInterface({
                           <div className="border-t border-gray-100 pt-3 mt-3 grid grid-cols-4 gap-1">
                             <button
                               onClick={() => {
-                                if (isSorteoPasado(t)) {
-                                  toast.error("No se puede visualizar el ticket porque el sorteo ya se realizó.", { position: 'top-center' });
-                                } else {
-                                  const tempVenta: Venta = {
-                                    id: t.id,
-                                    numero_ticket: t.numero_ticket || t.id_ticket || t.id.substring(0, 7).toUpperCase(),
-                                    timestamp_servidor: getNicaraguaISOString(t.fecha_emision_date),
-                                    juego: game,
-                                    sorteo: draw,
-                                    numero_jugado: t.jugadas && t.jugadas[0] ? t.jugadas[0].numero : (t.numero_jugado || "?"),
-                                    monto_pago: getTicketAmount(t),
-                                    moneda: t.moneda || "C$",
-                                    id_vendedor: t.id_vendedor,
-                                    nombre_vendedor: user.nombre,
-                                    nombre_cliente: t.nombre_cliente || "Genérico",
-                                    premio_posible_cs: t.total_premio || t.premio_posible_cs || 0,
-                                    firma_digital: t.firma_digital || t.id.substring(0, 7).toUpperCase(),
-                                    anulado: t.estado === "anulado",
-                                    estado: t.estado,
-                                    jugadas: t.jugadas || []
-                                  };
-                                  setIsVisualizing(true);
-                                  setActiveTicket(tempVenta);
-                                }
+                                const tempVenta: Venta = {
+                                  id: t.id,
+                                  numero_ticket: t.numero_ticket || t.id_ticket || t.id.substring(0, 7).toUpperCase(),
+                                  timestamp_servidor: getNicaraguaISOString(t.fecha_emision_date),
+                                  juego: game,
+                                  sorteo: draw,
+                                  numero_jugado: t.jugadas && t.jugadas[0] ? t.jugadas[0].numero : (t.numero_jugado || "?"),
+                                  monto_pago: getTicketAmount(t),
+                                  moneda: t.moneda || "C$",
+                                  id_vendedor: t.id_vendedor,
+                                  nombre_vendedor: user.nombre,
+                                  nombre_cliente: t.nombre_cliente || "Genérico",
+                                  premio_posible_cs: t.total_premio || t.premio_posible_cs || 0,
+                                  firma_digital: t.firma_digital || t.id.substring(0, 7).toUpperCase(),
+                                  anulado: t.estado === "anulado",
+                                  estado: t.estado,
+                                  jugadas: t.jugadas || []
+                                };
+                                setIsVisualizing(true);
+                                setActiveTicket(tempVenta);
                               }}
-                              className={`py-1.5 px-0.5 rounded-lg text-[9px] font-black uppercase transition-all border text-center flex items-center justify-center cursor-pointer ${
-                                isSorteoPasado(t)
-                                  ? "bg-gray-100 text-gray-400 border-gray-200"
-                                  : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
-                              }`}
+                              className="py-1.5 px-0.5 rounded-lg text-[9px] font-black uppercase transition-all border text-center flex items-center justify-center cursor-pointer bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
                             >
                               Visualizar
                             </button>

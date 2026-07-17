@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent, useMemo } from "react";
-import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot } from "firebase/firestore";
+import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot, where, limit } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
 import { 
   LayoutDashboard, 
@@ -168,7 +168,7 @@ export default function AdminInterface({
   onDeleteUser,
   simulatedSupervisorId
 }: AdminInterfaceProps) {
-  const [activeSection, setActiveSection] = useState<"dashboard" | "cierres" | "config" | "usuarios" | "resultados" | "limites" | "reportes" | "finanzas">("dashboard");
+  const [activeSection, setActiveSection] = useState<"dashboard" | "cierres" | "config" | "usuarios" | "resultados" | "limites" | "reportes" | "finanzas" | "buscador">("dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Local form states
@@ -238,6 +238,14 @@ export default function AdminInterface({
   const [limiteDineroInput, setLimiteDineroInput] = useState("");
   const [selectedHoraLimite, setSelectedHoraLimite] = useState("TODOS");
   const [editingLimitId, setEditingLimitId] = useState<string | null>(null);
+
+  // Optimized Ticket Search States
+  const [searchSellerId, setSearchSellerId] = useState("TODOS");
+  const [searchStartDate, setSearchStartDate] = useState(getLocalTodayStr());
+  const [searchEndDate, setSearchEndDate] = useState(getLocalTodayStr());
+  const [searchTicketQuery, setSearchTicketQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   // Reports (Reportes) Section States
   const [reportFilterVendedor, setReportFilterVendedor] = useState("TODOS");
@@ -342,6 +350,74 @@ export default function AdminInterface({
       }
     } catch (err) {
       toast.error("Error de red al anular el ticket.");
+    }
+  };
+
+  const handleExecuteSearch = async (e: FormEvent) => {
+    e.preventDefault();
+    setAlertText(null);
+    setSuccessText(null);
+
+    const userRoleStr = user.rol as string;
+    const canAccessSearch = userRoleStr === "admin" || userRoleStr === "admin_1" || userRoleStr === "administrador";
+    if (!canAccessSearch) {
+      setAlertText("Acceso Denegado: Su rol no cuenta con permisos para buscar boletos.");
+      return;
+    }
+
+    setSearchLoading(true);
+    try {
+      // 1. Build optimized Firestore query
+      const ticketsRef = collection(firestore, "tickets");
+      const conditions: any[] = [
+        where("fecha_venta", ">=", searchStartDate),
+        where("fecha_venta", "<=", searchEndDate)
+      ];
+
+      if (searchSellerId !== "TODOS") {
+        conditions.push(where("id_vendedor", "==", searchSellerId));
+      }
+
+      // Query with limit to avoid overloading client-side rendering
+      const q = query(ticketsRef, ...conditions, limit(500));
+      const querySnapshot = await getDocs(q);
+
+      const rawTickets: any[] = [];
+      querySnapshot.forEach((docSnap) => {
+        rawTickets.push({
+          id: docSnap.id,
+          ...docSnap.data()
+        });
+      });
+
+      // 2. Perform stitch (combine with real name of the seller) and search query string filter (stitch local)
+      const queryClean = searchTicketQuery.trim().toLowerCase();
+      const processedResults = rawTickets
+        .map((t) => {
+          const matchedSeller = users.find((u) => u.id === t.id_vendedor);
+          return {
+            ...t,
+            nombre_vendedor: matchedSeller ? matchedSeller.nombre : (t.nombre_vendedor || "Vendedor")
+          };
+        })
+        .filter((t) => {
+          if (!queryClean) return true;
+          const numTicket = (t.numero_ticket || "").toLowerCase();
+          const ticketId = (t.id || "").toLowerCase();
+          return numTicket.includes(queryClean) || ticketId.includes(queryClean);
+        });
+
+      setSearchResults(processedResults);
+      if (processedResults.length === 0) {
+        setSuccessText("No se encontraron resultados para la búsqueda actual.");
+      } else {
+        setSuccessText(`Se encontraron ${processedResults.length} resultados.`);
+      }
+    } catch (err: any) {
+      console.error("Error al buscar tickets:", err);
+      setAlertText(err.message || "Error al consultar la base de datos.");
+    } finally {
+      setSearchLoading(false);
     }
   };
 
@@ -1622,6 +1698,19 @@ export default function AdminInterface({
               <DollarSign className="w-4 h-4 stroke-[2]" />
               <span>Finanzas y Cobros</span>
             </button>
+
+            {((user.rol as string) === "admin" || (user.rol as string) === "admin_1" || (user.rol as string) === "administrador") && (
+              <button
+                id="sidebar-buscador"
+                onClick={() => { setActiveSection("buscador"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
+                className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
+                  activeSection === "buscador" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
+                }`}
+              >
+                <Search className="w-4 h-4 stroke-[2]" />
+                <span>Buscador de Boletos</span>
+              </button>
+            )}
           </nav>
         </div>
 
@@ -1670,6 +1759,7 @@ export default function AdminInterface({
                 {activeSection === "limites" && "Techos y Límites de Ventas"}
                 {activeSection === "reportes" && "Reportería de Facturación General"}
                 {activeSection === "finanzas" && "Módulo de Finanzas y Cobros"}
+                {activeSection === "buscador" && "Buscador y Recuperación de Boletos"}
               </h2>
               <p className="text-xs text-gray-500 font-sans mt-0.5 line-clamp-1">
                 {activeSection === "dashboard" && "Monitoreo en tiempo real de transacciones, estados de presencia de vendedores y auditoría."}
@@ -1679,6 +1769,7 @@ export default function AdminInterface({
                 {activeSection === "limites" && "Gestione el techo máximo de venta acumulada por número, sorteo y vendedor."}
                 {activeSection === "reportes" && "Estadísticas y reportes de facturación detallada por vendedor, por número de juego, o general."}
                 {activeSection === "finanzas" && "Consultar balances de vendedores, aplicar cobros y registrar pagos de comisiones."}
+                {activeSection === "buscador" && "Localice boletos dañados mediante filtros optimizados y visualice su representación oficial."}
               </p>
             </div>
           </div>
@@ -3743,6 +3834,158 @@ export default function AdminInterface({
               </div>
             </div>
 
+          </div>
+        )}
+
+        {activeSection === "buscador" && (
+          <div className="space-y-6">
+            {/* Filtros de Búsqueda */}
+            <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
+              <div className="flex items-center space-x-3 mb-6">
+                <div className="p-2 bg-blue-100 rounded-xl">
+                  <Search className="w-5 h-5 text-blue-900" />
+                </div>
+                <h3 className="font-display font-black text-sm uppercase text-gray-800">Filtros de Búsqueda de Boletos</h3>
+              </div>
+
+              <form onSubmit={handleExecuteSearch} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                <div>
+                  <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Vendedor</label>
+                  <select
+                    value={searchSellerId}
+                    onChange={(e) => setSearchSellerId(e.target.value)}
+                    className="w-full text-sm p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-blue-900 bg-gray-50 text-gray-800"
+                  >
+                    <option value="TODOS">-- TODOS --</option>
+                    {users.filter(u => u.rol === 'vendedor').map(v => (
+                      <option key={v.id} value={v.id}>{v.nombre}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fecha Inicio</label>
+                  <input
+                    type="date"
+                    value={searchStartDate}
+                    onChange={(e) => setSearchStartDate(e.target.value)}
+                    className="w-full text-sm p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-blue-900 bg-gray-50 text-gray-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fecha Fin</label>
+                  <input
+                    type="date"
+                    value={searchEndDate}
+                    onChange={(e) => setSearchEndDate(e.target.value)}
+                    className="w-full text-sm p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-blue-900 bg-gray-50 text-gray-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Número de Ticket (Búsqueda Parcial)</label>
+                  <input
+                    type="text"
+                    value={searchTicketQuery}
+                    onChange={(e) => setSearchTicketQuery(e.target.value)}
+                    placeholder="Ej. 114"
+                    className="w-full text-sm p-3 border border-gray-300 rounded-xl focus:outline-none focus:border-blue-900 bg-gray-50 text-gray-800"
+                  />
+                </div>
+
+                <div className="md:col-span-4 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={searchLoading}
+                    className="py-3 px-6 bg-blue-900 hover:bg-blue-800 text-white font-black uppercase text-xs rounded-xl shadow-md transition-colors cursor-pointer flex items-center space-x-2"
+                  >
+                    <Search className="w-4 h-4" />
+                    <span>{searchLoading ? "Buscando..." : "Buscar Boletos"}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Resultados de Búsqueda */}
+            <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
+              <div className="flex items-center space-x-3 mb-6">
+                <div className="p-2 bg-slate-100 rounded-xl">
+                  <FileText className="w-5 h-5 text-slate-700" />
+                </div>
+                <h3 className="font-display font-black text-sm uppercase text-gray-800">Resultados de la Búsqueda</h3>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 text-[10px] uppercase font-bold text-gray-500 tracking-wider">
+                      <th className="p-3 border-b border-gray-200 rounded-tl-xl">Fecha Emisión</th>
+                      <th className="p-3 border-b border-gray-200">ID / Ticket</th>
+                      <th className="p-3 border-b border-gray-200">Vendedor</th>
+                      <th className="p-3 border-b border-gray-200">Juego / Sorteo</th>
+                      <th className="p-3 border-b border-gray-200">Jugadas</th>
+                      <th className="p-3 border-b border-gray-200 text-right">Monto</th>
+                      <th className="p-3 border-b border-gray-200">Estado</th>
+                      <th className="p-3 border-b border-gray-200 rounded-tr-xl text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-xs font-sans">
+                    {searchResults.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="p-6 text-center text-gray-400 font-medium">
+                          Realice una búsqueda para ver los resultados.
+                        </td>
+                      </tr>
+                    ) : (
+                      searchResults.map((ticket) => {
+                        const isAnulado = ticket.estado === "anulado" || ticket.anulado;
+                        return (
+                          <tr key={ticket.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                            <td className="p-3 text-gray-800 font-semibold">{ticket.timestamp_servidor ? new Date(ticket.timestamp_servidor).toLocaleString("es-NI") : ticket.fecha_venta}</td>
+                            <td className="p-3 text-gray-600 font-mono font-bold">{ticket.numero_ticket || ticket.id.substring(0, 8).toUpperCase()}</td>
+                            <td className="p-3 font-bold text-blue-900">{ticket.nombre_vendedor}</td>
+                            <td className="p-3 text-gray-700">
+                              <span className="font-semibold block">{ticket.juego}</span>
+                              <span className="text-[10px] text-gray-400 font-medium">{ticket.sorteo}</span>
+                            </td>
+                            <td className="p-3 font-mono text-[11px] text-gray-600">
+                              {ticket.jugadas && ticket.jugadas.length > 0 ? (
+                                <div className="max-w-[200px] truncate">
+                                  {ticket.jugadas.map((j: any) => `${j.numero} (C$${j.monto})`).join(", ")}
+                                </div>
+                              ) : (
+                                `${ticket.numero_jugado} (C$${ticket.monto_pago})`
+                              )}
+                            </td>
+                            <td className="p-3 text-right font-black text-slate-800">
+                              {ticket.moneda || "C$"} {(ticket.monto_pago || 0).toFixed(2)}
+                            </td>
+                            <td className="p-3">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-black uppercase font-display border ${
+                                isAnulado 
+                                  ? "bg-red-50 text-red-700 border-red-200" 
+                                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              }`}>
+                                {isAnulado ? "Anulado" : "Válido"}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center">
+                              <button
+                                onClick={() => setActiveTicket(ticket)}
+                                className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold uppercase rounded-lg border border-blue-200 transition-colors text-[9px] cursor-pointer"
+                              >
+                                Visualizar
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
 
