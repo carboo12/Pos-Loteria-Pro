@@ -114,5 +114,21 @@ El frontend es una Single Page Application (SPA) que se puede instalar como PWA.
 2. Ajusta techos de números "calientes" para mitigar riesgo financiero.
 3. Gestiona accesos (desactiva vendedores morosos).
 
+## 7. Conectividad e Impresión Bluetooth Universal
+
+El sistema incorpora soporte universal para cualquier impresora térmica BLE de 48mm/58mm.
+
+### 7.1 Detección y Conexión (Web Bluetooth API)
+*   **Agnóstico a la Marca**: La solicitud de emparejamiento utiliza `navigator.bluetooth.requestDevice` con la opción `acceptAllDevices: true` para detectar cualquier dispositivo Bluetooth cercano sin importar su marca (PT-210, Goojprt, MTP, etc.).
+*   **Servicio BLE Estándar**: Se declara el UUID `'000018f0-0000-1000-8000-00805f9b34fb'` en `optionalServices` (el estándar de canal serie más extendido para impresoras térmicas BLE) para negociar y adquirir el servicio primario GATT.
+*   **Selección de Filtro Dinámico**: El frontend ofrece un selector/modal donde el vendedor puede elegir:
+    *   *Solo Impresoras*: Filtra la lista nativa del navegador mediante prefijos de nombre comunes (`Printer`, `Impresora`, `PT`, `MTP`, `POS`, `GP`, `RT`) para evitar saturar la interfaz de emparejamiento con dispositivos no deseados.
+    *   *Mostrar Todos*: Llama a la API con `acceptAllDevices: true` para admitir cualquier modelo nuevo.
+
+### 7.2 Procesamiento de Impresión y Alineación
+*   **Transmisión de Buffer Directo**: El servicio (`BluetoothPrinterService.ts`) envía el buffer de comandos `Uint8Array` sin alterar su codificación binaria, posibilitando compatibilidad transparente con cualquier impresora que soporte el set de comandos estándar **ESC/POS**.
+*   **Alineación de Ancho Exacto (Píxeles/Bytes)**: Para el dibujado de imágenes (como el logotipo de cabecera), el backend del generador (`escpos-builder.ts`) procesa el bitmap y escala su ancho forzándolo estrictamente a ser **múltiplo de 8 puntos**. Esto evita la distorsión de píxeles horizontales y el estiramiento vertical durante la impresión en papel térmico de 58mm.
+*   **Control de Fragmentación (MTU)**: Los comandos se transmiten troceados en paquetes de 64 bytes con pausas controladas de 50ms para evitar el desbordamiento de búfer y pérdida de datos en la controladora serie BLE de la impresora.
+
 ---
 *Fin del Blueprint.*

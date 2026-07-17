@@ -165,6 +165,20 @@ punto-de-venta-de-lotería/
 - **Supervisor**: Gestión de equipo, cierres, cobros
 - **Vendedor**: Venta de números, historial, cierre de caja
 
+## Impresión Térmica y Conectividad Bluetooth
+
+La aplicación incorpora una integración nativa con la API de **Web Bluetooth** para imprimir boletos en cualquier impresora térmica portátil de 58mm (48mm imprimibles):
+
+1. **Detección Universal (BLE)**: 
+   * La app utiliza el método `navigator.bluetooth.requestDevice` con el UUID estándar de impresora térmica BLE `000018f0-0000-1000-8000-00805f9b34fb`.
+   * Permite alternar en el diálogo de emparejamiento entre un filtro optimizado para impresoras comunes (`filters`) y una búsqueda universal de dispositivo libre (`acceptAllDevices: true`).
+2. **Formateo Estándar ESC/POS**: 
+   * El archivo [escpos-builder.ts](file:///c:/Users/carlo/OneDrive/Documents/react/punto-de-venta-de-lotería/src/services/escpos-builder.ts) compila los textos, líneas, códigos QR y logotipos en bytes binarios directos sin alterar su codificación antes de enviarlos.
+3. **Evitar Distorsión de Logo**: 
+   * La app procesa el logo en un Canvas del navegador asegurando que el ancho final de la imagen sea estrictamente un **múltiplo de 8 puntos** (ancho en bytes entero). Esto evita desalineaciones horizontales y el efecto de estiramiento vertical durante la impresión térmica.
+4. **Envío Fragmentado por MTU**: 
+   * Los comandos se transmiten al buffer de la impresora en paquetes pequeños de 64 bytes con pausas de 50ms para garantizar que los chips Bluetooth de bajo costo de las impresoras térmicas no pierdan bytes en tránsito.
+
 ## Scripts disponibles
 
 | Comando | Descripción |
