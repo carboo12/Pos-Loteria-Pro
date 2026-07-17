@@ -181,23 +181,31 @@ export async function loadLogoBitmap(url: string, maxWidthBytes: number = 48): P
       const ctx = canvas.getContext("2d");
       if (!ctx) { resolve([]); return; }
 
-      const maxDots = maxWidthBytes * 8;
+      const maxDots = maxWidthBytes * 8; // e.g. 48 * 8 = 384
       const ratio = Math.min(maxDots / img.width, 1);
       
-      // Force width to be a multiple of 8 to prevent byte alignment displacement
-      let w = Math.floor(img.width * ratio);
-      w = w - (w % 8);
-      if (w < 8) w = 8;
+      // Scaled logo dimensions
+      const imgW = Math.floor(img.width * ratio);
+      const imgH = Math.floor(img.height * ratio);
       
-      const h = Math.floor(img.height * (w / img.width));
+      // We always make the canvas width exactly the maximum dots
+      const w = maxDots;
+      const h = imgH;
 
       canvas.width = w;
       canvas.height = h;
-      ctx.drawImage(img, 0, 0, w, h);
+
+      // Fill canvas with white color (no ink)
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, w, h);
+
+      // Center the logo image horizontally on the canvas
+      const offsetX = Math.floor((w - imgW) / 2);
+      ctx.drawImage(img, offsetX, 0, imgW, imgH);
 
       const imageData = ctx.getImageData(0, 0, w, h);
       const px = imageData.data;
-      const widthBytes = Math.ceil(w / 8);
+      const widthBytes = maxWidthBytes;
       const bitmap: number[] = [];
 
       for (let y = 0; y < h; y++) {
@@ -211,7 +219,7 @@ export async function loadLogoBitmap(url: string, maxWidthBytes: number = 48): P
               const g = px[idx + 1];
               const b = px[idx + 2];
               const a = px[idx + 3];
-              // If pixel is transparent (alpha < 128), treat as white (no ink)
+              // If pixel is transparent (alpha < 128) or white, treat as white (no ink)
               if (a >= 128) {
                 const gray = r * 0.299 + g * 0.587 + b * 0.114;
                 if (gray < 128) byte |= (1 << (7 - bit));
