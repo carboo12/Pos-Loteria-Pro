@@ -182,13 +182,18 @@ export async function loadLogoBitmap(url: string, maxWidthBytes: number = 48): P
       if (!ctx) { resolve([]); return; }
 
       const maxDots = maxWidthBytes * 8; // e.g. 48 * 8 = 384
-      const ratio = Math.min(maxDots / img.width, 1);
+      
+      // Limit the logo's printable dimensions to prevent giant prints and buffer overflows
+      const maxLogoW = 256; // 32 bytes wide max
+      const maxLogoH = 96;  // 96 dots high max
+      
+      const ratio = Math.min(maxLogoW / img.width, maxLogoH / img.height, 1);
       
       // Scaled logo dimensions
       const imgW = Math.floor(img.width * ratio);
       const imgH = Math.floor(img.height * ratio);
       
-      // We always make the canvas width exactly the maximum dots
+      // We always make the canvas width exactly the maximum dots (384)
       const w = maxDots;
       const h = imgH;
 
