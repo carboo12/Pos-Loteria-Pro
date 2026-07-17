@@ -1582,6 +1582,84 @@ app.post("/api/ingresos", checkAuth(), (req, res) => {
   res.status(201).json(newIngreso);
 });
 
+// Update income (admin only)
+app.put("/api/ingresos/:id", requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { monto_cs, monto_usd, comentario, id_vendedor } = req.body;
+
+  (db.configuracion as any).ingresos = (db.configuracion as any).ingresos || [];
+  const index = (db.configuracion as any).ingresos.findIndex((i: any) => i.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "Ingreso no encontrado." });
+  }
+
+  const existing = (db.configuracion as any).ingresos[index];
+  
+  let nombre_vendedor = existing.nombre_vendedor;
+  if (id_vendedor && id_vendedor !== existing.id_vendedor) {
+    const user = db.usuarios.find((u: any) => u.id === id_vendedor);
+    nombre_vendedor = user ? (user.nombre || '').toUpperCase().trim() : "VENDEDOR DESCONOCIDO";
+  }
+
+  const updatedIngreso = {
+    ...existing,
+    id_vendedor: id_vendedor !== undefined ? id_vendedor : existing.id_vendedor,
+    nombre_vendedor,
+    monto_cs: monto_cs !== undefined ? Number(monto_cs) || 0 : existing.monto_cs,
+    monto_usd: monto_usd !== undefined ? Number(monto_usd) || 0 : existing.monto_usd,
+    comentario: comentario !== undefined ? comentario || "" : existing.comentario
+  };
+
+  (db.configuracion as any).ingresos[index] = updatedIngreso;
+
+  await saveToDB();
+
+  try {
+    const firestoreDb = getFirestoreInstance();
+    await firestoreDb.collection("logs_auditoria").add({
+      admin_id: (req as any).user.id,
+      accion: "EDIT",
+      id_ingreso_afectado: id,
+      timestamp: getNicaraguaISOString()
+    });
+  } catch (err) {
+    console.error("[Audit Log] Error writing EDIT logs_auditoria:", err);
+  }
+
+  res.json({ success: true, ingreso: updatedIngreso });
+});
+
+// Delete income (admin only)
+app.delete("/api/ingresos/:id", requireAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  (db.configuracion as any).ingresos = (db.configuracion as any).ingresos || [];
+  const index = (db.configuracion as any).ingresos.findIndex((i: any) => i.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "Ingreso no encontrado." });
+  }
+
+  (db.configuracion as any).ingresos.splice(index, 1);
+
+  await saveToDB();
+
+  try {
+    const firestoreDb = getFirestoreInstance();
+    await firestoreDb.collection("logs_auditoria").add({
+      admin_id: (req as any).user.id,
+      accion: "DELETE",
+      id_ingreso_afectado: id,
+      timestamp: getNicaraguaISOString()
+    });
+  } catch (err) {
+    console.error("[Audit Log] Error writing DELETE logs_auditoria:", err);
+  }
+
+  res.json({ success: true, message: "Ingreso eliminado correctamente." });
+});
+
 // Mark closure as collected manually
 app.put("/api/cierres/:id/cobrar", requireAdmin, (req, res) => {
   const { id } = req.params;

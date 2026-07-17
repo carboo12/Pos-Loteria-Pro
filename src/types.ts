@@ -81,6 +81,7 @@ export interface Configuracion {
   limites_numeros: LimiteNumero[];
   resultados: SorteoResultado[];
   cobros: CobroVendedor[];
+  ingresos?: any[];
 }
 
 export interface Venta {

@@ -278,6 +278,14 @@ export default function AdminInterface({
   const [lastCobroId, setLastCobroId] = useState("");
   const [historialCobros, setHistorialCobros] = useState<any[]>([]);
 
+  // Ingresos editing states
+  const [editingIngreso, setEditingIngreso] = useState<any | null>(null);
+  const [ingresoFormMontoCs, setIngresoFormMontoCs] = useState("");
+  const [ingresoFormMontoUsd, setIngresoFormMontoUsd] = useState("");
+  const [ingresoFormComentario, setIngresoFormComentario] = useState("");
+  const [ingresoFormVendedor, setIngresoFormVendedor] = useState("");
+  const [ingresoSubmitting, setIngresoSubmitting] = useState(false);
+
   // Fetch lists
   // Real-time Firestore listener for resultados (handles added/modified/removed)
   useEffect(() => {
@@ -330,6 +338,59 @@ export default function AdminInterface({
       toast.error(e.message || "Error al anular cobro");
     }
   };
+
+  const handleUpdateIngreso = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editingIngreso) return;
+    setIngresoSubmitting(true);
+    try {
+      const res = await fetch(`/api/ingresos/${editingIngreso.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          monto_cs: Number(ingresoFormMontoCs) || 0,
+          monto_usd: Number(ingresoFormMontoUsd) || 0,
+          comentario: ingresoFormComentario,
+          id_vendedor: ingresoFormVendedor
+        })
+      });
+      if (res.ok) {
+        setEditingIngreso(null);
+        toast.success("Ingreso actualizado correctamente.");
+        await onRefreshConfig();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Error al actualizar el ingreso");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error de red al actualizar ingreso");
+    } finally {
+      setIngresoSubmitting(false);
+    }
+  };
+
+  const handleDeleteIngreso = async (id: string) => {
+    if (!window.confirm("¿Seguro que desea eliminar este ingreso? Esta acción no se puede deshacer y modificará el balance del vendedor.")) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/ingresos/${id}`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        toast.success("Ingreso eliminado correctamente.");
+        await onRefreshConfig();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Error al eliminar el ingreso");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error de red al eliminar ingreso");
+    }
+  };
+
   const handleAnularTicket = async (ticketId: string) => {
     if (!window.confirm("¿Está seguro que desea anular este ticket? Esta acción es irreversible.")) {
       return;
@@ -3808,6 +3869,73 @@ export default function AdminInterface({
               </div>
             </div>
 
+            {/* Renderizado Visual del Historial y Gestión de Ingresos (Auditoría) */}
+            <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm mt-6">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-emerald-100 rounded-xl">
+                    <FileText className="w-5 h-5 text-emerald-700" />
+                  </div>
+                  <h3 className="font-display font-black text-sm uppercase text-gray-800">Historial de Ingresos Recientes</h3>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 text-[10px] uppercase font-bold text-gray-500 tracking-wider">
+                      <th className="p-3 border-b border-gray-200 rounded-tl-xl">Fecha</th>
+                      <th className="p-3 border-b border-gray-200">Vendedor</th>
+                      <th className="p-3 border-b border-gray-200 text-right">Monto C$</th>
+                      <th className="p-3 border-b border-gray-200 text-right">Monto USD</th>
+                      <th className="p-3 border-b border-gray-200">Comentario</th>
+                      <th className="p-3 border-b border-gray-200 rounded-tr-xl text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-xs font-sans">
+                    {!(config.ingresos && config.ingresos.length > 0) ? (
+                      <tr>
+                        <td colSpan={6} className="p-6 text-center text-gray-400 font-medium">No hay ingresos registrados.</td>
+                      </tr>
+                    ) : (
+                      [...(config.ingresos || [])]
+                        .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
+                        .map(ingreso => (
+                          <tr key={ingreso.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                            <td className="p-3 text-gray-800 font-semibold">{ingreso.timestamp ? new Date(ingreso.timestamp).toLocaleString("es-NI") : ingreso.fecha}</td>
+                            <td className="p-3 font-bold text-blue-900">{ingreso.nombre_vendedor}</td>
+                            <td className="p-3 text-right font-black text-emerald-700">C$ {Number(ingreso.monto_cs).toFixed(2)}</td>
+                            <td className="p-3 text-right font-black text-emerald-950">$ {Number(ingreso.monto_usd).toFixed(2)}</td>
+                            <td className="p-3 text-gray-600 truncate max-w-[200px]" title={ingreso.comentario}>{ingreso.comentario || "-"}</td>
+                            <td className="p-3 text-center space-x-2">
+                              <button
+                                onClick={() => {
+                                  setEditingIngreso(ingreso);
+                                  setIngresoFormMontoCs(String(ingreso.monto_cs));
+                                  setIngresoFormMontoUsd(String(ingreso.monto_usd));
+                                  setIngresoFormComentario(ingreso.comentario || "");
+                                  setIngresoFormVendedor(ingreso.id_vendedor || "");
+                                }}
+                                className="p-1.5 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded-lg transition-colors inline-flex items-center justify-center cursor-pointer"
+                                title="Editar Ingreso"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteIngreso(ingreso.id)}
+                                className="p-1.5 bg-red-100 text-red-600 hover:bg-red-200 rounded-lg transition-colors inline-flex items-center justify-center cursor-pointer"
+                                title="Eliminar Ingreso"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
           </div>
         )}
 
@@ -4234,6 +4362,110 @@ export default function AdminInterface({
                 SÍ, ELIMINAR
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Ingreso Modal */}
+      {editingIngreso && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in text-left">
+          <div className="bg-white rounded-3xl max-w-lg w-full border border-gray-300 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-6 bg-emerald-900 text-white flex justify-between items-center">
+              <div className="flex items-center space-x-2.5">
+                <Edit2 className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-display font-black text-sm uppercase tracking-wider">
+                  Editar Ingreso
+                </h3>
+              </div>
+              <button
+                onClick={() => setEditingIngreso(null)}
+                className="w-11 h-11 flex items-center justify-center text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleUpdateIngreso} className="p-6 space-y-4 overflow-y-auto flex-1">
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-mono font-bold rounded-xl">
+                ID del Registro: {editingIngreso.id}
+              </div>
+
+              {/* Vendedor selection */}
+              <div>
+                <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Vendedor *</label>
+                <select
+                  required
+                  value={ingresoFormVendedor}
+                  onChange={(e) => setIngresoFormVendedor(e.target.value)}
+                  className="w-full px-4 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-emerald-900 focus:bg-white transition-all"
+                >
+                  <option value="">Seleccione un vendedor</option>
+                  {users.filter(u => u.rol === 'vendedor').map(v => (
+                    <option key={v.id} value={v.id}>{v.nombre} ({v.usuario})</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Monto C$ */}
+              <div>
+                <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Monto (C$) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={ingresoFormMontoCs}
+                  onChange={(e) => setIngresoFormMontoCs(e.target.value)}
+                  className="w-full px-4 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-emerald-900 focus:bg-white transition-all font-mono"
+                />
+              </div>
+
+              {/* Monto USD */}
+              <div>
+                <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Monto (USD) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={ingresoFormMontoUsd}
+                  onChange={(e) => setIngresoFormMontoUsd(e.target.value)}
+                  className="w-full px-4 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-emerald-900 focus:bg-white transition-all font-mono"
+                />
+              </div>
+
+              {/* Comentario */}
+              <div>
+                <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Comentario</label>
+                <textarea
+                  placeholder="Detalles adicionales del ingreso..."
+                  value={ingresoFormComentario}
+                  onChange={(e) => setIngresoFormComentario(e.target.value)}
+                  className="w-full px-4 py-2.5 min-h-[80px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-emerald-900 focus:bg-white transition-all"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-4 border-t border-gray-100 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingIngreso(null)}
+                  className="flex-1 py-3 min-h-[44px] flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 font-display font-bold text-xs uppercase tracking-wider rounded-xl border border-gray-300 cursor-pointer text-center transition-colors font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={ingresoSubmitting}
+                  className="flex-1 py-3 min-h-[44px] bg-emerald-900 hover:bg-emerald-800 text-white font-display font-black text-xs uppercase tracking-wider rounded-xl border-b-2 border-emerald-950 cursor-pointer shadow-md flex items-center justify-center space-x-2 transition-all active:translate-y-0.5 font-bold"
+                >
+                  <Check className="w-4.5 h-4.5 stroke-[2.5]" />
+                  <span>{ingresoSubmitting ? "GUARDANDO..." : "GUARDAR CAMBIOS"}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
