@@ -46,6 +46,7 @@ import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import TicketPreviewModal from "./TicketPreviewModal";
+import AdminPanel from "./AdminPanel";
 import { QrScannerModal } from "./QrScannerModal";
 import {
   ResponsiveContainer,
@@ -168,7 +169,7 @@ export default function AdminInterface({
   onDeleteUser,
   simulatedSupervisorId
 }: AdminInterfaceProps) {
-  const [activeSection, setActiveSection] = useState<"dashboard" | "cierres" | "config" | "usuarios" | "resultados" | "limites" | "reportes" | "finanzas" | "buscador">("dashboard");
+  const [activeSection, setActiveSection] = useState<"dashboard" | "cierres" | "config" | "usuarios" | "resultados" | "limites" | "reportes" | "finanzas" | "buscador" | "adminpanel">("dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Local form states
@@ -1755,6 +1756,18 @@ export default function AdminInterface({
                 <span>Buscador de Boletos</span>
               </button>
             )}
+
+            {((user.rol as string) === "administrador") && (
+              <button
+                id="sidebar-adminpanel"
+                onClick={() => { setActiveSection("adminpanel"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
+                className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${activeSection === "adminpanel" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
+                  }`}
+              >
+                <Sliders className="w-4 h-4 stroke-[2]" />
+                <span>Panel Modular Admin</span>
+              </button>
+            )}
           </nav>
         </div>
 
@@ -1804,6 +1817,7 @@ export default function AdminInterface({
                 {activeSection === "reportes" && "Reportería de Facturación General"}
                 {activeSection === "finanzas" && "Módulo de Finanzas y Cobros"}
                 {activeSection === "buscador" && "Buscador y Recuperación de Boletos"}
+                {activeSection === "adminpanel" && "Panel Modular Admin"}
               </h2>
               <p className="text-xs text-gray-500 font-sans mt-0.5 line-clamp-1">
                 {activeSection === "dashboard" && "Monitoreo en tiempo real de transacciones, estados de presencia de vendedores y auditoría."}
@@ -1814,6 +1828,7 @@ export default function AdminInterface({
                 {activeSection === "reportes" && "Estadísticas y reportes de facturación detallada por vendedor, por número de juego, o general."}
                 {activeSection === "finanzas" && "Consultar balances de vendedores, aplicar cobros y registrar pagos de comisiones."}
                 {activeSection === "buscador" && "Localice boletos dañados mediante filtros optimizados y visualice su representación oficial."}
+                {activeSection === "adminpanel" && "Gestión de Rescate de Boletos y Control Centralizado de Ingresos."}
               </p>
             </div>
           </div>
@@ -4088,6 +4103,17 @@ export default function AdminInterface({
               </div>
             </div>
           </div>
+        )}
+
+        {activeSection === "adminpanel" && (
+          <AdminPanel
+            user={user}
+            config={config}
+            onRefreshConfig={onRefreshConfig}
+            users={users}
+            sales={sales}
+            onRefreshSales={onRefreshSales}
+          />
         )}
 
         {/* Modal de Cobro */}

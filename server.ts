@@ -1563,14 +1563,19 @@ app.post("/api/cobros", checkAuth(), (req, res) => {
 });
 
 // ─── INGRESOS (Supervisor entrega dinero al vendedor) ──────────────────────
-app.get("/api/ingresos", (req, res) => {
+app.get("/api/ingresos", checkAuth(), (req, res) => {
   res.json((db.configuracion as any).ingresos || []);
 });
 
-app.post("/api/ingresos", checkAuth(), (req, res) => {
+app.post("/api/ingresos", checkAuth(), async (req, res) => {
   const { id_vendedor, id_supervisor, monto_cs, monto_usd, comentario } = req.body;
   if (!id_vendedor || !id_supervisor) {
     return res.status(400).json({ error: "Vendedor y Supervisor son obligatorios." });
+  }
+
+  const supervisor = db.usuarios.find((u: any) => u.id === id_supervisor);
+  if (!supervisor || (supervisor.rol !== "supervisor" && supervisor.rol !== "administrador")) {
+    return res.status(403).json({ error: "El usuario que autoriza (id_supervisor) no es un supervisor o administrador autorizado." });
   }
 
   const user = db.usuarios.find((u: any) => u.id === id_vendedor);
@@ -1589,7 +1594,20 @@ app.post("/api/ingresos", checkAuth(), (req, res) => {
   (db.configuracion as any).ingresos = (db.configuracion as any).ingresos || [];
   (db.configuracion as any).ingresos.push(newIngreso);
 
-  saveToDB();
+  await saveToDB();
+
+  try {
+    const firestoreDb = getFirestoreInstance();
+    await firestoreDb.collection("logs_auditoria").add({
+      admin_id: (req as any).user.id,
+      accion: "CREATE",
+      id_ingreso_afectado: newIngreso.id,
+      timestamp: getNicaraguaISOString()
+    });
+  } catch (err) {
+    console.error("[Audit Log] Error writing CREATE logs_auditoria:", err);
+  }
+
   res.status(201).json(newIngreso);
 });
 
@@ -2001,13 +2019,13 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
       const ticketRef = firestoreDb.collection("tickets").doc(numero_ticket);
       const signature = generateDigitalSignature(numero_ticket, serverTimeStr, juego, numero_jugado, monto_pago, moneda);
 
-      // Normalize jugadas: preserve fecha_apuesta if present, but NEVER let a jugada's date
+      // Normalize jugadas: preserve dia_juego if present, but NEVER let a jugada's date
       // pollute the ticket root's fecha_venta.
       const jugadasNormalized = Array.isArray(jugadas)
         ? jugadas.map((j: any) => ({
             numero: j.numero,
             monto: Number(j.monto),
-            ...(j.fecha_apuesta ? { fecha_apuesta: j.fecha_apuesta } : {})
+            ...(j.dia_juego ? { dia_juego: j.dia_juego } : {})
           }))
         : [{ numero: numero_jugado, monto: Number(monto_pago) }];
 
@@ -2078,8 +2096,8 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     firma_digital: signature,
     anulado: false,
     estado: "pendiente",
-    // Multi-número: persistir jugadas con fecha_apuesta si vienen
-    ...(Array.isArray(jugadas) && jugadas.length > 0 ? { jugadas: jugadas.map((j: any) => ({ numero: j.numero, monto: Number(j.monto), ...(j.fecha_apuesta ? { fecha_apuesta: j.fecha_apuesta } : {}) })) } : {})
+    // Multi-número: persistir jugadas con dia_juego si vienen
+    ...(Array.isArray(jugadas) && jugadas.length > 0 ? { jugadas: jugadas.map((j: any) => ({ numero: j.numero, monto: Number(j.monto), ...(j.dia_juego ? { dia_juego: j.dia_juego } : {}) })) } : {})
   };
 
   db.ventas.push(newSale);

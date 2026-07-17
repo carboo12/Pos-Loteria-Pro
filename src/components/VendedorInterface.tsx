@@ -148,6 +148,7 @@ export default function VendedorInterface({
     config.cobros || []
   );
   const [showDetalleFacturacion, setShowDetalleFacturacion] = useState(false);
+  const [showBtFilterModal, setShowBtFilterModal] = useState(false);
 
   // rango de tickets memoizado para la vista Reportes (solo id_vendedor + fecha)
   const rangeTickets = useMemo(() => {
@@ -366,13 +367,13 @@ export default function VendedorInterface({
     const multiplier = calculatePrizeMultiplier(selectedJuego, selectedSorteo);
     const montoInCs = moneda === "USD" ? numericAmount * (config.tasa_cambio || 36.50) : numericAmount;
     const premioPosibleCs = montoInCs * multiplier;
-    // fecha_apuesta: la fecha del sorteo para el que se apuesta (ej: "16-Julio" en juego Fechas).
-    // IMPORTANTE: esto NO es la fecha de venta del ticket — se guarda en jugada.fecha_apuesta, no en ticket.fecha_venta.
+    // dia_juego: la fecha del sorteo para el que se apuesta (ej: "16-Julio" en juego Fechas).
+    // IMPORTANTE: esto NO es la fecha de venta del ticket — se guarda en jugada.dia_juego, no en ticket.fecha_venta.
     const fechaApuestaStr = fechaVentaToDateStr(fechaVenta);
 
     // Group identical numbers: if same number already in cart, sum monto and recalculate prize
     const existingIndex = jugadas.findIndex(
-      (j) => j.numero === numeroJugado && j.fecha_apuesta === fechaApuestaStr
+      (j) => j.numero === numeroJugado && j.dia_juego === fechaApuestaStr
     );
 
     if (existingIndex > -1) {
@@ -392,9 +393,9 @@ export default function VendedorInterface({
         numero: numeroJugado,
         monto: numericAmount,
         premio_posible: premioPosibleCs,
-        // fecha_apuesta: fecha del sorteo a jugar (puede ser futura en juego Fechas).
+        // dia_juego: fecha del sorteo a jugar (puede ser futura en juego Fechas).
         // Usar nombre distinto a fecha_venta para evitar colisión con el campo raíz del ticket.
-        fecha_apuesta: fechaApuestaStr,
+        dia_juego: fechaApuestaStr,
       };
       setJugadas([...jugadas, nuevaJugada]);
       toast.success("¡Número añadido con éxito!", { position: 'top-center' });
@@ -1318,7 +1319,7 @@ export default function VendedorInterface({
       try {
         // Send ticket data to server — server creates atomically in Firestore + local DB
       // AUDITORÍA: fecha_venta es SIEMPRE la fecha real de hoy (getLocalTodayStr()).
-      // La fecha del sorteo apostado (juego Fechas) va en jugada.fecha_apuesta, NUNCA en ticket.fecha_venta.
+      // La fecha del sorteo apostado (juego Fechas) va en jugada.dia_juego, NUNCA en ticket.fecha_venta.
       const ticketPayload = {
           juego: selectedJuego,
           sorteo: selectedSorteo,
@@ -1329,12 +1330,12 @@ export default function VendedorInterface({
           id_vendedor: user.id,
           nombre_cliente: nombreCliente.trim() || "Genérico",
           premio_posible_cs: totalPremioCs,
-          // jugadas: solo numero, monto y fecha_apuesta (la fecha del sorteo a jugar).
+          // jugadas: solo numero, monto y dia_juego (la fecha del sorteo a jugar).
           // NUNCA incluir fecha_venta aquí — ese campo pertenece al nivel raíz del ticket.
           jugadas: jugadas.map(j => ({
             numero: j.numero,
             monto: j.monto,
-            ...(j.fecha_apuesta ? { fecha_apuesta: j.fecha_apuesta } : {})
+            ...(j.dia_juego ? { dia_juego: j.dia_juego } : {})
           })),
           // fecha_venta = fecha real de emisión del ticket (hoy), independiente de la fecha apostada.
           fecha_venta: getLocalTodayStr(),
@@ -1372,8 +1373,8 @@ export default function VendedorInterface({
         firma_digital: createdSale.firma_digital,
         anulado: false,
         estado: "pendiente",
-        // jugadas: fecha_apuesta (no fecha_venta) para evitar colisión con el campo raíz.
-        jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto, premio_posible: j.premio_posible, ...(j.fecha_apuesta ? { fecha_apuesta: j.fecha_apuesta } : {}) }))
+        // jugadas: dia_juego (no fecha_venta) para evitar colisión con el campo raíz.
+        jugadas: jugadas.map(j => ({ numero: j.numero, monto: j.monto, premio_posible: j.premio_posible, ...(j.dia_juego ? { dia_juego: j.dia_juego } : {}) }))
       };
 
       onNewSaleCreated(syncedTicket);
@@ -1523,7 +1524,7 @@ export default function VendedorInterface({
                 if (printerStatus === "connected") {
                   printerRef.current?.disconnect();
                 } else {
-                  printerRef.current?.connect();
+                  setShowBtFilterModal(true);
                 }
               }}
               className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all shadow-inner border cursor-pointer ${
@@ -2923,6 +2924,44 @@ export default function VendedorInterface({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Modal de Selección/Filtro Bluetooth */}
+      {showBtFilterModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full border border-gray-200 p-6">
+            <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider mb-2">Conectar Impresora</h3>
+            <p className="text-[11px] text-gray-500 mb-4">
+              Seleccione cómo desea buscar su impresora Bluetooth. Puede filtrar la lista para mostrar solo impresoras, o mostrar todos los dispositivos si su impresora no aparece.
+            </p>
+            <div className="flex flex-col space-y-2">
+              <button
+                onClick={async () => {
+                  setShowBtFilterModal(false);
+                  await printerRef.current?.connect(true);
+                }}
+                className="w-full bg-[#10B981] hover:bg-[#0F9F6F] text-white py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+              >
+                Solo Impresoras (Filtro 'Printer' / 'PT')
+              </button>
+              <button
+                onClick={async () => {
+                  setShowBtFilterModal(false);
+                  await printerRef.current?.connect(false);
+                }}
+                className="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+              >
+                Mostrar Todos (Agnóstico a Marca)
+              </button>
+              <button
+                onClick={() => setShowBtFilterModal(false)}
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

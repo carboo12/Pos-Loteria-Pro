@@ -198,7 +198,7 @@ export class BluetoothPrinterService {
 
   // ─── Public API ──────────────────────────────────────────────────────
 
-  async connect(): Promise<boolean> {
+  async connect(onlyPrinters: boolean = false): Promise<boolean> {
     if (this.device && this.device.gatt?.connected) {
       this.setStatus("connected", "Ya conectado");
       return true;
@@ -213,10 +213,27 @@ export class BluetoothPrinterService {
     this.setStatus("connecting", "Solicitando dispositivo...");
 
     try {
-      this.device = await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: "PT-210" }, { namePrefix: "GOOJPRT" }, { namePrefix: "PT" }],
-        optionalServices: BluetoothPrinterService.SERVICE_UUIDS
-      });
+      const options: RequestDeviceOptions = onlyPrinters
+        ? {
+            filters: [
+              { namePrefix: "Printer" },
+              { namePrefix: "printer" },
+              { namePrefix: "Impresora" },
+              { namePrefix: "impresora" },
+              { namePrefix: "PT" },
+              { namePrefix: "MTP" },
+              { namePrefix: "POS" },
+              { namePrefix: "GP" },
+              { namePrefix: "RT" }
+            ],
+            optionalServices: BluetoothPrinterService.SERVICE_UUIDS
+          }
+        : {
+            acceptAllDevices: true,
+            optionalServices: BluetoothPrinterService.SERVICE_UUIDS
+          };
+
+      this.device = await navigator.bluetooth.requestDevice(options);
 
       this._attachDisconnectListener();
       const ok = await this.connectInternal();

@@ -17,7 +17,7 @@ export interface Jugada {
   numero: string;          // El número apostado
   monto: number;           // Monto apostado en la moneda del ticket
   premio_posible: number;  // Premio posible en C$ (ya convertido)
-  fecha_apuesta?: string;  // YYYY-MM-DD — fecha del sorteo para el que se apuesta (ej: "2026-05-07" en juego Fechas). NO es fecha_venta.
+  dia_juego?: string;  // YYYY-MM-DD — fecha del sorteo para el que se apuesta (ej: "2026-05-07" en juego Fechas). NO es fecha_venta.
 }
 
 export interface FormatoTicket {
