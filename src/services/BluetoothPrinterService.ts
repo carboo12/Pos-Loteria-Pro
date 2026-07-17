@@ -260,15 +260,19 @@ export class BluetoothPrinterService {
     this.setStatus("connecting", "Reconectando impresora guardada...");
 
     try {
-      this.device = await navigator.bluetooth.requestDevice({
-        filters: [{ deviceId: savedId }],
-        optionalServices: BluetoothPrinterService.SERVICE_UUIDS
-      });
-
-      this._attachDisconnectListener();
-      const ok = await this.connectInternal();
-      if (ok) this._saveDeviceId();
-      return ok;
+      if (navigator.bluetooth.getDevices) {
+        const devices = await navigator.bluetooth.getDevices();
+        const matchedDevice = devices.find(d => d.id === savedId);
+        if (matchedDevice) {
+          this.device = matchedDevice;
+          this._attachDisconnectListener();
+          const ok = await this.connectInternal();
+          if (ok) this._saveDeviceId();
+          return ok;
+        }
+      }
+      this.setStatus("disconnected");
+      return false;
     } catch {
       this.setStatus("disconnected");
       return false;
