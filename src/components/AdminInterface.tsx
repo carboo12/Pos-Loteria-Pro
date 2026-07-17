@@ -1,20 +1,20 @@
 import { useState, useEffect, FormEvent, useMemo } from "react";
 import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot, where, limit } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
-import { 
-  LayoutDashboard, 
-  Users, 
-  Settings, 
-  Briefcase, 
-  RefreshCw, 
-  DollarSign, 
-  FileText, 
-  Sliders, 
-  UserPlus, 
-  ShieldAlert, 
-  CheckCircle, 
-  TrendingUp, 
-  TrendingDown, 
+import {
+  LayoutDashboard,
+  Users,
+  Settings,
+  Briefcase,
+  RefreshCw,
+  DollarSign,
+  FileText,
+  Sliders,
+  UserPlus,
+  ShieldAlert,
+  CheckCircle,
+  TrendingUp,
+  TrendingDown,
   AlertCircle,
   Bell,
   Clock,
@@ -75,9 +75,9 @@ const formatTo12Hour = (time24: string): string => {
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
-    const isoStr = typeof dateInput === "string" ? dateInput : 
-                   dateInput instanceof Date ? getNicaraguaISOString(dateInput) : String(dateInput);
-    
+    const isoStr = typeof dateInput === "string" ? dateInput :
+      dateInput instanceof Date ? getNicaraguaISOString(dateInput) : String(dateInput);
+
     // For ISO strings from server (with -06:00 offset), parse directly to avoid timezone drift
     if (typeof isoStr === "string" && isoStr.includes("T")) {
       const { hours, minutes, seconds } = (() => {
@@ -88,30 +88,30 @@ const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: b
         const d = new Date(isoStr);
         return { hours: d.getHours(), minutes: d.getMinutes(), seconds: d.getSeconds() };
       })();
-      
+
       const ampm = hours >= 12 ? "PM" : "AM";
       let h12 = hours % 12;
       if (h12 === 0) h12 = 12;
       const hStr = String(h12).padStart(2, "0");
       const mStr = String(minutes).padStart(2, "0");
-      
+
       if (includeSeconds) {
         return `${hStr}:${mStr}:${String(seconds).padStart(2, "0")} ${ampm}`;
       }
       return `${hStr}:${mStr} ${ampm}`;
     }
-    
+
     // Fallback for non-ISO inputs
     const date = typeof dateInput === "object" ? dateInput : new Date(dateInput);
     if (isNaN(date.getTime())) return String(dateInput);
-    
+
     let hours = date.getHours();
     const minutes = String(date.getMinutes()).padStart(2, "0");
     const ampm = hours >= 12 ? "PM" : "AM";
     hours = hours % 12;
     hours = hours ? hours : 12;
     const hoursStr = String(hours).padStart(2, "0");
-    
+
     if (includeSeconds) {
       const seconds = String(date.getSeconds()).padStart(2, "0");
       return `${hoursStr}:${minutes}:${seconds} ${ampm}`;
@@ -184,7 +184,7 @@ export default function AdminInterface({
   // Advanced User CRUD states
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<Usuario | null>(null);
-  
+
   const [userFormName, setUserFormName] = useState("");
   const [userFormEmail, setUserFormEmail] = useState("");
   const [userFormUsername, setUserFormUsername] = useState("");
@@ -269,7 +269,7 @@ export default function AdminInterface({
   const [finanzasMensajeInfo, setFinanzasMensajeInfo] = useState("");
   const [finanzasLoading, setFinanzasLoading] = useState(false);
   const [showCobroModal, setShowCobroModal] = useState(false);
-  
+
   // Finanzas / Pagos Comision states
   const [comisionVendedor, setComisionVendedor] = useState("");
   const [comisionMonto, setComisionMonto] = useState("");
@@ -425,10 +425,10 @@ export default function AdminInterface({
   const handleBackfill = async () => {
     if (!window.confirm("¿Ejecutar migración de ventas históricas? (Backfill)")) return;
     try {
-      const res = await fetch("/api/admin/backfill-resumenes", { 
+      const res = await fetch("/api/admin/backfill-resumenes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ default_status: "pagado" }) 
+        body: JSON.stringify({ default_status: "pagado" })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -499,7 +499,7 @@ export default function AdminInterface({
       setShowCobroModal(false);
       setFinanzasResumenes([]); // Reset UI
       setFinanzasMensajeInfo("Cobro procesado correctamente. Caja saldada.");
-      
+
       // Auto-fill commission module with 10%
       setComisionVendedor(finanzasVendedor);
       setComisionMonto((totalVendido * 0.10).toFixed(2));
@@ -524,7 +524,8 @@ export default function AdminInterface({
           id_admin: user.id,
           id_vendedor: comisionVendedor,
           monto_pago: parseFloat(comisionMonto),
-          concepto: comisionConcepto,
+          concepto: comisionConcepto
+          ,
           id_cobro_relacionado: lastCobroId
         })
       });
@@ -593,8 +594,8 @@ export default function AdminInterface({
     const cleanNum = targetNum.replace(/^#/, "").trim();
 
     // Look up in global sales list
-    const found = sales.find(s => 
-      s.id === cleanNum || 
+    const found = sales.find(s =>
+      s.id === cleanNum ||
       s.numero_ticket === cleanNum ||
       s.numero_ticket === targetNum ||
       (s.firma_digital && s.firma_digital.toUpperCase() === cleanNum.toUpperCase()) ||
@@ -678,7 +679,7 @@ export default function AdminInterface({
       try {
         if (!event.data) return;
         const data = JSON.parse(event.data);
-        
+
         // Skip ping heartbeats
         if (data.type === "ping") return;
 
@@ -687,10 +688,10 @@ export default function AdminInterface({
         // Add to history
         setNotifications((prev) => [data, ...prev].slice(0, 50)); // keep last 50
         setUnseenCount((prev) => prev + 1);
-        
+
         // Show in-app custom floating toast
         setActiveToast(data);
-        
+
         // Trigger native notification if permission is granted
         if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
           new Notification(data.title || "Nuevo Ticket", {
@@ -763,7 +764,7 @@ export default function AdminInterface({
     if (!ticketMatchesToday(s)) return false;
     return ticketMatchesSupervisor(s);
   });
-  
+
   const voidedSales = sales.filter(s => {
     if (!s.anulado) return false;
     if (!ticketMatchesToday(s)) return false;
@@ -794,7 +795,7 @@ export default function AdminInterface({
   // Aggregated sales by hour for the current day
   const todayStr = getTodayString();
   const todaySales = activeSales.filter(s => s.timestamp_servidor.startsWith(todayStr));
-  
+
   const hourlyData = Array.from({ length: 24 }, (_, i) => {
     const hourStr = String(i).padStart(2, "0");
     const hourSales = todaySales.filter(s => {
@@ -867,10 +868,10 @@ export default function AdminInterface({
       printCenter("--- IMPRESORA TÉRMICA 80MM ---", 7, false);
       y += 1;
       drawSeparator("=");
-      
+
       const nowNic = getNicaraguaISOString();
       const nicParts = parseISOTimeParts(nowNic);
-      const printDate = `${String(nicParts.day).padStart(2,"0")}/${String(nicParts.month).padStart(2,"0")}/${nicParts.year}`;
+      const printDate = `${String(nicParts.day).padStart(2, "0")}/${String(nicParts.month).padStart(2, "0")}/${nicParts.year}`;
       printRow("FECHA REPORTE:", printDate, 8, true);
       printRow("HORA:", formatTo12HourTime(nowNic), 8, false);
       printRow("TASA CAMBIO:", `C$ ${config.tasa_cambio.toFixed(2)}`, 8, false);
@@ -1101,9 +1102,9 @@ export default function AdminInterface({
     const nextEstado = targetUser.estado === "activo" ? "inactivo" : "activo";
     const nextActivo = nextEstado === "activo";
 
-    const success = await onUpdateUser(targetUser.id, { 
-      estado: nextEstado, 
-      activo: nextActivo 
+    const success = await onUpdateUser(targetUser.id, {
+      estado: nextEstado,
+      activo: nextActivo
     });
     if (success) {
       setSuccessText(`El estado de "${targetUser.nombre}" ahora es ${nextEstado.toUpperCase()}.`);
@@ -1152,7 +1153,7 @@ export default function AdminInterface({
   const handleToggleSellerToSupervisor = async (supervisor: Usuario, sellerId: string, isChecked: boolean) => {
     setAlertText(null);
     setSuccessText(null);
-    
+
     let currentAsignados = [...(supervisor.vendedoresAsignados || [])];
     if (isChecked) {
       if (!currentAsignados.includes(sellerId)) {
@@ -1334,8 +1335,8 @@ export default function AdminInterface({
     const matchedSorteo = config.sorteos.find(s => s.id === selectedSorteoResultados);
     const matchedJuego = matchedSorteo ? matchedSorteo.juego : "";
 
-    const winningNum = matchedJuego === "Fechas" 
-      ? `${resultFechasDia}-${resultFechasMes}` 
+    const winningNum = matchedJuego === "Fechas"
+      ? `${resultFechasDia}-${resultFechasMes}`
       : winningNumberInput.trim();
 
     if (!selectedSorteoResultados || !fechaResultadosInput || (!winningNum && matchedJuego !== "Fechas")) {
@@ -1514,10 +1515,10 @@ export default function AdminInterface({
     setSelectedJuegoLimite(lim.juego || "TODOS");
     setSelectedSorteoLimite(lim.sorteo || "TODOS");
     setSelectedHoraLimite(lim.hora_limite || lim.hora || "TODOS");
-    
+
     const limitNum = lim.numero ?? lim.numero_jugado ?? "TODOS";
     setNumeroLimiteInput(limitNum === "TODOS" ? "" : String(limitNum));
-    
+
     const limitAmt = lim.max_monto ?? lim.techo_dinero ?? 0;
     setLimiteDineroInput(String(limitAmt));
 
@@ -1558,7 +1559,7 @@ export default function AdminInterface({
 
   return (
     <div id="admin-container" className="flex flex-col lg:flex-row bg-[#F3F4F6] flex-1 w-full relative min-h-screen">
-      
+
       {/* Floating Custom Live Notification Toast */}
       {activeToast && (
         <div className="fixed bottom-6 right-6 z-50 max-w-sm w-[90%] bg-slate-950 border border-slate-800 text-white rounded-2xl shadow-2xl p-4 flex items-start space-x-3.5 animate-bounce">
@@ -1575,23 +1576,23 @@ export default function AdminInterface({
               <span>{activeToast.hora ? (activeToast.hora.includes(":") ? formatTo12Hour(activeToast.hora) : activeToast.hora) : formatTo12HourTime(activeToast.timestamp)}</span>
             </div>
           </div>
-          <button 
-            onClick={() => setActiveToast(null)} 
+          <button
+            onClick={() => setActiveToast(null)}
             className="text-gray-400 hover:text-white text-sm font-bold p-1 cursor-pointer shrink-0"
           >
             ✕
           </button>
         </div>
       )}
-      
+
       {/* Backdrop overlay for sidebar drawer */}
       {isSidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/60 z-40 transition-opacity duration-300 lg:hidden"
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
-      
+
       {/* Sidebar Drawer Panel */}
       <aside className={`
         fixed top-0 bottom-0 left-0 w-72 bg-[#1E3A8A] text-white flex flex-col justify-between border-r border-blue-950 z-50
@@ -1599,7 +1600,7 @@ export default function AdminInterface({
         transform transition-transform duration-300 ease-in-out shadow-2xl shrink-0
         ${isSidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
       `}>
-        
+
         {/* Brand & Stats info */}
         <div className="flex-1 overflow-y-auto">
           <div className="p-6 bg-blue-950 border-b border-blue-900 flex justify-between items-center">
@@ -1610,7 +1611,7 @@ export default function AdminInterface({
                 <span className="text-[10px] text-emerald-300 font-mono font-bold tracking-widest uppercase">Monitoreo en Vivo</span>
               </div>
             </div>
-            
+
             {/* Close button for drawer */}
             <button
               onClick={() => setIsSidebarOpen(false)}
@@ -1625,9 +1626,8 @@ export default function AdminInterface({
             <button
               id="sidebar-dashboard"
               onClick={() => { setActiveSection("dashboard"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
-                activeSection === "dashboard" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
-              }`}
+              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${activeSection === "dashboard" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
+                }`}
             >
               <LayoutDashboard className="w-4 h-4 stroke-[2]" />
               <span>Monitor en Vivo</span>
@@ -1636,9 +1636,8 @@ export default function AdminInterface({
             <button
               id="sidebar-config"
               onClick={() => { setActiveSection("config"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
-                activeSection === "config" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
-              }`}
+              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${activeSection === "config" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
+                }`}
             >
               <Settings className="w-4 h-4 stroke-[2]" />
               <span>Configuración</span>
@@ -1647,9 +1646,8 @@ export default function AdminInterface({
             <button
               id="sidebar-usuarios"
               onClick={() => { setActiveSection("usuarios"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
-                activeSection === "usuarios" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
-              }`}
+              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${activeSection === "usuarios" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
+                }`}
             >
               <Users className="w-4 h-4 stroke-[2]" />
               <span>Gestión Usuarios</span>
@@ -1658,9 +1656,8 @@ export default function AdminInterface({
             <button
               id="sidebar-resultados"
               onClick={() => { setActiveSection("resultados"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
-                activeSection === "resultados" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
-              }`}
+              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${activeSection === "resultados" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
+                }`}
             >
               <CheckCircle className="w-4 h-4 stroke-[2]" />
               <span>Resultados Sorteos</span>
@@ -1669,9 +1666,8 @@ export default function AdminInterface({
             <button
               id="sidebar-limites"
               onClick={() => { setActiveSection("limites"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
-                activeSection === "limites" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
-              }`}
+              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${activeSection === "limites" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
+                }`}
             >
               <Sliders className="w-4 h-4 stroke-[2]" />
               <span>Límites de Números</span>
@@ -1680,32 +1676,19 @@ export default function AdminInterface({
             <button
               id="sidebar-reportes"
               onClick={() => { setActiveSection("reportes"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
-                activeSection === "reportes" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
-              }`}
+              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${activeSection === "reportes" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
+                }`}
             >
               <FileText className="w-4 h-4 stroke-[2]" />
               <span>Reportes de Ventas</span>
-            </button>
-
-            <button
-              id="sidebar-finanzas"
-              onClick={() => { setActiveSection("finanzas"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
-                activeSection === "finanzas" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
-              }`}
-            >
-              <DollarSign className="w-4 h-4 stroke-[2]" />
-              <span>Finanzas y Cobros</span>
             </button>
 
             {((user.rol as string) === "admin" || (user.rol as string) === "admin_1" || (user.rol as string) === "administrador") && (
               <button
                 id="sidebar-buscador"
                 onClick={() => { setActiveSection("buscador"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
-                className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${
-                  activeSection === "buscador" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
-                }`}
+                className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${activeSection === "buscador" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
+                  }`}
               >
                 <Search className="w-4 h-4 stroke-[2]" />
                 <span>Buscador de Boletos</span>
@@ -1734,7 +1717,7 @@ export default function AdminInterface({
 
       {/* Main Content Area */}
       <main className="flex-1 p-4 md:p-8 pb-24 md:pb-32 overflow-y-auto max-h-screen">
-        
+
         {/* Unified Top Header Bar with Hamburger Menu Trigger */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-gray-300 pb-5 mb-6 gap-4 bg-white md:bg-transparent p-4 md:p-0 rounded-2xl shadow-xs md:shadow-none">
           <div className="flex items-center space-x-3.5">
@@ -1746,7 +1729,7 @@ export default function AdminInterface({
             >
               <Menu className="w-5.5 h-5.5" />
             </button>
-            
+
             <div>
               <div className="flex items-center space-x-2">
                 <span className="text-[10px] text-blue-900 font-sans font-black tracking-wider uppercase bg-blue-100/80 border border-blue-200 px-2.5 py-0.5 rounded-lg">Panel de Administración</span>
@@ -1784,11 +1767,10 @@ export default function AdminInterface({
                   setShowNotifHub(!showNotifHub);
                   setUnseenCount(0); // clear unseen count on view
                 }}
-                className={`w-11 h-11 flex items-center justify-center rounded-xl border cursor-pointer transition-all relative ${
-                  showNotifHub
+                className={`w-11 h-11 flex items-center justify-center rounded-xl border cursor-pointer transition-all relative ${showNotifHub
                     ? "bg-blue-900 text-white border-blue-900"
                     : "bg-white text-gray-700 hover:bg-gray-100 border-gray-300 shadow-xs"
-                }`}
+                  }`}
                 title="Notificaciones en Vivo"
               >
                 <Bell className={`w-4 h-4 ${unseenCount > 0 ? "animate-pulse" : ""}`} />
@@ -1850,7 +1832,7 @@ export default function AdminInterface({
                       ))
                     )}
                   </div>
-                  
+
                   <div className="p-2 bg-gray-50 text-center border-t border-gray-100">
                     <span className="text-[9px] text-gray-400 font-mono tracking-widest uppercase font-bold">FCM / SSE en Vivo</span>
                   </div>
@@ -1949,10 +1931,10 @@ export default function AdminInterface({
         {/* SECTION 1: MONITOR EN VIVO */}
         {activeSection === "dashboard" && (
           <div className="space-y-6 animate-fade-in">
-            
+
             {/* Summary Dashboard Section (2x2 Grid) */}
             <div id="summary-dashboard" className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              
+
               {/* Widget 1: Recaudación de Hoy */}
               <button
                 onClick={() => {
@@ -2023,7 +2005,7 @@ export default function AdminInterface({
 
             {/* Split Grid: Presence Monitor & Custom SVG Analytics Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              
+
               {/* Left Column: Presence grid (simulating Realtime DB live indicators) */}
               <div className="lg:col-span-4 bg-white p-5 rounded-2xl border border-gray-300 shadow-xs flex flex-col justify-between">
                 <div>
@@ -2031,7 +2013,7 @@ export default function AdminInterface({
                     <span className="font-display font-black text-xs text-gray-800 uppercase tracking-wider block">Estado de Presencia</span>
                     <span className="text-[9px] font-mono bg-blue-100 text-blue-900 px-2 py-0.5 rounded uppercase font-bold">Tiempo Real</span>
                   </div>
-                  
+
                   <div className="space-y-3">
                     {activeSellers.map((v) => (
                       <div key={v.id} className="flex justify-between items-center p-2.5 hover:bg-gray-50 rounded-xl border border-gray-200 transition-colors">
@@ -2043,9 +2025,8 @@ export default function AdminInterface({
                             className="w-11 h-11 flex items-center justify-center relative cursor-pointer group shrink-0"
                             title="Haz clic para alternar estado simulado en tiempo real"
                           >
-                            <span className={`w-3.5 h-3.5 rounded-full block border border-white ${
-                              v.conexion === "online" ? "bg-[#10B981]" : "bg-gray-400"
-                            }`}></span>
+                            <span className={`w-3.5 h-3.5 rounded-full block border border-white ${v.conexion === "online" ? "bg-[#10B981]" : "bg-gray-400"
+                              }`}></span>
                             <span className="absolute left-0 top-10 hidden group-hover:block bg-gray-900 text-white text-[8px] py-0.5 px-1 rounded whitespace-nowrap z-10 font-mono">
                               Alternar Estado
                             </span>
@@ -2082,7 +2063,7 @@ export default function AdminInterface({
               <div id="live-feed-card" className="lg:col-span-8 bg-white p-5 rounded-2xl border border-gray-300 shadow-xs space-y-6">
                 <div>
                   <span className="font-display font-black text-xs text-gray-800 uppercase tracking-wider block mb-4">Ventas Recaudadas por Tipo de Juego (C$)</span>
-                  
+
                   {/* Custom High-Contrast SVG Bar Chart */}
                   <div className="space-y-4">
                     {["Diaria", "Premia2", "La Grande"].map((juego) => {
@@ -2098,13 +2079,12 @@ export default function AdminInterface({
                               C$ {(totalInCs || 0).toLocaleString("es-NI", { maximumFractionDigits: 2 })} ({percentage.toFixed(0)}%)
                             </span>
                           </div>
-                          
+
                           {/* Custom SVG horizontal bar acting as progress */}
                           <div className="h-4 w-full bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
-                            <div 
-                              className={`h-full transition-all duration-1000 ${
-                                juego === "Diaria" ? "bg-blue-900" : juego === "Premia2" ? "bg-emerald-600" : "bg-yellow-500"
-                              }`}
+                            <div
+                              className={`h-full transition-all duration-1000 ${juego === "Diaria" ? "bg-blue-900" : juego === "Premia2" ? "bg-emerald-600" : "bg-yellow-500"
+                                }`}
                               style={{ width: `${Math.max(3, percentage)}%` }}
                             ></div>
                           </div>
@@ -2116,7 +2096,7 @@ export default function AdminInterface({
 
                 <div className="pt-4 border-t border-gray-100">
                   <span className="font-display font-black text-xs text-gray-800 uppercase tracking-wider block mb-3">Live Feed de Transacciones</span>
-                  
+
                   <div className="space-y-2 max-h-40 overflow-y-auto">
                     {activeSales.slice().reverse().map((sale) => (
                       <div key={sale.id} className="flex justify-between items-center text-[11px] p-2 bg-gray-50 rounded-lg border border-gray-200">
@@ -2164,61 +2144,61 @@ export default function AdminInterface({
                   >
                     <defs>
                       <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#1E3A8A" stopOpacity={0.2}/>
-                        <stop offset="95%" stopColor="#1E3A8A" stopOpacity={0}/>
+                        <stop offset="5%" stopColor="#1E3A8A" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#1E3A8A" stopOpacity={0} />
                       </linearGradient>
                       <linearGradient id="colorTickets" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10B981" stopOpacity={0.2}/>
-                        <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
+                        <stop offset="5%" stopColor="#10B981" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                    <XAxis 
-                      dataKey="hora" 
-                      stroke="#9CA3AF" 
+                    <XAxis
+                      dataKey="hora"
+                      stroke="#9CA3AF"
                       fontSize={9}
                       tickLine={false}
                       axisLine={false}
                       dy={5}
                     />
-                    <YAxis 
+                    <YAxis
                       yAxisId="left"
-                      stroke="#1E3A8A" 
+                      stroke="#1E3A8A"
                       fontSize={9}
                       tickLine={false}
                       axisLine={false}
                       tickFormatter={(val) => `C$ ${val}`}
                     />
-                    <YAxis 
+                    <YAxis
                       yAxisId="right"
                       orientation="right"
-                      stroke="#10B981" 
+                      stroke="#10B981"
                       fontSize={9}
                       tickLine={false}
                       axisLine={false}
                       tickFormatter={(val) => `${val} tks`}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ backgroundColor: '#1E293B', border: 'none', borderRadius: '12px', color: '#FFF', fontSize: '11px', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                       labelStyle={{ fontWeight: 'black', color: '#93C5FD' }}
                     />
-                    <Area 
+                    <Area
                       yAxisId="left"
-                      type="monotone" 
-                      dataKey="Ventas C$" 
-                      stroke="#1E3A8A" 
+                      type="monotone"
+                      dataKey="Ventas C$"
+                      stroke="#1E3A8A"
                       strokeWidth={2.5}
-                      fillOpacity={1} 
-                      fill="url(#colorSales)" 
+                      fillOpacity={1}
+                      fill="url(#colorSales)"
                     />
-                    <Area 
+                    <Area
                       yAxisId="right"
-                      type="monotone" 
-                      dataKey="Tickets" 
-                      stroke="#10B981" 
+                      type="monotone"
+                      dataKey="Tickets"
+                      stroke="#10B981"
                       strokeWidth={1.5}
-                      fillOpacity={1} 
-                      fill="url(#colorTickets)" 
+                      fillOpacity={1}
+                      fill="url(#colorTickets)"
                     />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -2231,16 +2211,16 @@ export default function AdminInterface({
         {/* SECTION 3: CONFIGURACIÓN SISTEMA */}
         {activeSection === "config" && (
           <div className="space-y-6 animate-fade-in">
-            
+
             {/* Global parameters / Tasa de Cambio */}
             <div className="bg-white p-6 rounded-2xl border border-gray-300 shadow-xs space-y-4">
               <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block border-b border-gray-100 pb-2">1. Parámetros Económicos Globales</span>
-              
+
               <div className="max-w-md space-y-3">
                 <div>
                   <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Tasa de Cambio Global (C$ por 1.00 USD)</label>
                   <p className="text-[11px] text-gray-400 font-sans mb-2">Este valor se propaga automáticamente a los vendedores para realizar cálculos de caja y ventas en tiempo real.</p>
-                  
+
                   <div className="flex space-x-3">
                     <div className="relative flex-1">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono font-bold text-gray-400">C$</span>
@@ -2269,7 +2249,7 @@ export default function AdminInterface({
             {/* Ticket printing template builder */}
             <div className="bg-white p-6 rounded-2xl border border-gray-300 shadow-xs space-y-4">
               <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block border-b border-gray-100 pb-2">2. Constructor de Diseño de Ticket de Lotería</span>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Form fields */}
                 <div className="space-y-4">
@@ -2342,7 +2322,7 @@ export default function AdminInterface({
                     </div>
                     <div className="border-t border-dashed border-gray-300 my-1.5"></div>
                     <div className="text-center text-[7.5px] italic text-gray-500 mb-2">{ticketFooterInput || "Gracias por su compra."}</div>
-                    
+
                     {/* Fake QR Code */}
                     <div className="flex flex-col items-center justify-center mt-1">
                       <QrCode className="w-10 h-10 text-gray-900" strokeWidth={1.2} />
@@ -2389,7 +2369,7 @@ export default function AdminInterface({
                                     Cierre de Ventas: {formatTo12Hour(s.hora_cierre)}
                                   </span>
                                 </div>
-                                
+
                                 <div className="flex items-center gap-2">
                                   <button
                                     onClick={() => handleEditSorteoClick(s)}
@@ -2423,7 +2403,7 @@ export default function AdminInterface({
                     <button onClick={cancelEditSorteo} className="ml-2 text-[10px] text-blue-600 hover:text-blue-800 underline align-baseline" type="button">Cancelar</button>
                   )}
                 </span>
-                
+
                 <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
                   <div>
                     <label className="block text-[10px] font-sans font-bold text-gray-500 uppercase mb-1">País</label>
@@ -2450,12 +2430,12 @@ export default function AdminInterface({
                       className="w-full px-2 py-2 min-h-[44px] bg-white border border-gray-300 rounded-lg text-xs font-semibold focus:outline-none"
                     >
                       {((newSorteoPais === "Nicaragua" ? ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"] :
-                         newSorteoPais === "Honduras" ? ["La Diaria", "Premia2", "Pega 3", "Súper Premio"] :
-                         newSorteoPais === "El Salvador" ? ["Diaria"] :
-                         newSorteoPais === "La Primera" ? ["La Primera"] :
-                         newSorteoPais === "Costa Rica" ? ["3 Monazos", "Tica"] : ["Diaria"]) as string[]).map((game) => (
-                        <option key={game} value={game}>{game}</option>
-                      ))}
+                        newSorteoPais === "Honduras" ? ["La Diaria", "Premia2", "Pega 3", "Súper Premio"] :
+                          newSorteoPais === "El Salvador" ? ["Diaria"] :
+                            newSorteoPais === "La Primera" ? ["La Primera"] :
+                              newSorteoPais === "Costa Rica" ? ["3 Monazos", "Tica"] : ["Diaria"]) as string[]).map((game) => (
+                                <option key={game} value={game}>{game}</option>
+                              ))}
                     </select>
                   </div>
 
@@ -2544,11 +2524,10 @@ export default function AdminInterface({
                         key={idx}
                         type="button"
                         onClick={() => setNewSorteoDias(prev => prev.includes(idx) ? prev.filter(d => d !== idx) : [...prev, idx])}
-                        className={`px-2 py-1 min-h-[32px] text-[10px] font-bold rounded-lg border transition-all ${
-                          newSorteoDias.includes(idx)
+                        className={`px-2 py-1 min-h-[32px] text-[10px] font-bold rounded-lg border transition-all ${newSorteoDias.includes(idx)
                             ? "bg-indigo-600 text-white border-indigo-700"
                             : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
-                        }`}
+                          }`}
                       >
                         {dia}
                       </button>
@@ -2641,7 +2620,7 @@ export default function AdminInterface({
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              
+
               {/* Directory (8 Cols) */}
               <div className="lg:col-span-8 bg-white p-6 rounded-2xl border border-gray-300 shadow-xs space-y-4">
                 <div className="flex justify-between items-center border-b border-gray-100 pb-3">
@@ -2667,18 +2646,16 @@ export default function AdminInterface({
                       return (
                         <div
                           key={u.id}
-                          className={`p-4 rounded-xl border transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 ${
-                            isActivo ? "bg-gray-50 border-gray-200 hover:bg-gray-100/50" : "bg-red-50/20 border-red-200/50 grayscale-[20%]"
-                          }`}
+                          className={`p-4 rounded-xl border transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 ${isActivo ? "bg-gray-50 border-gray-200 hover:bg-gray-100/50" : "bg-red-50/20 border-red-200/50 grayscale-[20%]"
+                            }`}
                         >
                           {/* Left Details */}
                           <div className="space-y-1 flex-1">
                             <div className="flex items-center space-x-2">
                               {/* Connection Bubble */}
                               <span
-                                className={`w-2.5 h-2.5 rounded-full inline-block border border-white ${
-                                  isOnline ? "bg-[#10B981]" : "bg-gray-400"
-                                }`}
+                                className={`w-2.5 h-2.5 rounded-full inline-block border border-white ${isOnline ? "bg-[#10B981]" : "bg-gray-400"
+                                  }`}
                                 title={isOnline ? "En Línea" : "Desconectado"}
                               ></span>
                               <span className="font-display font-black text-sm text-gray-950 uppercase tracking-tight">
@@ -2697,13 +2674,12 @@ export default function AdminInterface({
 
                             <div className="flex flex-wrap items-center gap-2 pt-1">
                               <span
-                                className={`text-[9px] px-2 py-0.5 rounded font-black uppercase tracking-wider ${
-                                  u.rol === "admin" || u.rol === "administrador"
+                                className={`text-[9px] px-2 py-0.5 rounded font-black uppercase tracking-wider ${u.rol === "admin" || u.rol === "administrador"
                                     ? "bg-blue-100 text-blue-900 border border-blue-200"
                                     : isSupervisor
-                                    ? "bg-purple-100 text-purple-900 border border-purple-200"
-                                    : "bg-teal-100 text-teal-900 border border-teal-200"
-                                }`}
+                                      ? "bg-purple-100 text-purple-900 border border-purple-200"
+                                      : "bg-teal-100 text-teal-900 border border-teal-200"
+                                  }`}
                               >
                                 {u.rol === "admin" || u.rol === "administrador" ? "Administrador" : u.rol}
                               </span>
@@ -2718,7 +2694,7 @@ export default function AdminInterface({
                                   Supervisado por: {users.find((x) => x.id === u.id_supervisor)?.nombre || u.id_supervisor}
                                 </span>
                               )}
-                              
+
                               {isSupervisor && (
                                 <span className="text-[9px] bg-indigo-50 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded font-bold">
                                   Vendedores Asignados: {u.vendedoresAsignados?.length || 0}
@@ -2733,11 +2709,10 @@ export default function AdminInterface({
                             {isSupervisor && (
                               <button
                                 onClick={() => setSelectedSupervisorForAssignment(u)}
-                                className={`px-2.5 py-1.5 min-h-[44px] flex items-center justify-center rounded-lg text-[10px] font-sans font-bold uppercase tracking-wider cursor-pointer space-x-1 border ${
-                                  selectedSupervisorForAssignment?.id === u.id
+                                className={`px-2.5 py-1.5 min-h-[44px] flex items-center justify-center rounded-lg text-[10px] font-sans font-bold uppercase tracking-wider cursor-pointer space-x-1 border ${selectedSupervisorForAssignment?.id === u.id
                                     ? "bg-purple-900 text-white border-purple-900"
                                     : "bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100"
-                                }`}
+                                  }`}
                                 title="Gestionar vendedores asignados a este supervisor"
                               >
                                 <Link className="w-3.5 h-3.5 shrink-0" />
@@ -2749,11 +2724,10 @@ export default function AdminInterface({
                             {u.id !== user.id && (
                               <button
                                 onClick={() => handleToggleUserActive(u)}
-                                className={`px-3 py-1.5 min-h-[44px] flex items-center justify-center rounded-lg text-[10px] font-display font-black uppercase tracking-wider transition-all cursor-pointer space-x-1.5 border shadow-xs ${
-                                  isActivo
+                                className={`px-3 py-1.5 min-h-[44px] flex items-center justify-center rounded-lg text-[10px] font-display font-black uppercase tracking-wider transition-all cursor-pointer space-x-1.5 border shadow-xs ${isActivo
                                     ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
                                     : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
-                                }`}
+                                  }`}
                               >
                                 {isActivo ? (
                                   <>
@@ -2798,10 +2772,10 @@ export default function AdminInterface({
                     const matchRegion = userFilterRegion === "TODOS" || u.region === userFilterRegion;
                     return matchRole && matchRegion;
                   }).length === 0 && (
-                    <div className="text-center py-12 text-sm text-gray-400 font-medium border border-dashed border-gray-300 rounded-2xl">
-                      No se encontraron usuarios activos con los filtros indicados.
-                    </div>
-                  )}
+                      <div className="text-center py-12 text-sm text-gray-400 font-medium border border-dashed border-gray-300 rounded-2xl">
+                        No se encontraron usuarios activos con los filtros indicados.
+                      </div>
+                    )}
                 </div>
               </div>
 
@@ -2872,10 +2846,10 @@ export default function AdminInterface({
                           const hasNoSupervisor = !u.id_supervisor || u.id_supervisor === "";
                           return isCurrentlyAssigned || hasNoSupervisor;
                         }).length === 0 && (
-                          <p className="text-xs text-gray-400 text-center py-6 font-semibold">
-                            No hay vendedores registrados sin supervisor asignado en el sistema.
-                          </p>
-                        )}
+                            <p className="text-xs text-gray-400 text-center py-6 font-semibold">
+                              No hay vendedores registrados sin supervisor asignado en el sistema.
+                            </p>
+                          )}
                       </div>
                     </div>
                   ) : (
@@ -2908,11 +2882,11 @@ export default function AdminInterface({
         {activeSection === "resultados" && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              
+
               {/* Left side: Enter new winning number */}
               <div className="lg:col-span-5 bg-white p-6 rounded-2xl border border-gray-300 shadow-xs">
                 <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block border-b border-gray-100 pb-2 mb-4">Registrar Número Ganador</span>
-                
+
                 <form onSubmit={handleSaveResultado} className="space-y-4">
                   <div>
                     <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">1. Seleccionar País</label>
@@ -3040,7 +3014,7 @@ export default function AdminInterface({
               {/* Right side: Published winners registry list */}
               <div className="lg:col-span-7 bg-white p-6 rounded-2xl border border-gray-300 shadow-xs">
                 <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block border-b border-gray-100 pb-2 mb-4">Registro Histórico de Resultados</span>
-                
+
                 {resultsList.length === 0 ? (
                   <div className="p-8 text-center text-xs text-gray-400 font-medium">No se han registrado números ganadores oficialmente todavía.</div>
                 ) : (
@@ -3090,13 +3064,13 @@ export default function AdminInterface({
         {activeSection === "limites" && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              
+
               {/* Left side: Create limit rule form */}
               <div className="lg:col-span-5 bg-white p-6 rounded-2xl border border-gray-300 shadow-xs">
                 <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block border-b border-gray-100 pb-2 mb-4">
                   {editingLimitId ? "Editar Techo o Límite" : "Configurar Techo o Límite"}
                 </span>
-                
+
                 <form onSubmit={handleSaveLimite} className="space-y-4 font-sans">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -3148,13 +3122,13 @@ export default function AdminInterface({
                         className="w-full px-3 py-2 min-h-[44px] bg-white border border-gray-300 rounded-xl text-xs font-bold text-gray-900 focus:outline-none"
                       >
                         {((selectedPaisLimite === "Nicaragua" ? ["TODOS", "Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"] :
-                           selectedPaisLimite === "Honduras" ? ["TODOS", "La Diaria", "Premia2", "Pega 3", "Súper Premio"] :
-                           selectedPaisLimite === "El Salvador" ? ["TODOS", "Diaria"] :
-                           selectedPaisLimite === "La Primera" ? ["TODOS", "La Primera"] :
-                           selectedPaisLimite === "Costa Rica" ? ["TODOS", "3 Monazos", "Tica"] :
-                           ["TODOS", "Diaria", "La Diaria", "Jugá 3", "3 Monazos", "Premia2", "Pega 3", "Súper Premio", "La Primera", "Tica", "Fechas", "Terminación 2", "Sabadito"])).map(j => (
-                          <option key={j} value={j}>{j}</option>
-                        ))}
+                          selectedPaisLimite === "Honduras" ? ["TODOS", "La Diaria", "Premia2", "Pega 3", "Súper Premio"] :
+                            selectedPaisLimite === "El Salvador" ? ["TODOS", "Diaria"] :
+                              selectedPaisLimite === "La Primera" ? ["TODOS", "La Primera"] :
+                                selectedPaisLimite === "Costa Rica" ? ["TODOS", "3 Monazos", "Tica"] :
+                                  ["TODOS", "Diaria", "La Diaria", "Jugá 3", "3 Monazos", "Premia2", "Pega 3", "Súper Premio", "La Primera", "Tica", "Fechas", "Terminación 2", "Sabadito"])).map(j => (
+                                    <option key={j} value={j}>{j}</option>
+                                  ))}
                       </select>
                     </div>
 
@@ -3184,10 +3158,10 @@ export default function AdminInterface({
                       {config.sorteos.filter(s => {
                         if (selectedPaisLimite !== "TODOS") {
                           const paisSuffix = selectedPaisLimite === "Nicaragua" ? "(NI)" :
-                                             selectedPaisLimite === "Honduras" ? "(HN)" :
-                                             selectedPaisLimite === "El Salvador" ? "(SV)" :
-                                             selectedPaisLimite === "La Primera" ? "(LP)" :
-                                             selectedPaisLimite === "Costa Rica" ? "(CR)" : "";
+                            selectedPaisLimite === "Honduras" ? "(HN)" :
+                              selectedPaisLimite === "El Salvador" ? "(SV)" :
+                                selectedPaisLimite === "La Primera" ? "(LP)" :
+                                  selectedPaisLimite === "Costa Rica" ? "(CR)" : "";
                           if (paisSuffix && !s.nombre.includes(paisSuffix)) return false;
                         }
                         if (selectedJuegoLimite !== "TODOS" && s.juego !== selectedJuegoLimite) return false;
@@ -3204,9 +3178,9 @@ export default function AdminInterface({
                         <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider">Número Restringido</label>
                         <span className="text-[9px] text-[#EF4444] font-bold font-mono">
                           {selectedJuegoLimite === "Premia2" ? "4 dig." :
-                           selectedJuegoLimite === "Jugá 3" || selectedJuegoLimite === "3 Monazos" ? "3 dig." :
-                           selectedJuegoLimite === "Pega 3" ? "6 dig." :
-                           selectedJuegoLimite === "Súper Premio" ? "12 dig." : "2 dig."}
+                            selectedJuegoLimite === "Jugá 3" || selectedJuegoLimite === "3 Monazos" ? "3 dig." :
+                              selectedJuegoLimite === "Pega 3" ? "6 dig." :
+                                selectedJuegoLimite === "Súper Premio" ? "12 dig." : "2 dig."}
                         </span>
                       </div>
                       <input
@@ -3237,8 +3211,8 @@ export default function AdminInterface({
                       className="w-full py-3 min-h-[44px] flex items-center justify-center bg-[#1E3A8A] hover:bg-blue-800 text-white font-display font-black text-xs uppercase tracking-wider rounded-xl border-b-2 border-blue-950 shadow-xs cursor-pointer space-x-2"
                     >
                       <span>
-                        {submitting 
-                          ? (editingLimitId ? "ACTUALIZANDO..." : "CONFIGURANDO...") 
+                        {submitting
+                          ? (editingLimitId ? "ACTUALIZANDO..." : "CONFIGURANDO...")
                           : (editingLimitId ? "ACTUALIZAR TECHO DE VENTA" : "GUARDAR TECHO DE VENTA")}
                       </span>
                     </button>
@@ -3268,7 +3242,7 @@ export default function AdminInterface({
               {/* Right side: Limits list */}
               <div className="lg:col-span-7 bg-white p-6 rounded-2xl border border-gray-300 shadow-xs">
                 <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block border-b border-gray-100 pb-2 mb-4">Techos de Venta de Números Activos</span>
-                
+
                 {limitsList.length === 0 ? (
                   <div className="p-8 text-center text-xs text-gray-400 font-medium">No se registran techos de venta de números programados. El sistema permitirá ventas ilimitadas.</div>
                 ) : (
@@ -3350,7 +3324,7 @@ export default function AdminInterface({
         {/* SECTION 7: REPORTERIA DE FACTURACION */}
         {activeSection === "reportes" && (
           <div className="space-y-6 font-sans">
-            
+
             {/* Filter bar */}
             <div className="bg-white p-5 rounded-2xl border border-gray-300 shadow-xs flex flex-wrap gap-4 items-center justify-between">
               <div className="flex flex-wrap gap-4 items-center">
@@ -3407,7 +3381,7 @@ export default function AdminInterface({
             {/* Main reports grid */}
             <div className="space-y-4">
               <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block">Facturación por Vendedor</span>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {vendedoresReporte
                   .filter(u => reportFilterVendedor === "TODOS" || u.id === reportFilterVendedor)
@@ -3503,7 +3477,7 @@ export default function AdminInterface({
                         });
 
                         const grouped: { [key: string]: { number: string; juego: string; sorteo: string; tickets: number; totalCs: number } } = {};
-                        
+
                         filteredDaySales.forEach(s => {
                           const key = `${s.numero_jugado}-${s.juego}`;
                           const equivalentAmountCs = s.moneda === "C$" ? s.monto_pago : (s.monto_pago * config.tasa_cambio);
@@ -3600,7 +3574,7 @@ export default function AdminInterface({
                               </span>
                             </div>
                             <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                              <div 
+                              <div
                                 className="h-full bg-blue-900 rounded-full transition-all duration-500"
                                 style={{ width: `${pct}%` }}
                               ></div>
@@ -3629,7 +3603,7 @@ export default function AdminInterface({
         {activeSection === "finanzas" && (
           <div className="space-y-6 animate-fade-in">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              
+
               {/* Facturación por Usuario */}
               <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
                 <div className="flex items-center space-x-3 mb-6">
@@ -3703,7 +3677,7 @@ export default function AdminInterface({
                           <span className="text-lg font-black text-gray-800">C$ {finanzasResumenes.reduce((a, b) => a + b.pagado, 0).toFixed(2)}</span>
                         </div>
                       </div>
-                      
+
                       <div className="bg-green-50 p-5 rounded-2xl border border-green-200 text-center relative overflow-hidden">
                         <span className="text-xs uppercase font-black tracking-widest text-green-800 block mb-1">Ganancia / Total a Pagar</span>
                         <span className="text-4xl font-black text-green-700 tracking-tighter">
@@ -3962,11 +3936,10 @@ export default function AdminInterface({
                               {ticket.moneda || "C$"} {(ticket.monto_pago || 0).toFixed(2)}
                             </td>
                             <td className="p-3">
-                              <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-black uppercase font-display border ${
-                                isAnulado 
-                                  ? "bg-red-50 text-red-700 border-red-200" 
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-black uppercase font-display border ${isAnulado
+                                  ? "bg-red-50 text-red-700 border-red-200"
                                   : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              }`}>
+                                }`}>
                                 {isAnulado ? "Anulado" : "Válido"}
                               </span>
                             </td>
@@ -3989,57 +3962,57 @@ export default function AdminInterface({
           </div>
         )}
 
-      {/* Modal de Cobro */}
-      <AnimatePresence>
-        {showCobroModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
-          >
+        {/* Modal de Cobro */}
+        <AnimatePresence>
+          {showCobroModal && (
             <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="bg-white rounded-3xl p-6 shadow-2xl max-w-md w-full border border-gray-200"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
             >
-              <div className="flex items-center space-x-3 text-green-600 mb-4">
-                <div className="p-3 bg-green-100 rounded-full">
-                  <DollarSign className="w-8 h-8" />
+              <motion.div
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
+                className="bg-white rounded-3xl p-6 shadow-2xl max-w-md w-full border border-gray-200"
+              >
+                <div className="flex items-center space-x-3 text-green-600 mb-4">
+                  <div className="p-3 bg-green-100 rounded-full">
+                    <DollarSign className="w-8 h-8" />
+                  </div>
+                  <h3 className="font-display font-black text-lg uppercase tracking-wider text-green-900">
+                    Confirmar Cobro
+                  </h3>
                 </div>
-                <h3 className="font-display font-black text-lg uppercase tracking-wider text-green-900">
-                  Confirmar Cobro
-                </h3>
-              </div>
-              <p className="text-gray-600 font-sans text-sm leading-relaxed mb-4">
-                ¿Confirmas que estás retirando físicamente <strong className="text-gray-900 font-black font-mono">C$ {(finanzasResumenes.reduce((a, b) => a + b.vendido, 0) - finanzasResumenes.reduce((a, b) => a + b.pagado, 0)).toFixed(2)}</strong> a este vendedor por el corte del {finanzasFechaInicio} al {finanzasFechaFin}?
-              </p>
-              <div className="mb-6 p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono text-gray-600">
-                <span className="font-bold uppercase text-gray-800 block mb-1">Días a saldar ({finanzasResumenes.length}):</span>
-                {finanzasResumenes.map(r => (
-                  <div key={r.id}>- {r.id.split('_')[1] || r.id}</div>
-                ))}
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowCobroModal(false)}
-                  className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold uppercase text-xs rounded-xl transition-colors cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleAplicarCobro}
-                  disabled={finanzasLoading}
-                  className="flex-1 py-3 bg-green-600 hover:bg-green-700 text-white font-black uppercase text-xs rounded-xl shadow-md transition-colors cursor-pointer flex justify-center items-center"
-                >
-                  {finanzasLoading ? "Procesando..." : "SÍ, CONFIRMAR COBRO"}
-                </button>
-              </div>
+                <p className="text-gray-600 font-sans text-sm leading-relaxed mb-4">
+                  ¿Confirmas que estás retirando físicamente <strong className="text-gray-900 font-black font-mono">C$ {(finanzasResumenes.reduce((a, b) => a + b.vendido, 0) - finanzasResumenes.reduce((a, b) => a + b.pagado, 0)).toFixed(2)}</strong> a este vendedor por el corte del {finanzasFechaInicio} al {finanzasFechaFin}?
+                </p>
+                <div className="mb-6 p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono text-gray-600">
+                  <span className="font-bold uppercase text-gray-800 block mb-1">Días a saldar ({finanzasResumenes.length}):</span>
+                  {finanzasResumenes.map(r => (
+                    <div key={r.id}>- {r.id.split('_')[1] || r.id}</div>
+                  ))}
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowCobroModal(false)}
+                    className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold uppercase text-xs rounded-xl transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleAplicarCobro}
+                    disabled={finanzasLoading}
+                    className="flex-1 py-3 bg-green-600 hover:bg-green-700 text-white font-black uppercase text-xs rounded-xl shadow-md transition-colors cursor-pointer flex justify-center items-center"
+                  >
+                    {finanzasLoading ? "Procesando..." : "SÍ, CONFIRMAR COBRO"}
+                  </button>
+                </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>
 
       </main>
 
@@ -4056,10 +4029,10 @@ export default function AdminInterface({
 
       {/* Ticket Viewer Modal */}
       {activeTicket && (
-        <TicketPreviewModal 
-          ticket={activeTicket} 
-          config={config} 
-          onClose={() => setActiveTicket(null)} 
+        <TicketPreviewModal
+          ticket={activeTicket}
+          config={config}
+          onClose={() => setActiveTicket(null)}
           userRole="administrador"
           onAnular={handleAnularTicket}
         />
@@ -4182,11 +4155,10 @@ export default function AdminInterface({
                 <button
                   type="button"
                   onClick={() => setUserFormStatus(userFormStatus === "activo" ? "inactivo" : "activo")}
-                  className={`px-4 py-2 min-h-[44px] flex items-center justify-center rounded-xl text-xs font-display font-black uppercase tracking-wider transition-all border cursor-pointer ${
-                    userFormStatus === "activo"
+                  className={`px-4 py-2 min-h-[44px] flex items-center justify-center rounded-xl text-xs font-display font-black uppercase tracking-wider transition-all border cursor-pointer ${userFormStatus === "activo"
                       ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                       : "bg-red-50 text-red-800 border-red-200"
-                  }`}
+                    }`}
                 >
                   {userFormStatus === "activo" ? "● ACTIVO" : "○ INACTIVO"}
                 </button>
