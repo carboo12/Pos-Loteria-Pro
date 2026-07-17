@@ -183,8 +183,13 @@ export async function loadLogoBitmap(url: string, maxWidthBytes: number = 48): P
 
       const maxDots = maxWidthBytes * 8;
       const ratio = Math.min(maxDots / img.width, 1);
-      const w = Math.floor(img.width * ratio);
-      const h = Math.floor(img.height * ratio);
+      
+      // Force width to be a multiple of 8 to prevent byte alignment displacement
+      let w = Math.floor(img.width * ratio);
+      w = w - (w % 8);
+      if (w < 8) w = 8;
+      
+      const h = Math.floor(img.height * (w / img.width));
 
       canvas.width = w;
       canvas.height = h;
