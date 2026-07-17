@@ -302,7 +302,18 @@ function initDatabase(): ServerDB {
     usuarios: [
       {
         id: "admin_1",
-        requiereCambioPassword: true, nombre: "Administrador Global", usuario: "admin", rol: "administrador", estado: "activo", conexion: "online", activo: true, region: "Nicaragua", email: "carboo12@gmail.com", id_supervisor: "", vendedoresAsignados: []
+        requiereCambioPassword: true,
+        nombre: "Administrador Global",
+        usuario: "admin",
+        rol: "administrador",
+        estado: "activo",
+        conexion: "online",
+        activo: true,
+        region: "Nicaragua",
+        email: "jessica26@gmail.com",
+        id_supervisor: "",
+        vendedoresAsignados: [],
+        password: bcrypt.hashSync("199206J", 10)
       }
     ],
     configuracion: {
