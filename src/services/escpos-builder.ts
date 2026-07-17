@@ -240,7 +240,12 @@ export async function loadLogoBitmap(url: string, maxWidthBytes: number = 48): P
       const yL = h & 0xFF;
       const yH = (h >> 8) & 0xFF;
 
-      resolve([0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH, ...bitmap]);
+      // Wrap image payload with ESC 2 (set default line spacing 1/6 inch) and ESC J 0 (minimum paper feed)
+      resolve([
+        0x1B, 0x32, // ESC 2
+        0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH, ...bitmap, // GS v 0
+        0x1B, 0x4A, 0x00 // ESC J 0
+      ]);
     };
     img.onerror = () => resolve([]);
     img.src = url;

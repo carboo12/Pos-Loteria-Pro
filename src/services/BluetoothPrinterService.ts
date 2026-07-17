@@ -341,7 +341,7 @@ export class BluetoothPrinterService {
     this.setStatus("printing", "Imprimiendo...");
 
     try {
-      const mtu = 64;
+      const mtu = 200; // Bloques de 200 bytes para evitar desborde de búfer
       for (let i = 0; i < data.length; i += mtu) {
         const chunk = data.slice(i, Math.min(i + mtu, data.length));
         if (this.characteristic?.properties.writeWithoutResponse) {
@@ -351,7 +351,7 @@ export class BluetoothPrinterService {
         } else {
           await (this.characteristic as any).writeValue(chunk);
         }
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 20)); // Espera de 20ms
       }
       this.setStatus("connected", "Impresión completada");
       return true;
