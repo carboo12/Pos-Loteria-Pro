@@ -224,6 +224,7 @@ export default function VendedorInterface({
   const [loading, setLoading] = useState(false);
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [activeTicket, setActiveTicket] = useState<Venta | null>(null);
+  const [isVisualizing, setIsVisualizing] = useState(false);
 
   // Bluetooth printer state
   const [printerStatus, setPrinterStatus] = useState<PrinterStatus>("disconnected");
@@ -1376,6 +1377,7 @@ export default function VendedorInterface({
       };
 
       onNewSaleCreated(syncedTicket);
+      setIsVisualizing(false);
       setActiveTicket(syncedTicket);
       setSuccessMessage(`Ticket #${syncedTicket.numero_ticket} emitido con éxito.`);
       toast.success(`Ticket #${syncedTicket.numero_ticket} emitido con éxito`, { position: 'top-center' });
@@ -2323,9 +2325,6 @@ export default function VendedorInterface({
                           <div className="flex justify-between items-start mb-2 relative z-10">
                             <div>
                               <span className="font-bold text-gray-800 uppercase block">{user.nombre}</span>
-                              <span className="text-[10px] text-blue-600 font-mono font-black mt-0.5 block">
-                                #{t.numero_ticket || t.id_ticket || 'N/A'}
-                              </span>
                               <span className="text-[9px] text-gray-400 font-mono mt-0.5 block">
                                 {t.fecha_emision_date.toLocaleDateString("es-ES")} {formatTo12HourTime(t.fecha_emision_date)}
                               </span>
@@ -2396,6 +2395,7 @@ export default function VendedorInterface({
                                     estado: t.estado,
                                     jugadas: t.jugadas || []
                                   };
+                                  setIsVisualizing(true);
                                   setActiveTicket(tempVenta);
                                 }
                               }}
@@ -2806,9 +2806,10 @@ export default function VendedorInterface({
         <TicketPreviewModal 
           ticket={activeTicket} 
           config={config} 
-          onClose={() => setActiveTicket(null)} 
+          onClose={() => { setActiveTicket(null); setIsVisualizing(false); }} 
           userRole={user.rol}
           serverTime={serverTime}
+          onlyView={isVisualizing}
           onPrint={printerRef.current && printerStatus === "connected" ? () => {
             const printData = ticketDataFromVenta(activeTicket, config);
             printData.logo_bytes = logoBytesRef.current;

@@ -90,10 +90,12 @@ interface TicketPreviewModalProps {
   userRole?: string;
   serverTime?: string;
   onPrint?: () => void;
+  onlyView?: boolean;
+  onAnular?: (ticketId: string) => void | Promise<void>;
 }
 
 
-export default function TicketPreviewModal({ ticket, config, onClose, userRole = "vendedor", serverTime, onPrint }: TicketPreviewModalProps) {
+export default function TicketPreviewModal({ ticket, config, onClose, userRole = "vendedor", serverTime, onPrint, onlyView = false, onAnular }: TicketPreviewModalProps) {
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
   const ticketRenderRef = useRef<HTMLDivElement>(null);
@@ -399,10 +401,12 @@ ${config.formato_ticket.mensaje_pie}
 
             {/* Ticket Info */}
             <div className="space-y-1 text-xs font-bold text-black">
-              <div className="flex justify-between">
-                <span>Nº TICKET:</span>
-                <span className="font-black text-black">#{ticket.numero_ticket}</span>
-              </div>
+              {!onlyView && (
+                <div className="flex justify-between">
+                  <span>Nº TICKET:</span>
+                  <span className="font-black text-black">#{ticket.numero_ticket}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span>FECHA:</span>
                 <span className="text-black">{formatTicketDate(ticket.timestamp_servidor)}</span>
@@ -481,19 +485,21 @@ ${config.formato_ticket.mensaje_pie}
             </div>
 
             {/* Simulated Barcode & Real scannable QR Code */}
-            <div className="mt-4 flex flex-col items-center border-t-2 border-black border-dotted pt-3 space-y-3">
-              <div className="flex flex-col items-center p-2 bg-white border-2 border-black">
-                <QRCodeSVG
-                  value={ticket.numero_ticket || ticket.id}
-                  size={120}
-                  level="Q"
-                  bgColor="#ffffff"
-                  fgColor="#000000"
-                  marginSize={2}
-                />
+            {!onlyView && (
+              <div className="mt-4 flex flex-col items-center border-t-2 border-black border-dotted pt-3 space-y-3">
+                <div className="flex flex-col items-center p-2 bg-white border-2 border-black">
+                  <QRCodeSVG
+                    value={ticket.numero_ticket || ticket.id}
+                    size={120}
+                    level="Q"
+                    bgColor="#ffffff"
+                    fgColor="#000000"
+                    marginSize={2}
+                  />
+                </div>
+                <span className="text-xs text-black font-bold font-mono mt-1 uppercase tracking-wider">Verificación Digital QR</span>
               </div>
-              <span className="text-xs text-black font-bold font-mono mt-1 uppercase tracking-wider">Verificación Digital QR</span>
-            </div>
+            )}
 
           </div>
         </div>
@@ -510,32 +516,46 @@ ${config.formato_ticket.mensaje_pie}
         )}
 
         {/* Action buttons (Large POS-style) */}
-        <div className="p-4 bg-white grid grid-cols-2 gap-3 border-t border-gray-100">
-          <button
-            id="print-ticket-btn"
-            onClick={onPrint ? onPrint : handlePrintRaw}
-            className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center cursor-pointer shadow-sm border-b-2 ${isBlocked || sharing
-                ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed border-b-0"
-                : "bg-blue-900 text-white hover:bg-blue-800 active:scale-95 border-blue-950"
-              }`}
-          >
-            <Printer className="w-4 h-4" />
-            <span>Imprimir</span>
-          </button>
+        {!onlyView && (
+          <div className="p-4 bg-white grid grid-cols-2 gap-3 border-t border-gray-100">
+            <button
+              id="print-ticket-btn"
+              onClick={onPrint ? onPrint : handlePrintRaw}
+              className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center cursor-pointer shadow-sm border-b-2 ${isBlocked || sharing
+                  ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed border-b-0"
+                  : "bg-blue-900 text-white hover:bg-blue-800 active:scale-95 border-blue-950"
+                }`}
+            >
+              <Printer className="w-4 h-4" />
+              <span>Imprimir</span>
+            </button>
 
-          <button
-            id="share-ticket-btn"
-            onClick={handleShare}
-            disabled={isBlocked}
-            className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center shadow-sm border-b-2 ${isBlocked
-                ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed border-b-0"
-                : "bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95 border-emerald-700 cursor-pointer"
-              }`}
-          >
-            <Share2 className="w-4 h-4" />
-            <span>WhatsApp</span>
-          </button>
-        </div>
+            <button
+              id="share-ticket-btn"
+              onClick={handleShare}
+              disabled={isBlocked}
+              className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center shadow-sm border-b-2 ${isBlocked
+                  ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed border-b-0"
+                  : "bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95 border-emerald-700 cursor-pointer"
+                }`}
+            >
+              <Share2 className="w-4 h-4" />
+              <span>WhatsApp</span>
+            </button>
+          </div>
+        )}
+
+        {/* Admin cancel button */}
+        {(userRole === "administrador" || userRole === "admin") && onAnular && ticket.estado !== "anulado" && !ticket.anulado && (
+          <div className="px-4 pb-4 bg-white">
+            <button
+              onClick={() => onAnular(ticket.id)}
+              className="w-full py-3 flex items-center justify-center space-x-2 bg-red-600 hover:bg-red-700 text-white font-display font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-sm border-b-2 border-red-800"
+            >
+              <span>Anular Boleto</span>
+            </button>
+          </div>
+        )}
 
         {/* Floating toast notification */}
         {copied && (

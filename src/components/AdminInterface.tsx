@@ -322,6 +322,29 @@ export default function AdminInterface({
       toast.error(e.message || "Error al anular cobro");
     }
   };
+  const handleAnularTicket = async (ticketId: string) => {
+    if (!window.confirm("¿Está seguro que desea anular este ticket? Esta acción es irreversible.")) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/ventas/${ticketId}/anular`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userRole: "administrador" })
+      });
+      if (res.ok) {
+        toast.success("Ticket anulado correctamente.");
+        setActiveTicket(null);
+        await onRefreshSales();
+      } else {
+        const errData = await res.json();
+        toast.error(errData.error || "Error al anular el ticket.");
+      }
+    } catch (err) {
+      toast.error("Error de red al anular el ticket.");
+    }
+  };
+
 
   const handleBackfill = async () => {
     if (!window.confirm("¿Ejecutar migración de ventas históricas? (Backfill)")) return;
@@ -3795,6 +3818,7 @@ export default function AdminInterface({
           config={config} 
           onClose={() => setActiveTicket(null)} 
           userRole="administrador"
+          onAnular={handleAnularTicket}
         />
       )}
 
