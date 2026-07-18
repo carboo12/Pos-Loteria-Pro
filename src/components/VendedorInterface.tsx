@@ -131,13 +131,7 @@ export default function VendedorInterface({
   const [activeTab, setActiveTab] = useState<"venta" | "reportes" | "pagos">("venta");
   
   // Filtros y estados de Firestore para Reportes
-  const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => {
-    // Default: first day of current month so all month's tickets are visible
-    const now = getNicaraguaNow();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    return `${y}-${m}-01`;
-  });
+  const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => getLocalTodayStr());
   const [reportFilterFechaFin, setReportFilterFechaFin] = useState(() => getLocalTodayStr());
   const [reportTickets, setReportTickets] = useState<any[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
@@ -150,6 +144,7 @@ export default function VendedorInterface({
     config.cobros || []
   );
   const [showDetalleFacturacion, setShowDetalleFacturacion] = useState(false);
+  const [showCustomFilter, setShowCustomFilter] = useState(false);
   const [showBtFilterModal, setShowBtFilterModal] = useState(false);
 
   // rango de tickets memoizado para la vista Reportes (solo id_vendedor + fecha)
@@ -2184,74 +2179,103 @@ export default function VendedorInterface({
                 </div>
               </div>
 
-              {/* Rango de Fechas */}
-              <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-xs space-y-2">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-1">Fecha Inicio</label>
-                    <input
-                      type="date"
-                      value={reportFilterFechaInicio}
-                      onChange={(e) => setReportFilterFechaInicio(e.target.value)}
-                      className="w-full p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-1">Fecha Fin</label>
-                    <input
-                      type="date"
-                      value={reportFilterFechaFin}
-                      onChange={(e) => setReportFilterFechaFin(e.target.value)}
-                      className="w-full p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                </div>
-                {/* Quick range buttons */}
-                <div className="flex gap-1.5">
-                  {([
-                    {
-                      label: "Hoy",
-                      fn: () => { const t = getLocalTodayStr(); setReportFilterFechaInicio(t); setReportFilterFechaFin(t); }
-                    },
-                    {
-                      label: "Semana",
-                      fn: () => {
-                        const now = getNicaraguaNow();
-                        const dayOfWeek = now.getDay();
-                        const diffToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-                        const mon = new Date(now);
-                        mon.setDate(now.getDate() - diffToMon);
-                        const pad = (n: number) => String(n).padStart(2, "0");
-                        const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-                        setReportFilterFechaInicio(fmt(mon));
-                        setReportFilterFechaFin(getLocalTodayStr());
-                      }
-                    },
-                    {
-                      label: "Mes",
-                      fn: () => {
-                        const now = getNicaraguaNow();
-                        const y = now.getFullYear();
-                        const m = String(now.getMonth() + 1).padStart(2, "0");
-                        setReportFilterFechaInicio(`${y}-${m}-01`);
-                        setReportFilterFechaFin(getLocalTodayStr());
-                      }
-                    },
-                    {
-                      label: "Todo",
-                      fn: () => { setReportFilterFechaInicio("2025-01-01"); setReportFilterFechaFin(getLocalTodayStr()); }
-                    },
-                  ] as { label: string; fn: () => void }[]).map(({ label, fn }) => (
-                    <button
-                      key={label}
-                      onClick={fn}
-                      className="flex-1 py-1 text-[9px] font-black uppercase tracking-wider rounded-lg border border-gray-300 bg-gray-50 hover:bg-blue-900 hover:text-white hover:border-blue-900 transition-colors cursor-pointer"
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              {/* Botón de Filtro Personalizado */}
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider font-mono">
+                  {showCustomFilter ? "Filtro: Rango de Fechas" : "Mostrando: Hoy"}
+                </span>
+                <button
+                  onClick={() => {
+                    const nextVal = !showCustomFilter;
+                    setShowCustomFilter(nextVal);
+                    if (!nextVal) {
+                      // Al ocultar, reestablecer al día de hoy
+                      const today = getLocalTodayStr();
+                      setReportFilterFechaInicio(today);
+                      setReportFilterFechaFin(today);
+                    }
+                  }}
+                  className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-colors cursor-pointer ${
+                    showCustomFilter
+                      ? "border-blue-300 bg-blue-50 text-blue-900 hover:bg-blue-100"
+                      : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50 shadow-xs"
+                  }`}
+                >
+                  <SlidersHorizontal className="w-3 h-3" />
+                  <span>{showCustomFilter ? "Cerrar Filtro" : "Filtro Personalizado"}</span>
+                </button>
               </div>
+
+              {/* Rango de Fechas */}
+              {showCustomFilter && (
+                <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-xs space-y-2 animate-fade-in">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-1">Fecha Inicio</label>
+                      <input
+                        type="date"
+                        value={reportFilterFechaInicio}
+                        onChange={(e) => setReportFilterFechaInicio(e.target.value)}
+                        className="w-full p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-display font-black text-gray-500 uppercase tracking-wider mb-1">Fecha Fin</label>
+                      <input
+                        type="date"
+                        value={reportFilterFechaFin}
+                        onChange={(e) => setReportFilterFechaFin(e.target.value)}
+                        className="w-full p-2 text-xs font-mono font-bold bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                  </div>
+                  {/* Quick range buttons */}
+                  <div className="flex gap-1.5">
+                    {([
+                      {
+                        label: "Hoy",
+                        fn: () => { const t = getLocalTodayStr(); setReportFilterFechaInicio(t); setReportFilterFechaFin(t); }
+                      },
+                      {
+                        label: "Semana",
+                        fn: () => {
+                          const now = getNicaraguaNow();
+                          const dayOfWeek = now.getDay();
+                          const diffToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+                          const mon = new Date(now);
+                          mon.setDate(now.getDate() - diffToMon);
+                          const pad = (n: number) => String(n).padStart(2, "0");
+                          const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+                          setReportFilterFechaInicio(fmt(mon));
+                          setReportFilterFechaFin(getLocalTodayStr());
+                        }
+                      },
+                      {
+                        label: "Mes",
+                        fn: () => {
+                          const now = getNicaraguaNow();
+                          const y = now.getFullYear();
+                          const m = String(now.getMonth() + 1).padStart(2, "0");
+                          setReportFilterFechaInicio(`${y}-${m}-01`);
+                          setReportFilterFechaFin(getLocalTodayStr());
+                        }
+                      },
+                      {
+                        label: "Todo",
+                        fn: () => { setReportFilterFechaInicio("2025-01-01"); setReportFilterFechaFin(getLocalTodayStr()); }
+                      },
+                    ] as { label: string; fn: () => void }[]).map(({ label, fn }) => (
+                      <button
+                        key={label}
+                        onClick={fn}
+                        className="flex-1 py-1 text-[9px] font-black uppercase tracking-wider rounded-lg border border-gray-300 bg-gray-50 hover:bg-blue-900 hover:text-white hover:border-blue-900 transition-colors cursor-pointer"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <ResumenFacturacionCard
                 facturado={facturado}
