@@ -326,7 +326,7 @@ export default function VendedorInterface({
     return 2;
   };
 
-  const addJugadaAlCarrito = () => {
+  const addJugadaAlCarrito = (montoOverride?: string) => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -334,8 +334,10 @@ export default function VendedorInterface({
       setErrorMessage("Ingrese un número válido para jugar.");
       return;
     }
-    const numericAmount = Number(montoPago);
-    if (!montoPago || isNaN(numericAmount) || numericAmount <= 0) {
+    const montoFuente = montoOverride ?? montoPago;
+    if (montoOverride) setMontoPago(montoOverride);
+    const numericAmount = Number(montoFuente);
+    if (!montoFuente || isNaN(numericAmount) || numericAmount <= 0) {
       setErrorMessage("Ingrese un monto válido mayor a cero.");
       return;
     }
@@ -1511,6 +1513,13 @@ export default function VendedorInterface({
     return Math.ceil(remainingMs / 1000);
   };
 
+  const handlePlayFormSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const montoDirecto = montoInputRef.current?.value || montoPago;
+    addJugadaAlCarrito(montoDirecto);
+  };
+
   return (
     <div id="vendedor-container" className="flex flex-col bg-[#F3F4F6] w-full h-full">
       
@@ -1877,7 +1886,7 @@ export default function VendedorInterface({
             )}
 
             {/* Play Form — NÚMERO | FECHA | MONTO inline row */}
-            <div className="flex gap-2 items-end">
+            <form onSubmit={handlePlayFormSubmit} className="flex gap-2 items-end">
               
               {/* NÚMERO JUGADO */}
               <div className="flex-1 min-w-0">
@@ -2065,8 +2074,10 @@ export default function VendedorInterface({
                       if (e.key === "Enter" || e.keyCode === 13) {
                         e.preventDefault();
                         e.stopPropagation();
-                        addJugadaAlCarrito();
-                        setTimeout(() => numeroInputRef.current?.focus(), 0);
+                        const montoDirecto = (e.currentTarget as HTMLInputElement).value;
+                        setTimeout(() => {
+                          addJugadaAlCarrito(montoDirecto);
+                        }, 50);
                       }
                     }}
                     onBlur={(e) => {
@@ -2095,7 +2106,7 @@ export default function VendedorInterface({
                   className="absolute opacity-0 h-0 w-0 pointer-events-none"
                 />
               </div>
-            </div>
+            </form>
             <div>
               <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">Nombre del Cliente</label>
               <input
