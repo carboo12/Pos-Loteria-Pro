@@ -2066,18 +2066,17 @@ export default function VendedorInterface({
                     type="number"
                     inputMode="numeric"
                     enterKeyHint="enter"
-                    form="none"
                     pattern="[0-9]*"
                     min="1"
                     value={montoPago}
                     onFocus={() => setActiveField('monto')}
                     onChange={(e) => setMontoPago(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.keyCode === 13) {
+                      if (e.key === "Enter" || e.keyCode === 13 || e.key === "Tab" || e.keyCode === 9) {
                         e.preventDefault();
                         e.stopPropagation();
                         const montoDirecto = (e.currentTarget as HTMLInputElement).value;
-                        console.log("Intento de agregar mediante Enter", { montoDirecto });
+                        console.log("Intento de agregar mediante Enter/Tab", { key: e.key, montoDirecto });
                         setMontoPago(montoDirecto);
                         setTimeout(() => {
                           const btn = document.getElementById("btn-agregar-jugada");
