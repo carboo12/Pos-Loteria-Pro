@@ -25,6 +25,7 @@ export class BluetoothPrinterService {
   private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private _destroyed = false;
   private _wakeLock: WakeLockSentinel | null = null;
+  private _silentReconnect = false;
 
   private static readonly SERVICE_UUIDS = [
     "000018f0-0000-1000-8000-00805f9b34fb",
@@ -46,6 +47,10 @@ export class BluetoothPrinterService {
 
   isConnected(): boolean {
     return !!(this.device?.gatt?.connected && this.characteristic);
+  }
+
+  isSilentReconnecting(): boolean {
+    return this._silentReconnect;
   }
 
   private setStatus(status: PrinterStatus, message?: string) {
@@ -257,6 +262,7 @@ export class BluetoothPrinterService {
     if (!navigator.bluetooth) return false;
 
     this._destroyed = false;
+    this._silentReconnect = true;
     this.setStatus("connecting", "Reconectando impresora guardada...");
 
     try {
@@ -268,12 +274,15 @@ export class BluetoothPrinterService {
           this._attachDisconnectListener();
           const ok = await this.connectInternal();
           if (ok) this._saveDeviceId();
+          this._silentReconnect = false;
           return ok;
         }
       }
+      this._silentReconnect = false;
       this.setStatus("disconnected");
       return false;
     } catch {
+      this._silentReconnect = false;
       this.setStatus("disconnected");
       return false;
     }
@@ -384,6 +393,41 @@ export class BluetoothPrinterService {
     this.connectionLost = false;
     this._clearSavedDevice();
     this.setStatus("disconnected", "Desconectado");
+  }
+
+  async desvincularImpresora(): Promise<void> {
+    this._destroyed = true;
+    this._stopHeartbeat();
+    this._releaseWakeLock();
+
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+
+    this._detachDisconnectListener();
+
+    // A. Olvidar permiso Bluetooth del navegador
+    try {
+      if (this.device && typeof this.device.forget === "function") {
+        await this.device.forget();
+      }
+    } catch { /* forget puede no estar soportado en todos los navegadores */ }
+
+    // B. Limpiar localStorage
+    this._clearSavedDevice();
+
+    // C. Limpiar estado interno
+    this.device = null;
+    this.server = null;
+    this.characteristic = null;
+    this.reconnectAttempts = 0;
+    this.connectionLost = false;
+    this._silentReconnect = false;
+    this.setStatus("disconnected", "Impresora desvinculada");
+
+    // D. Recargar para limpiar estado en memoria
+    window.location.reload();
   }
 
   destroy() {

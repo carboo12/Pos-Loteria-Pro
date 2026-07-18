@@ -23,7 +23,9 @@ import {
   AlertTriangle,
   Ticket,
   Plus,
-  Printer
+  Printer,
+  Loader2,
+  Unlink
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Html5QrcodeScanner } from "html5-qrcode";
@@ -240,6 +242,13 @@ export default function VendedorInterface({
       printerRef.current?.destroy();
       printerRef.current = undefined;
     };
+  }, []);
+
+  // Auto-reconexión silenciosa al montar: si hay impresora guardada, reconectar
+  useEffect(() => {
+    if (printerRef.current && printerStatus === "disconnected") {
+      printerRef.current.reconnectSaved();
+    }
   }, []);
 
   // Logo bytes for ESC/POS printing (loaded once)
@@ -1524,6 +1533,13 @@ export default function VendedorInterface({
   return (
     <div id="vendedor-container" className="flex flex-col bg-[#F3F4F6] w-full h-full">
       
+      {/* Indicador silencioso de reconexión Bluetooth */}
+      {printerStatus === "connecting" && printerRef.current?.isSilentReconnecting() && (
+        <div className="fixed top-2 right-2 z-50 flex items-center gap-1.5 bg-amber-500 text-white text-[9px] font-black uppercase px-2 py-1 rounded-full shadow-lg animate-pulse">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          <span>Conectando impresora...</span>
+        </div>
+      )}
       {/* Vendedor Bar — fixed, never shrinks */}
       <div className="bg-[#1E3A8A] text-white px-4 py-3 flex flex-col justify-between border-b border-blue-950 shrink-0">
         <div className="flex justify-between items-center">
@@ -1538,13 +1554,7 @@ export default function VendedorInterface({
             {/* Bluetooth Printer Button */}
             <button
               id="printer-connect-btn"
-              onClick={() => {
-                if (printerStatus === "connected") {
-                  printerRef.current?.disconnect();
-                } else {
-                  setShowBtFilterModal(true);
-                }
-              }}
+              onClick={() => setShowBtFilterModal(true)}
               className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all shadow-inner border cursor-pointer ${
                 printerStatus === "connected"
                   ? "bg-[#10B981] border-[#0F9F6F] text-white"
@@ -2983,36 +2993,77 @@ export default function VendedorInterface({
       {showBtFilterModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full border border-gray-200 p-6">
-            <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider mb-2">Conectar Impresora</h3>
-            <p className="text-[11px] text-gray-500 mb-4">
-              Seleccione cómo desea buscar su impresora Bluetooth. Puede filtrar la lista para mostrar solo impresoras, o mostrar todos los dispositivos si su impresora no aparece.
-            </p>
-            <div className="flex flex-col space-y-2">
-              <button
-                onClick={async () => {
-                  setShowBtFilterModal(false);
-                  await printerRef.current?.connect(true);
-                }}
-                className="w-full bg-[#10B981] hover:bg-[#0F9F6F] text-white py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
-              >
-                Solo Impresoras (Filtro 'Printer' / 'PT')
-              </button>
-              <button
-                onClick={async () => {
-                  setShowBtFilterModal(false);
-                  await printerRef.current?.connect(false);
-                }}
-                className="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
-              >
-                Mostrar Todos (Agnóstico a Marca)
-              </button>
-              <button
-                onClick={() => setShowBtFilterModal(false)}
-                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
-              >
-                Cancelar
-              </button>
-            </div>
+            {printerStatus === "connected" ? (
+              <>
+                <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider mb-2">Impresora Conectada</h3>
+                <div className="bg-green-50 border border-green-200 rounded-xl p-3 mb-4 flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
+                  <span className="text-xs font-bold text-green-800">
+                    {printerRef.current?.getDeviceName() || "Impresora"} — Conectada
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-500 mb-4">
+                  Para cambiar de impresora, primero desvincule la actual. Esto eliminará el permiso Bluetooth y la reconexión automática.
+                </p>
+                <div className="flex flex-col space-y-2">
+                  <button
+                    onClick={async () => {
+                      setShowBtFilterModal(false);
+                      await printerRef.current?.desvincularImpresora();
+                    }}
+                    className="w-full bg-red-500 hover:bg-red-600 text-white py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Unlink className="w-4 h-4" />
+                    Desvincular Impresora
+                  </button>
+                  <button
+                    onClick={() => printerRef.current?.disconnect()}
+                    className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Solo Desconectar (Conservar)
+                  </button>
+                  <button
+                    onClick={() => setShowBtFilterModal(false)}
+                    className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="font-display font-black text-sm text-gray-800 uppercase tracking-wider mb-2">Conectar Impresora</h3>
+                <p className="text-[11px] text-gray-500 mb-4">
+                  Seleccione cómo desea buscar su impresora Bluetooth. Puede filtrar la lista para mostrar solo impresoras, o mostrar todos los dispositivos si su impresora no aparece.
+                </p>
+                <div className="flex flex-col space-y-2">
+                  <button
+                    onClick={async () => {
+                      setShowBtFilterModal(false);
+                      await printerRef.current?.connect(true);
+                    }}
+                    className="w-full bg-[#10B981] hover:bg-[#0F9F6F] text-white py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                  >
+                    Solo Impresoras (Filtro 'Printer' / 'PT')
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setShowBtFilterModal(false);
+                      await printerRef.current?.connect(false);
+                    }}
+                    className="w-full bg-gray-600 hover:bg-gray-700 text-white py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                  >
+                    Mostrar Todos (Agnóstico a Marca)
+                  </button>
+                  <button
+                    onClick={() => setShowBtFilterModal(false)}
+                    className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
