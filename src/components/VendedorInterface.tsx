@@ -1856,19 +1856,19 @@ export default function VendedorInterface({
                 </div>
                 <div ref={cartContainerRef} className="max-h-[132px] overflow-y-auto divide-y divide-gray-100">
                   {jugadas.map((j, i) => (
-                    <div key={i} className="flex items-center justify-between px-3 py-1.5 text-[11px]">
-                      <span className="font-mono font-black text-black w-16" style={{ fontSize: "1.5rem" }}>{j.numero}</span>
-                      <span className="font-mono text-gray-700 flex-1 text-right">
-                        {moneda} {j.monto.toFixed(2)}
+                    <div key={i} className="flex items-center justify-between px-3 py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
+                      <span className="font-mono font-black text-black w-20 text-2xl shrink-0">{j.numero}</span>
+                      <span className="font-mono font-black text-gray-700 flex-1 text-right text-2xl">
+                        {moneda} {j.monto.toFixed(0)}
                       </span>
-                      <span className="font-mono text-emerald-600 w-24 text-right text-[10px]">
+                      <span className="font-mono font-black text-emerald-600 w-36 text-right text-2xl">
                         C$ {j.premio_posible.toFixed(0)}
                       </span>
                       <button
                         onClick={() => removeJugada(i)}
-                        className="ml-2 p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                        className="ml-4 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
                       >
-                        <X className="w-3 h-3" />
+                        <X className="w-5 h-5" />
                       </button>
                     </div>
                   ))}
