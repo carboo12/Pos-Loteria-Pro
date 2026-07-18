@@ -2164,7 +2164,7 @@ export default function VendedorInterface({
         {/* TAB 2: REPORTES */}
         {activeTab === "reportes" && (() => {
           const [factData] = vendedorFacturacion;
-          const { vendido: facturado, pagado, ingresos, aPagar, cobrado: cobro, total, ganancia } = factData || { vendido: 0, pagado: 0, ingresos: 0, aPagar: 0, cobrado: 0, total: 0, ganancia: 0 };
+          const { vendido: facturado, pagado, ingresos, premios, cobrado: cobro, balance, ganancia } = factData || { vendido: 0, pagado: 0, ingresos: 0, premios: 0, cobrado: 0, balance: 0, ganancia: 0 };
 
           const formatCurrency = (val: number) => {
             return `C$ ${val.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -2256,10 +2256,10 @@ export default function VendedorInterface({
               <ResumenFacturacionCard
                 facturado={facturado}
                 ingresos={ingresos}
-                aPagar={aPagar}
+                aPagar={premios}
                 cobro={cobro}
                 pagado={pagado}
-                total={total}
+                total={balance}
               />
 
               {/* Botón Detalle de Facturación */}
@@ -2291,11 +2291,11 @@ export default function VendedorInterface({
                         vendido={factData.vendido}
                         pagado={factData.pagado}
                         ingresos={factData.ingresos}
-                        totalAPagar={factData.aPagar}
+                        totalAPagar={factData.premios}
                         totalPremios={factData.totalPremios}
                         cobrado={factData.cobrado}
                         ganancia={factData.ganancia}
-                        total={factData.total}
+                        total={factData.balance}
                       />
                       <div className="text-center text-[10px] text-gray-400 mt-2 font-sans">
                         Del {reportFilterFechaInicio} al {reportFilterFechaFin}

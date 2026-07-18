@@ -3463,7 +3463,7 @@ export default function AdminInterface({
                   .filter(u => reportFilterVendedor === "TODOS" || u.id === reportFilterVendedor)
                   .map(seller => {
                     const fd = facturacionData.find(d => d.id === seller.id) || {
-                      vendido: 0, pagado: 0, ingresos: 0, aPagar: 0, cobrado: 0, ganancia: 0, total: 0, totalPremios: 0,
+                      vendido: 0, pagado: 0, ingresos: 0, premios: 0, cobrado: 0, ganancia: 0, balance: 0, totalPremios: 0,
                       id: seller.id, nombre: seller.nombre
                     };
 
@@ -3495,7 +3495,7 @@ export default function AdminInterface({
                             </div>
                             <div>
                               <span>Total a pagar: </span>
-                              <span className="font-mono font-bold text-gray-950">C$ {fd.aPagar.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
+                              <span className="font-mono font-bold text-gray-950">C$ {fd.premios.toLocaleString("es-ES", { minimumFractionDigits: 2 })}</span>
                             </div>
                             <div>
                               <span>Cobrado: </span>
@@ -3512,9 +3512,9 @@ export default function AdminInterface({
                               </span>
                             </div>
                             <div className="text-right pt-1 border-t border-gray-100 w-full">
-                              <span className="text-[10px] text-gray-400 block">Total:</span>
+                              <span className="text-[10px] text-gray-400 block">Balance:</span>
                               <span className="text-sm font-mono font-black text-blue-900">
-                                C$ {fd.total.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
+                                C$ {fd.balance.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
                               </span>
                             </div>
                           </div>

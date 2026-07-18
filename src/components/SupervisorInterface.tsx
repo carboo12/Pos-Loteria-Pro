@@ -793,10 +793,10 @@ export default function SupervisorInterface({
                 vendido={ad.vendido}
                 pagado={ad.pagado}
                 ingresos={ad.ingresos}
-                totalAPagar={ad.aPagar}
+                totalAPagar={ad.premios}
                 cobrado={ad.cobrado}
                 ganancia={ad.ganancia}
-                total={ad.total}
+                total={ad.balance}
               />
             ))}
           </div>
@@ -805,19 +805,19 @@ export default function SupervisorInterface({
           {(() => {
             const sumFacturado = arqueoData.reduce((a, d) => a + d.vendido, 0);
             const sumIngresos = arqueoData.reduce((a, d) => a + d.ingresos, 0);
-            const sumAPagar = arqueoData.reduce((a, d) => a + d.aPagar, 0);
-            const sumPremios = arqueoData.reduce((a, d) => a + (d.totalPremios || 0), 0);
+            const sumPremios = arqueoData.reduce((a, d) => a + d.premios, 0);
+            const sumTotalPremios = arqueoData.reduce((a, d) => a + (d.totalPremios || 0), 0);
             const sumCobro = arqueoData.reduce((a, d) => a + d.cobrado, 0);
             const sumPagado = arqueoData.reduce((a, d) => a + d.pagado, 0);
-            const sumTotal = arqueoData.reduce((a, d) => a + d.total, 0);
+            const sumBalance = arqueoData.reduce((a, d) => a + d.balance, 0);
             return (
               <ResumenFacturacionCard
                 facturado={sumFacturado}
                 ingresos={sumIngresos}
-                aPagar={sumAPagar}
+                aPagar={sumPremios}
                 cobro={sumCobro}
                 pagado={sumPagado}
-                total={sumTotal}
+                total={sumBalance}
               />
             );
           })()}
