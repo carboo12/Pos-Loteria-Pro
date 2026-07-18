@@ -2066,7 +2066,14 @@ export default function VendedorInterface({
                         e.preventDefault();
                         e.stopPropagation();
                         addJugadaAlCarrito();
-                        e.currentTarget.blur();
+                        setTimeout(() => numeroInputRef.current?.focus(), 0);
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const next = e.relatedTarget as HTMLElement | null;
+                      if (next && (next.id === "monto-input" || next.id === "lotto-digit-input")) return;
+                      if (montoPago) {
+                        setTimeout(() => numeroInputRef.current?.focus(), 0);
                       }
                     }}
                     placeholder="0"
@@ -2079,10 +2086,16 @@ export default function VendedorInterface({
                     }`}
                   />
                 </div>
+                {/* Dummy input: captura navegación forzada por Android */}
+                <input
+                  id="android-nav-dummy"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  onFocus={() => setTimeout(() => numeroInputRef.current?.focus(), 0)}
+                  className="absolute opacity-0 h-0 w-0 pointer-events-none"
+                />
               </div>
             </div>
-
-            {/* Nombre del Cliente — standalone row */}
             <div>
               <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">Nombre del Cliente</label>
               <input
