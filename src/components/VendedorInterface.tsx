@@ -1854,10 +1854,10 @@ export default function VendedorInterface({
                     Total: {moneda} {totalTicketMonto.toFixed(2)}
                   </span>
                 </div>
-                <div ref={cartContainerRef} className="max-h-[250px] overflow-y-auto divide-y divide-gray-100">
+                <div ref={cartContainerRef} className="max-h-[132px] overflow-y-auto divide-y divide-gray-100">
                   {jugadas.map((j, i) => (
                     <div key={i} className="flex items-center justify-between px-3 py-1.5 text-[11px]">
-                      <span className="font-mono font-black text-black w-16" style={{ fontSize: "1.3rem" }}>{j.numero}</span>
+                      <span className="font-mono font-black text-black w-16" style={{ fontSize: "1.5rem" }}>{j.numero}</span>
                       <span className="font-mono text-gray-700 flex-1 text-right">
                         {moneda} {j.monto.toFixed(2)}
                       </span>
@@ -2054,6 +2054,7 @@ export default function VendedorInterface({
                     id="monto-input"
                     type="number"
                     inputMode="numeric"
+                    enterKeyHint="enter"
                     pattern="[0-9]*"
                     min="1"
                     value={montoPago}
