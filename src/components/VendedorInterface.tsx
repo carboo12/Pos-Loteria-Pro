@@ -2055,6 +2055,7 @@ export default function VendedorInterface({
                     type="number"
                     inputMode="numeric"
                     enterKeyHint="enter"
+                    form="none"
                     pattern="[0-9]*"
                     min="1"
                     value={montoPago}
@@ -2063,7 +2064,9 @@ export default function VendedorInterface({
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.keyCode === 13) {
                         e.preventDefault();
+                        e.stopPropagation();
                         addJugadaAlCarrito();
+                        e.currentTarget.blur();
                       }
                     }}
                     placeholder="0"
