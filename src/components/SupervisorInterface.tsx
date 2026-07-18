@@ -448,7 +448,7 @@ export default function SupervisorInterface({
   );
 
   return (
-    <div id="supervisor-container" className="flex flex-col bg-[#F3F4F6] flex-1 w-full">
+    <div id="supervisor-container" className="flex flex-col bg-[#F3F4F6] flex-1 w-full h-full min-h-0">
       
       {/* Premium Deep Blue Header matching the Vendedor POS Visual Identity */}
       <div className="bg-[#1E3A8A] text-white px-4 py-3 flex flex-col justify-between border-b border-blue-950 shrink-0">
@@ -502,7 +502,7 @@ export default function SupervisorInterface({
       </div>
 
       {/* Main Viewport Container Scrollable Area */}
-      <div className="p-4 pb-24">
+      <div className="flex-1 p-4 pb-24 overflow-y-auto min-h-0">
         
         {/* 2. COMPACT PORTFOLIO BENTO METRICS */}
         <div className="grid grid-cols-2 gap-3 mb-4">

@@ -418,7 +418,7 @@ export default function App() {
           ) : currentUser.rol === "supervisor" ? (
 
             /* Supervisor view */
-            <div className="w-full flex-1 flex flex-col min-h-0 overflow-y-auto animate-fade-in">
+            <div className="w-full flex-1 flex flex-col min-h-0 overflow-hidden animate-fade-in">
                 <Suspense fallback={<SuspenseLoader />}>
               <SupervisorInterface
                 user={currentUser}
