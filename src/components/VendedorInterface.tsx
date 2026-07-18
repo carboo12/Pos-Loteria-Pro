@@ -291,6 +291,14 @@ export default function VendedorInterface({
   const [jugadas, setJugadas] = useState<Jugada[]>([]);
   const montoInputRef = useRef<HTMLInputElement>(null);
   const numeroInputRef = useRef<HTMLInputElement>(null);
+  const cartContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (cartContainerRef.current) {
+      cartContainerRef.current.scrollTop = cartContainerRef.current.scrollHeight;
+    }
+  }, [jugadas.length]);
+
   const totalTicketMonto = jugadas.reduce((acc, j) => acc + j.monto, 0);
   const totalTicketPremio = jugadas.reduce((acc, j) => acc + j.premio_posible, 0);
 
@@ -1846,10 +1854,10 @@ export default function VendedorInterface({
                     Total: {moneda} {totalTicketMonto.toFixed(2)}
                   </span>
                 </div>
-                <div className="max-h-[300px] overflow-y-auto divide-y divide-gray-100">
+                <div ref={cartContainerRef} className="max-h-[250px] overflow-y-auto divide-y divide-gray-100">
                   {jugadas.map((j, i) => (
                     <div key={i} className="flex items-center justify-between px-3 py-1.5 text-[11px]">
-                      <span className="font-mono font-black text-blue-900 w-12">{j.numero}</span>
+                      <span className="font-mono font-black text-black w-16" style={{ fontSize: "1.3rem" }}>{j.numero}</span>
                       <span className="font-mono text-gray-700 flex-1 text-right">
                         {moneda} {j.monto.toFixed(2)}
                       </span>
@@ -1902,7 +1910,7 @@ export default function VendedorInterface({
                     }
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && numeroJugado && selectedJuego !== "Fechas") {
+                    if ((e.key === "Enter" || e.keyCode === 13) && numeroJugado && selectedJuego !== "Fechas") {
                       e.preventDefault();
                       montoInputRef.current?.focus();
                     }
@@ -1947,6 +1955,13 @@ export default function VendedorInterface({
                             if (mesSelect) mesSelect.focus();
                           }
                         }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.keyCode === 13) {
+                            e.preventDefault();
+                            const mesSelect = document.getElementById("fecha-mes-select") as HTMLSelectElement;
+                            if (mesSelect) mesSelect.focus();
+                          }
+                        }}
                         onFocus={() => setActiveField("fecha")}
                         className={`w-full h-12 px-1 rounded-xl border-2 font-mono text-lg font-black text-center shadow-inner transition-colors focus:outline-none ${
                           isInvalidDay
@@ -1969,6 +1984,13 @@ export default function VendedorInterface({
                           setNumeroJugado(`${fechaVenta.dia.padStart(2, "0")}-${e.target.value}`);
                           const montoInput = document.getElementById("monto-input") as HTMLInputElement;
                           if (montoInput) montoInput.focus();
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.keyCode === 13) {
+                            e.preventDefault();
+                            const montoInput = document.getElementById("monto-input") as HTMLInputElement;
+                            if (montoInput) montoInput.focus();
+                          }
                         }}
                         onFocus={() => setActiveField("fecha")}
                         className="w-full h-12 px-0.5 rounded-xl border-2 border-gray-300 bg-white font-sans text-[11px] font-bold text-gray-900 text-center focus:outline-none focus:border-blue-500 cursor-pointer transition-colors"
@@ -2038,7 +2060,7 @@ export default function VendedorInterface({
                     onFocus={() => setActiveField('monto')}
                     onChange={(e) => setMontoPago(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && numeroJugado && montoPago) {
+                      if (e.key === "Enter" || e.keyCode === 13) {
                         e.preventDefault();
                         addJugadaAlCarrito();
                       }
