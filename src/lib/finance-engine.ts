@@ -101,9 +101,9 @@ export function calculateSellerSummary(
     0,
   );
 
-  // Standardized formulas:
+  // Standardized formulas: aqui se aplica las formulas
   const ganancia = vendido - premios;
-  const balance = ganancia + ingresos - cobrado;
+  const balance = (vendido + ingresos) - (pagado + cobrado);
 
   return {
     id: seller.id,
