@@ -326,7 +326,7 @@ export default function VendedorInterface({
     return 2;
   };
 
-  const addJugadaAlCarrito = (montoOverride?: string) => {
+  const addJugadaAlCarrito = (montoOverride?: string | any) => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -334,8 +334,9 @@ export default function VendedorInterface({
       setErrorMessage("Ingrese un número válido para jugar.");
       return;
     }
-    const montoFuente = montoOverride ?? montoPago;
-    if (montoOverride) setMontoPago(montoOverride);
+    const realOverride = typeof montoOverride === "string" ? montoOverride : undefined;
+    const montoFuente = realOverride ?? montoPago;
+    if (realOverride) setMontoPago(realOverride);
     const numericAmount = Number(montoFuente);
     if (!montoFuente || isNaN(numericAmount) || numericAmount <= 0) {
       setErrorMessage("Ingrese un monto válido mayor a cero.");
@@ -1815,6 +1816,7 @@ export default function VendedorInterface({
 
               {/* AÑADIR JUGADA — Stitch Blue */}
               <button
+                id="btn-agregar-jugada"
                 type="button"
                 onClick={addJugadaAlCarrito}
                 disabled={loading}
@@ -2075,8 +2077,11 @@ export default function VendedorInterface({
                         e.preventDefault();
                         e.stopPropagation();
                         const montoDirecto = (e.currentTarget as HTMLInputElement).value;
+                        console.log("Intento de agregar mediante Enter", { montoDirecto });
+                        setMontoPago(montoDirecto);
                         setTimeout(() => {
-                          addJugadaAlCarrito(montoDirecto);
+                          const btn = document.getElementById("btn-agregar-jugada");
+                          if (btn) btn.click();
                         }, 50);
                       }
                     }}
