@@ -242,12 +242,12 @@ ${config.formato_ticket.mensaje_pie}
 
     const jugadas = jugadasList;
 
-    // Filas alineadas por columnas
+    // Filas alineadas por columnas — bold para mayor visibilidad
     jugadas.forEach((j: any) => {
       const num = String(j.numero ?? 'N/A').padStart(2, '0');
       const monto = `${ticket.moneda} ${(Number(j.monto) || 0).toFixed(0)}`;
       const premio = `C$ ${(Number(j.premio_posible) || 0).toFixed(0)}`;
-      t += `[L]${num}[C]${monto}[R]${premio}\n`;
+      t += `[L]<b>${num}</b>[C]<b>${monto}</b>[R]<b>${premio}</b>\n`;
     });
 
     t += "[C]--------------------------------\n";
@@ -445,12 +445,12 @@ ${config.formato_ticket.mensaje_pie}
                       <span className="w-24 text-right font-black">PREMIO</span>
                     </div>
 
-                    {/* Dynamic Rows */}
+                    {/* Dynamic Rows — double-height visual */}
                     {jugadas.map((j, i) => (
-                      <div key={i} className="flex justify-between text-xs font-mono py-0.5 text-black">
-                        <span className="w-12 text-left font-black text-black">{j.numero ?? 'N/A'}</span>
-                        <span className="flex-1 text-center font-bold text-black">{ticket.moneda} {(Number(j.monto) || 0).toFixed(2)}</span>
-                        <span className="w-24 text-right font-black text-black">C$ {(Number(j.premio_posible) || 0).toFixed(0)}</span>
+                      <div key={i} className="flex justify-between text-base font-mono font-black py-1 text-black leading-tight">
+                        <span className="w-12 text-left text-black">{j.numero ?? 'N/A'}</span>
+                        <span className="flex-1 text-center text-black">{ticket.moneda} {(Number(j.monto) || 0).toFixed(2)}</span>
+                        <span className="w-24 text-right text-black">C$ {(Number(j.premio_posible) || 0).toFixed(0)}</span>
                       </div>
                     ))}
 

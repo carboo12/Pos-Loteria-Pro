@@ -315,14 +315,16 @@ export function buildTicketBuffer(data: TicketPrintData): Uint8Array {
   bytes.push(...line(justify3Columns("NUM.", "MONTO", "PREMIO"), "L", true));
   bytes.push(...separator("-"));
 
-  // Lista de jugadas (3 columnas)
+  // Lista de jugadas (3 columnas) — double-height para mayor legibilidad
   if (data.jugadas.length > 0) {
+    bytes.push(...ESCPOS.DOUBLE_HEIGHT_ON);
     for (const j of data.jugadas) {
       const num = abrevMesEnNumero(j.numero);
-      const monto = `C$ ${j.monto.toFixed(2)}`;
+      const monto = `${data.moneda} ${j.monto.toFixed(2)}`;
       const premio = `C$ ${j.premio_posible.toFixed(0)}`;
       bytes.push(...line(justify3Columns(num, monto, premio), "L"));
     }
+    bytes.push(...ESCPOS.CHAR_SIZE_NORMAL);
   } else {
     bytes.push(...line("(sin jugadas)", "C"));
   }
