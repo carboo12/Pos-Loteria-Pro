@@ -2141,22 +2141,22 @@ app.post("/api/ventas/:id/anular", checkAuth(), async (req, res) => {
     return res.status(400).json({ error: "Este ticket ya se encuentra anulado." });
   }
 
-  // If not admin, validate against hora_cierre (PER-SORTEO by ID)
+  // If not admin, validate against hora_sorteo (PER-SORTEO by ID)
   if (userRole !== "admin" && userRole !== "administrador") {
     const selectedSorteo = sale.id_sorteo
       ? db.configuracion.sorteos.find((s: any) => s.id === sale.id_sorteo)
       : db.configuracion.sorteos.find((s: any) => s.nombre === sale.sorteo && s.juego === sale.juego);
     if (selectedSorteo) {
       const now = getNicaraguaNow();
-      const [cierreHour, cierreMin] = selectedSorteo.hora_cierre.split(":").map(Number);
+      const [sorteoHour, sorteoMin] = selectedSorteo.hora_sorteo.split(":").map(Number);
       const currentHour = now.getHours();
       const currentMin = now.getMinutes();
 
-      const isPastCierre = (currentHour > cierreHour) || (currentHour === cierreHour && currentMin >= cierreMin);
+      const isPastSorteo = (currentHour > sorteoHour) || (currentHour === sorteoHour && currentMin >= sorteoMin);
 
-      if (isPastCierre) {
+      if (isPastSorteo) {
         return res.status(400).json({
-          error: `VENTA BLOQUEADA: El sorteo ${selectedSorteo.nombre} ya cerró a las ${selectedSorteo.hora_cierre}. No se puede anular.`
+          error: `VENTA BLOQUEADA: El sorteo ${selectedSorteo.nombre} ya sortea a las ${selectedSorteo.hora_sorteo}. No se puede anular.`
         });
       }
     }

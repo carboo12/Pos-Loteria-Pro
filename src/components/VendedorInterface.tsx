@@ -2551,13 +2551,6 @@ export default function VendedorInterface({
                                   toast.error("El ticket ya está anulado.", { position: 'top-center' });
                                   return;
                                 }
-                                // Client side validation: 5-minute void time limit
-                                const createdTime = t.fecha_emision_date ? t.fecha_emision_date.getTime() : Date.now();
-                                const elapsedMin = (Date.now() - createdTime) / (60 * 1000);
-                                if (elapsedMin > 5) {
-                                  toast.error("Solo se pueden anular boletos dentro de los primeros 5 minutos de su emisión.", { position: 'top-center', duration: 4000 });
-                                  return;
-                                }
                                 handleAnularTicket(t.id);
                               }}
                               className={`py-1.5 px-0.5 rounded-lg text-[9px] font-black uppercase transition-all border text-center flex items-center justify-center cursor-pointer ${

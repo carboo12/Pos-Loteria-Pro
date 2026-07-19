@@ -120,9 +120,9 @@ export default function TicketPreviewModal({ ticket, config, onClose, userRole =
       (ticket.id_sorteo && x.id === ticket.id_sorteo) ||
       (x.nombre === ticket.sorteo && x.juego === ticket.juego)
     );
-    if (!s) return false; // Fallback if draw not found
-    const [cierreHour, cierreMin] = s.hora_cierre.split(":").map(Number);
-    return (nicNow.hours > cierreHour) || (nicNow.hours === cierreHour && nicNow.minutes >= cierreMin);
+    if (!s) return false;
+    const [sorteoHour, sorteoMin] = s.hora_sorteo.split(":").map(Number);
+    return (nicNow.hours > sorteoHour) || (nicNow.hours === sorteoHour && nicNow.minutes >= sorteoMin);
   })();
 
   const multiplier = calculatePrizeMultiplier(ticket.juego, ticket.sorteo);
