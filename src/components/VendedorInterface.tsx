@@ -1119,9 +1119,9 @@ export default function VendedorInterface({
       const gameMatch = !limitJuego || limitJuego === "TODOS" || limitJuego.toLowerCase() === selectedJuego.toLowerCase();
       if (!gameMatch) return false;
 
-      // 2. Match Number
+      // 2. Match Number (normalizado con padStart para evitar "03" !== "3")
       const limitNum = l.numero ?? l.numero_jugado ?? "TODOS";
-      const numMatch = limitNum === "TODOS" || String(limitNum) === String(numeroJugado);
+      const numMatch = limitNum === "TODOS" || String(limitNum).padStart(2, "0") === String(numeroJugado).padStart(2, "0");
       if (!numMatch) return false;
 
       // 3. Match Seller
@@ -1162,9 +1162,9 @@ export default function VendedorInterface({
       const limitJuego = matchedLimit.juego || "";
       if (limitJuego && limitJuego !== "TODOS" && v.juego.toLowerCase() !== limitJuego.toLowerCase()) return false;
 
-      // Match number
+      // Match number (normalizado)
       const limitNum = matchedLimit.numero ?? matchedLimit.numero_jugado ?? "TODOS";
-      if (limitNum !== "TODOS" && String(v.numero_jugado) !== String(limitNum)) return false;
+      if (limitNum !== "TODOS" && String(v.numero_jugado).padStart(2, "0") !== String(limitNum).padStart(2, "0")) return false;
 
       // Match Sorteo
       const limitSorteoName = matchedLimit.sorteo || "";
@@ -1192,7 +1192,20 @@ export default function VendedorInterface({
       return true;
     });
 
+    // Bug #1 fix: sumar SOLO las jugadas del número específico, no monto_pago total
     const totalPrevSalesCs = matchingSales.reduce((sum: number, v: any) => {
+      const limitNum = matchedLimit.numero ?? matchedLimit.numero_jugado ?? "TODOS";
+      if (limitNum !== "TODOS" && v.jugadas && v.jugadas.length > 0) {
+        const matchedJugadas = v.jugadas.filter((j: any) =>
+          String(j.numero).padStart(2, "0") === String(limitNum).padStart(2, "0")
+        );
+        const amtInCs = matchedJugadas.reduce((s: number, j: any) => {
+          const monto = Number(j.monto) || 0;
+          return s + (v.moneda === "C$" ? monto : monto * (config?.tasa_cambio || 36));
+        }, 0);
+        return sum + amtInCs;
+      }
+      // Fallback para tickets legacy sin jugadas[]
       const amtInCs = v.moneda === "C$" ? v.monto_pago : v.monto_pago * (config?.tasa_cambio || 36);
       return sum + amtInCs;
     }, 0);
@@ -1206,7 +1219,7 @@ export default function VendedorInterface({
     const numericAmount = Number(montoPago) || 0;
     const currentInputCs = moneda === "C$" ? numericAmount : numericAmount * (config?.tasa_cambio || 36);
     const requestedMontoCs = cartMatchingSum + currentInputCs;
-    const disponibleCs = Math.max(0, limitMontoCs - totalPrevSalesCs - cartMatchingSum);
+    const disponibleCs = Math.max(0, limitMontoCs - totalPrevSalesCs - cartMatchingSum - currentInputCs);
     const isExceeded = (totalPrevSalesCs + requestedMontoCs) > limitMontoCs;
 
     return {

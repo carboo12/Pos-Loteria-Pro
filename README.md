@@ -25,9 +25,9 @@
 - **Módulo de Supervisor Móvil**: Cobros y liquidaciones de ruta adaptados con interfaz neumórfica responsiva para operaciones en la calle.
 - **Gestión de usuarios**: Roles de Administrador, Supervisor y Vendedor con seguridad híbrida Bcrypt.
 - **Catálogo de juegos**: Diaria, Fechas, Jugá 3, Premia2, Terminación 2, La Diaria, Pega 3, Súper Premio
-- **Validación anti-fraude**: Bloqueo automático de ventas 5 minutos antes del sorteo usando timestamp del servidor
+- **Validación anti-fraude**: Bloqueo automático de ventas antes de la hora de cierre; anulación bloqueada después de la hora de sorteo
 - **Límites por número**: Techos de dinero configurables por juego, sorteo y vendedor
-- **Sincronización en tiempo real**: Polling cada 4 segundos con el backend Express
+- **Sincronización en tiempo real**: Firestore `onSnapshot` con `docChanges()` para updates incrementales
 - **Cierre de caja**: Gestión de denominaciones en C$ y USD con cálculo de descuadre
 - **Notificaciones**: SSE (Server-Sent Events) y Firebase Cloud Messaging
 - **Reportes**: Dashboard con gráficos (Recharts), exportación a PDF
@@ -41,8 +41,8 @@
 | React 19 | Express 4 | Vite 6 |
 | TypeScript | Firebase Admin SDK | Tailwind CSS v4 |
 | Recharts (gráficos) | Firebase Auth | PWA (Service Worker) |
-| Lucide React (iconos) | Firestore (sync) | dotenv |
-| Motion (animaciones) | Almacenamiento JSON local | esbuild (build server) |
+| Lucide React (iconos) | Firestore (sync en tiempo real) | dotenv |
+| Motion (animaciones) | Almacenamiento JSON local (legacy) | esbuild (build server) |
 | jsPDF (reportes) | SSE + FCM (notificaciones) | tsx (dev server) |
 
 ## Empezar
@@ -119,7 +119,6 @@ punto-de-venta-de-lotería/
 ├── tsconfig.json
 ├── .env.example                  # Template de variables de entorno
 ├── firebase-applet-config.json   # Configuración de Firebase
-├── data-store.json               # Base de datos local (auto-generada)
 ├── public/
 │   ├── sw.js                     # Service Worker PWA
 │   ├── manifest.json             # Manifest PWA
@@ -130,14 +129,24 @@ punto-de-venta-de-lotería/
 │   ├── types.ts                  # Tipos TypeScript
 │   ├── index.css                 # Estilos globales Tailwind
 │   ├── lib/
-│   │   └── firebase.ts           # Inicialización Firebase (Auth + Firestore)
+│   │   ├── firebase.ts           # Inicialización Firebase (Auth + Firestore)
+│   │   ├── prize-utils.ts        # Lógica centralizada de premios
+│   │   ├── date-utils.ts         # Normalización de fechas
+│   │   └── finance-engine.ts     # Motor financiero
+│   ├── services/
+│   │   ├── escpos-builder.ts     # Constructor de buffers ESC/POS
+│   │   └── BluetoothPrinterService.ts  # Servicio Bluetooth completo
 │   └── components/
 │       ├── Login.tsx             # Pantalla de inicio de sesión
 │       ├── RoleSelector.tsx      # Header con info de usuario y botón Salir
 │       ├── VendedorInterface.tsx # Interfaz de punto de venta
 │       ├── SupervisorInterface.tsx # Panel de supervisión
 │       ├── AdminInterface.tsx    # Dashboard de administración
-│       └── TicketPreviewModal.tsx # Previsualización e impresión de tickets
+│       ├── TicketPreviewModal.tsx # Previsualización e impresión de tickets
+│       ├── QrScannerModal.tsx    # Scanner QR con beep
+│       ├── FacturacionVendedorCard.tsx # Resumen facturación
+│       ├── BoletoVendidoCard.tsx # Card de boleto vendido
+│       └── ResumenFacturacionCard.tsx # Resumen de facturación
 ```
 
 ## Seguridad
@@ -156,6 +165,7 @@ punto-de-venta-de-lotería/
 
 ### Validación de ventas
 - Bloqueo dual (cliente + servidor) de ventas fuera del horario permitido
+- **Anulación**: bloqueada después de `hora_sorteo` (no `hora_cierre`). Admin siempre puede anular.
 - Verificación de formato de número según el juego seleccionado
 - Límites de monto configurables por juego, sorteo y vendedor
 - Firma digital en cada ticket (`A9X-2M`)
@@ -173,11 +183,18 @@ La aplicación incorpora una integración nativa con la API de **Web Bluetooth**
    * La app utiliza el método `navigator.bluetooth.requestDevice` con el UUID estándar de impresora térmica BLE `000018f0-0000-1000-8000-00805f9b34fb`.
    * Permite alternar en el diálogo de emparejamiento entre un filtro optimizado para impresoras comunes (`filters`) y una búsqueda universal de dispositivo libre (`acceptAllDevices: true`).
 2. **Formateo Estándar ESC/POS**: 
-   * El archivo [escpos-builder.ts](file:///c:/Users/carlo/OneDrive/Documents/react/punto-de-venta-de-lotería/src/services/escpos-builder.ts) compila los textos, líneas, códigos QR y logotipos en bytes binarios directos sin alterar su codificación antes de enviarlos.
-3. **Evitar Distorsión de Logo**: 
+   * El archivo [escpos-builder.ts](src/services/escpos-builder.ts) compila los textos, líneas, códigos QR y logotipos en bytes binarios directos sin alterar su codificación antes de enviarlos.
+3. **Jugadas Double-Height**: 
+   * Las filas de números jugados, montos y premios se imprimen con **doble alto** (`0x1B 0x21 0x10`) para mayor legibilidad en papel de 48mm. El header de la tabla se mantiene en tamaño normal.
+4. **Evitar Distorsión de Logo**: 
    * La app procesa el logo en un Canvas del navegador asegurando que el ancho final de la imagen sea estrictamente un **múltiplo de 8 puntos** (ancho en bytes entero). Esto evita desalineaciones horizontales y el efecto de estiramiento vertical durante la impresión térmica.
-4. **Envío Fragmentado por MTU**: 
-   * Los comandos se transmiten al buffer de la impresora en paquetes pequeños de 64 bytes con pausas de 50ms para garantizar que los chips Bluetooth de bajo costo de las impresoras térmicas no pierdan bytes en tránsito.
+5. **Envío Fragmentado por MTU**: 
+   * Los comandos se transmiten al buffer de la impresora en paquetes pequeños de 200 bytes con pausas de 20ms para garantizar que los chips Bluetooth de bajo costo de las impresoras térmicas no pierdan bytes en tránsito.
+6. **Reconexión Automática**: 
+   * `localStorage` persiste `bt_printer_device_id` y `bt_printer_name` para reconexión silenciosa via `navigator.bluetooth.getDevices()`.
+   * Backoff exponencial: 1s → 2s → 4s → 6s → 8s (máx 10 intentos).
+   * Heartbeat NOP cada 8s para detectar desconexiones y trigger reconexión.
+   * Wake Lock para mantener pantalla activa durante impresión.
 
 ## Scripts disponibles
 

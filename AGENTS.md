@@ -105,17 +105,31 @@ env:
 | `src/components/QrScannerModal.tsx` | Scanner QR con beep Web Audio + overlay éxito |
 | `src/components/TicketPreviewModal.tsx` | Preview/imprimir ticket con prize calc |
 | `src/components/FacturacionVendedorCard.tsx` | Resumen facturación por vendedor |
+| `src/services/escpos-builder.ts` | Constructor de buffers ESC/POS para impresora térmica |
+| `src/services/BluetoothPrinterService.ts` | Servicio Bluetooth: conexión, reconexión, heartbeat, wake lock |
 | `src/lib/prize-utils.ts` | Lógica centralizada de premios |
 | `src/lib/date-utils.ts` | Normalización de fechas |
 | `src/lib/firebase.ts` | Firebase client init (named DB) |
 | `firestore.rules` | `allow read, write: if request.auth != null;` |
 
+## Impresión Térmica (ESC/POS)
+- **Ancho de papel**: 48mm (384 dots, ~32 chars por línea con FONT_A)
+- **Jugadas**: double-height (`0x1B 0x21 0x10`) para mayor legibilidad, reset a normal después del loop
+- **Logo**: Canvas → bitmap con ancho múltiplo de 8, centrado, max 256×96 dots
+- **QR**: Modelo 2, tamaño 10, corrección Q (25%)
+- **Envío**: chunks de 200 bytes con pausa de 20ms entre cada uno
+- **Heartbeat**: NOP cada 8s para mantener conexión viva
+- **Persistencia**: `localStorage` guarda `bt_printer_device_id` y `bt_printer_name` para reconexión silenciosa via `navigator.bluetooth.getDevices()`
+- **Reconexión**: backoff exponencial 1s→2s→4s→6s→8s, máx 10 intentos
+
 ## Reglas de Negocio (Anti-Fraude)
 - Cada venta usa timestamp del servidor (no del cliente)
-- Cierre automático 5 min antes del sorteo
+- Cierre automático 5 min antes del sorteo (venta)
+- **Anulación**: bloqueada después de `hora_sorteo` (no `hora_cierre`). Admin siempre puede anular.
 - Selector de hora deshabilita opciones pasadas
 - Formato de entrada validado por juego (2 dígitos Diaria, 3 Jugá 3, etc.)
 - País → Tipo de Sorteo → Hora del Sorteo (flujo obligatorio)
+- Límites de monto configurables por juego, sorteo y vendedor
 
 ## .gitignore
 ```
