@@ -3694,7 +3694,7 @@ export default function AdminInterface({
               </div>
 
               {/* Box 4: Reporte por Número (Acumulados) */}
-              <div className="bg-white p-6 rounded-2xl border border-gray-300 shadow-xs flex flex-col justify-between font-sans">
+              <div className="lg:col-span-12 bg-white p-6 rounded-2xl border border-gray-300 shadow-xs flex flex-col justify-between font-sans">
                 {/* Card Header */}
                 <div className="flex flex-wrap items-center justify-between border-b border-gray-100 pb-3 mb-4 gap-4">
                   <div className="flex items-center space-x-3">
@@ -3739,19 +3739,20 @@ export default function AdminInterface({
                       <tr className="bg-gray-100 text-gray-600 uppercase text-[9px] font-mono tracking-wider sticky top-0 z-10">
                         <th className="p-3 rounded-l-xl">#</th>
                         <th className="p-3">Número</th>
+                        <th className="p-3">Juego / Sorteo</th>
                         <th className="p-3 rounded-r-xl text-right">Monto Acumulado</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {!numReportVendedorId ? (
                         <tr>
-                          <td colSpan={3} className="p-8 text-center text-gray-400 text-xs">
+                          <td colSpan={4} className="p-8 text-center text-gray-400 text-xs">
                             Seleccione un vendedor para ver el reporte.
                           </td>
                         </tr>
                       ) : numReportData.length === 0 ? (
                         <tr>
-                          <td colSpan={3} className="p-8 text-center text-gray-400 text-xs">
+                          <td colSpan={4} className="p-8 text-center text-gray-400 text-xs">
                             Sin ventas registradas para este vendedor en la fecha seleccionada.
                           </td>
                         </tr>
@@ -3779,6 +3780,10 @@ export default function AdminInterface({
                                 }`}>
                                   {item.numero}
                                 </span>
+                              </td>
+                              <td className="p-3">
+                                <div className="font-bold text-gray-700 text-xs">{item.juego}</div>
+                                <div className="text-[10px] text-gray-400 font-mono uppercase">{item.sorteo}</div>
                               </td>
                               <td className="p-3 text-right">
                                 <div className="flex flex-col items-end">

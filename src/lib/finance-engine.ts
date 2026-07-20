@@ -137,38 +137,46 @@ export function calculateAllSellerSummaries(
 }
 
 /**
- * Get the accumulated sales grouped by played number for a specific seller on a selected date.
- * Returns an array of { numero: string, total: number } sorted by total descending.
+ * Get the accumulated sales grouped by played number, game, and draw for a specific seller on a selected date.
+ * Returns an array of { numero: string, juego: string, sorteo: string, total: number } sorted by total descending.
  */
 export function getVendedorReporteAcumulado(
   vendedorId: string,
   fecha: string, // YYYY-MM-DD
   tickets: Venta[]
-): { numero: string; total: number }[] {
+): { numero: string; juego: string; sorteo: string; total: number }[] {
   const sellerTickets = tickets.filter((t) => {
     if (t.anulado) return false;
     const ticketDateStr = getTicketDate(t);
     return ticketDateStr === fecha && t.id_vendedor === vendedorId;
   });
 
-  const totalsByNumber: Record<string, number> = {};
+  const totalsByKey: Record<string, { numero: string; juego: string; sorteo: string; total: number }> = {};
 
   sellerTickets.forEach((t) => {
+    const juego = t.juego || "";
+    const sorteo = t.sorteo || "";
     if (t.jugadas && t.jugadas.length > 0) {
       t.jugadas.forEach((j) => {
         const num = String(j.numero).padStart(2, "0");
         const amount = Number(j.monto) || 0;
-        totalsByNumber[num] = (totalsByNumber[num] || 0) + amount;
+        const key = `${num}-${juego}-${sorteo}`;
+        if (!totalsByKey[key]) {
+          totalsByKey[key] = { numero: num, juego, sorteo, total: 0 };
+        }
+        totalsByKey[key].total += amount;
       });
+    } else if (t.numero_jugado) {
+      // Fallback for legacy single-play tickets without jugadas[]
+      const num = String(t.numero_jugado).padStart(2, "0");
+      const amount = Number(t.total_apostado ?? t.monto_pago ?? 0);
+      const key = `${num}-${juego}-${sorteo}`;
+      if (!totalsByKey[key]) {
+        totalsByKey[key] = { numero: num, juego, sorteo, total: 0 };
+      }
+      totalsByKey[key].total += amount;
     }
-    // Legacy tickets sin jugadas[]: omitidos porque monto_pago incluye
-    // todas las jugadas y no podemos descomponerlo por número.
   });
 
-  return Object.entries(totalsByNumber)
-    .map(([numero, total]) => ({
-      numero,
-      total,
-    }))
-    .sort((a, b) => b.total - a.total);
+  return Object.values(totalsByKey).sort((a, b) => b.total - a.total);
 }
