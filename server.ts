@@ -98,7 +98,21 @@ function checkAuth(allowedRoles?: string[]) {
       }
 
       // Re-validar que el usuario sigue existiendo y activo en la DB
-      const freshUser = db.usuarios.find((u: any) => u.id === sessionUser.id);
+      let freshUser = db.usuarios.find((u: any) => u.id === sessionUser.id);
+      if (!freshUser) {
+        try {
+          const firestoreDb = getFirestoreInstance();
+          const userDoc = await firestoreDb.collection("usuarios").doc(sessionUser.id).get();
+          if (userDoc.exists) {
+            freshUser = { id: userDoc.id, ...userDoc.data() } as any;
+            db.usuarios.push(freshUser!);
+            console.log(`[Auth] Usuario ${sessionUser.id} recuperado de Firestore y agregado a caché.`);
+          }
+        } catch (err) {
+          console.error("[Auth] Error fetching user from Firestore:", err);
+        }
+      }
+
       if (!freshUser) {
         destroySession(token);
         return res.status(401).json({ error: "Usuario no encontrado. Sesión cerrada." });
@@ -798,6 +812,15 @@ app.post("/api/login", async (req, res) => {
 
   // ─── PASO 8: Login exitoso ───────────────────────────────────────
   const { password: _, ...safeUser } = user;
+  
+  // Sync memory cache to prevent stale checkAuth de-synchronization
+  const userCacheIndex = db.usuarios.findIndex((u: any) => u.id === user.id);
+  if (userCacheIndex > -1) {
+    db.usuarios[userCacheIndex] = { ...db.usuarios[userCacheIndex], ...user };
+  } else {
+    db.usuarios.push(user);
+  }
+
   const sessionToken = createSession(safeUser);
   log(`LOGIN EXITOSO → id=${user.id}, email=${user.email}, rol=${user.rol}`);
   log(`════════════════════════════════════════`);
