@@ -178,5 +178,9 @@ export function getVendedorReporteAcumulado(
     }
   });
 
-  return Object.values(totalsByKey).sort((a, b) => b.total - a.total);
+  return Object.values(totalsByKey).sort((a, b) => {
+    const comp = a.sorteo.localeCompare(b.sorteo);
+    if (comp !== 0) return comp;
+    return a.numero.localeCompare(b.numero);
+  });
 }
