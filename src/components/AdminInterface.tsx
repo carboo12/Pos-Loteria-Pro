@@ -267,6 +267,8 @@ export default function AdminInterface({
   // Reporte por Número States
   const [numReportVendedorId, setNumReportVendedorId] = useState<string>("");
   const [numReportFecha, setNumReportFecha] = useState<string>(getLocalTodayStr());
+  const [numReportJuego, setNumReportJuego] = useState<string>("TODOS");
+  const [numReportSorteo, setNumReportSorteo] = useState<string>("TODOS");
 
   // Auto-select first seller if available
   useEffect(() => {
@@ -275,11 +277,40 @@ export default function AdminInterface({
     }
   }, [vendedoresReporte, numReportVendedorId]);
 
+  const uniqueJuegosReporte = useMemo(() => {
+    const juegosSet = new Set<string>();
+    config.sorteos.forEach((s) => {
+      if (s.juego) juegosSet.add(s.juego);
+    });
+    sales.forEach((s) => {
+      if (s.juego) juegosSet.add(s.juego);
+    });
+    return Array.from(juegosSet).sort();
+  }, [config.sorteos, sales]);
+
+  const uniqueSorteosReporte = useMemo(() => {
+    const sorteosSet = new Set<string>();
+    config.sorteos.forEach((s) => {
+      if (s.nombre) sorteosSet.add(s.nombre);
+    });
+    sales.forEach((s) => {
+      if (s.sorteo) sorteosSet.add(s.sorteo);
+    });
+    return Array.from(sorteosSet).sort();
+  }, [config.sorteos, sales]);
+
   // Memoized data for "Acumulados por Número" report
   const numReportData = useMemo(() => {
     if (!numReportVendedorId) return [];
-    return getVendedorReporteAcumulado(numReportVendedorId, numReportFecha, sales);
-  }, [numReportVendedorId, numReportFecha, sales]);
+    let data = getVendedorReporteAcumulado(numReportVendedorId, numReportFecha, sales);
+    if (numReportJuego !== "TODOS") {
+      data = data.filter(item => item.juego.toLowerCase() === numReportJuego.toLowerCase());
+    }
+    if (numReportSorteo !== "TODOS") {
+      data = data.filter(item => item.sorteo.toLowerCase() === numReportSorteo.toLowerCase());
+    }
+    return data;
+  }, [numReportVendedorId, numReportFecha, numReportJuego, numReportSorteo, sales]);
 
   const numReportTotal = useMemo(() => {
     return numReportData.reduce((sum, item) => sum + item.total, 0);
@@ -3728,6 +3759,32 @@ export default function AdminInterface({
                         onChange={(e) => setNumReportFecha(e.target.value)}
                         className="bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 min-h-[44px] text-xs font-bold text-gray-800 font-mono focus:outline-none focus:border-violet-400 transition-colors"
                       />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-black uppercase font-mono text-gray-500 mb-1">Juego</label>
+                      <select
+                        value={numReportJuego}
+                        onChange={(e) => setNumReportJuego(e.target.value)}
+                        className="bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 min-h-[44px] text-xs font-bold text-gray-800 focus:outline-none focus:border-violet-400 transition-colors"
+                      >
+                        <option value="TODOS">TODOS</option>
+                        {uniqueJuegosReporte.map(juego => (
+                          <option key={juego} value={juego}>{juego}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-black uppercase font-mono text-gray-500 mb-1">Sorteo</label>
+                      <select
+                        value={numReportSorteo}
+                        onChange={(e) => setNumReportSorteo(e.target.value)}
+                        className="bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 min-h-[44px] text-xs font-bold text-gray-800 focus:outline-none focus:border-violet-400 transition-colors"
+                      >
+                        <option value="TODOS">TODOS</option>
+                        {uniqueSorteosReporte.map(sorteo => (
+                          <option key={sorteo} value={sorteo}>{sorteo}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 </div>
