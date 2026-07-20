@@ -61,9 +61,12 @@ export function calculateSellerSummary(
   let premios = 0;
   let totalPremios = 0;
   sellerTickets.forEach((s) => {
-    const theoreticalPrize = getTicketTheoreticalPrize(s, config);
-    if (theoreticalPrize > 0) {
-      premios += theoreticalPrize;
+    const prize =
+      typeof s.monto_premio === "number" && s.monto_premio > 0
+        ? s.monto_premio
+        : getTicketTheoreticalPrize(s, config);
+    if (prize > 0) {
+      premios += prize;
     }
     if (typeof s.monto_premio === "number" && s.monto_premio > 0) {
       totalPremios += s.monto_premio;
