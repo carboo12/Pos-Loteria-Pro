@@ -1946,7 +1946,12 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
       if (limitJuego && limitJuego !== "TODOS" && v.juego.toLowerCase() !== limitJuego.toLowerCase()) return false;
 
       const limitNum = applicableLimit.numero ?? applicableLimit.numero_jugado ?? "TODOS";
-      if (limitNum !== "TODOS" && String(v.numero_jugado).padStart(2, "0") !== String(limitNum).padStart(2, "0")) return false;
+      if (limitNum !== "TODOS") {
+        const padLimitNum = String(limitNum).padStart(2, "0");
+        const matchesLegacy = String(v.numero_jugado).padStart(2, "0") === padLimitNum;
+        const matchesJugadas = v.jugadas && v.jugadas.some((j: any) => String(j.numero).padStart(2, "0") === padLimitNum);
+        if (!matchesLegacy && !matchesJugadas) return false;
+      }
 
       const limitSorteoName = applicableLimit.sorteo || "";
       if (limitSorteoName && limitSorteoName !== "TODOS" &&
@@ -1969,22 +1974,32 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
       return true;
     });
 
-    // Bug #1 fix: sumar SOLO las jugadas del número específico, no monto_pago total
+    // Sum matching plays/sales to C$
     const totalPrevSalesCs = matchingSales.reduce((sum: number, v: any) => {
       const limitNum = applicableLimit.numero ?? applicableLimit.numero_jugado ?? "TODOS";
-      if (limitNum !== "TODOS" && v.jugadas && v.jugadas.length > 0) {
-        const matchedJugadas = v.jugadas.filter((j: any) =>
-          String(j.numero).padStart(2, "0") === String(limitNum).padStart(2, "0")
-        );
-        const amtInCs = matchedJugadas.reduce((s: number, j: any) => {
-          const monto = Number(j.monto) || 0;
-          return s + (v.moneda === "C$" ? monto : monto * db.configuracion.tasa_cambio);
-        }, 0);
+      if (limitNum !== "TODOS") {
+        const padLimitNum = String(limitNum).padStart(2, "0");
+        if (v.jugadas && v.jugadas.length > 0) {
+          const matchedJugadas = v.jugadas.filter((j: any) =>
+            String(j.numero).padStart(2, "0") === padLimitNum
+          );
+          const amtInCs = matchedJugadas.reduce((s: number, j: any) => {
+            const monto = Number(j.monto) || 0;
+            return s + (v.moneda === "C$" ? monto : monto * db.configuracion.tasa_cambio);
+          }, 0);
+          return sum + amtInCs;
+        } else {
+          // Legacy ticket sin jugadas[]: NO podemos descomponer monto_pago por número.
+          // Si es un ticket multi-jugada legacy, monto_pago incluye TODAS las jugadas,
+          // así que contarlo inflaría artificialmente el límite del número específico.
+          // Mejor omitirlo (no contarlo) para evitar bloquear ventas legítimas.
+          return sum;
+        }
+      } else {
+        // limitNum === "TODOS" (Global limit for game/seller/etc)
+        const amtInCs = v.moneda === "C$" ? v.monto_pago : v.monto_pago * db.configuracion.tasa_cambio;
         return sum + amtInCs;
       }
-      // Fallback para tickets legacy sin jugadas[]
-      const amtInCs = v.moneda === "C$" ? v.monto_pago : v.monto_pago * db.configuracion.tasa_cambio;
-      return sum + amtInCs;
     }, 0);
 
     const requestedMontoCs = moneda === "C$" ? Number(monto_pago) : Number(monto_pago) * db.configuracion.tasa_cambio;

@@ -35,12 +35,14 @@ import {
   Globe,
   Menu,
   Eye,
-  EyeOff
+  EyeOff,
+  Hash
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
 import { toDateStr, getTicketDate, getLocalTodayStr, getNicaraguaISOString, parseISOTimeParts, getNicaraguaNow } from "../lib/date-utils";
 
 import { useFacturacion } from "../hooks/useFacturacion";
+import { getVendedorReporteAcumulado } from "../lib/finance-engine";
 import { createPortal } from "react-dom";
 import { jsPDF } from "jspdf";
 import toast from "react-hot-toast";
@@ -261,6 +263,27 @@ export default function AdminInterface({
     config,
     config.cobros || []
   );
+
+  // Reporte por Número States
+  const [numReportVendedorId, setNumReportVendedorId] = useState<string>("");
+  const [numReportFecha, setNumReportFecha] = useState<string>(getLocalTodayStr());
+
+  // Auto-select first seller if available
+  useEffect(() => {
+    if (vendedoresReporte.length > 0 && !numReportVendedorId) {
+      setNumReportVendedorId(vendedoresReporte[0].id);
+    }
+  }, [vendedoresReporte, numReportVendedorId]);
+
+  // Memoized data for "Acumulados por Número" report
+  const numReportData = useMemo(() => {
+    if (!numReportVendedorId) return [];
+    return getVendedorReporteAcumulado(numReportVendedorId, numReportFecha, sales);
+  }, [numReportVendedorId, numReportFecha, sales]);
+
+  const numReportTotal = useMemo(() => {
+    return numReportData.reduce((sum, item) => sum + item.total, 0);
+  }, [numReportData]);
 
   // Finanzas / Cobros states
   const [finanzasVendedor, setFinanzasVendedor] = useState("");
@@ -3668,6 +3691,127 @@ export default function AdminInterface({
                     </div>
                   );
                 })()}
+              </div>
+
+              {/* Box 4: Reporte por Número (Acumulados) */}
+              <div className="bg-white p-6 rounded-2xl border border-gray-300 shadow-xs flex flex-col justify-between font-sans">
+                {/* Card Header */}
+                <div className="flex flex-wrap items-center justify-between border-b border-gray-100 pb-3 mb-4 gap-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-violet-50 rounded-xl">
+                      <Hash className="w-5 h-5 text-violet-600" />
+                    </div>
+                    <div>
+                      <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block">Acumulados por Número</span>
+                      <p className="text-[10px] text-gray-400">Números con mayor riesgo acumulado por vendedor y fecha</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-3 items-center">
+                    <div>
+                      <label className="block text-[9px] font-black uppercase font-mono text-gray-500 mb-1">Vendedor</label>
+                      <select
+                        value={numReportVendedorId}
+                        onChange={(e) => setNumReportVendedorId(e.target.value)}
+                        className="bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 min-h-[44px] text-xs font-bold text-gray-800 focus:outline-none focus:border-violet-400 transition-colors"
+                      >
+                        <option value="" disabled>Seleccione Vendedor</option>
+                        {vendedoresReporte.map(u => (
+                          <option key={u.id} value={u.id}>{u.nombre}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-black uppercase font-mono text-gray-500 mb-1">Fecha</label>
+                      <input
+                        type="date"
+                        value={numReportFecha}
+                        onChange={(e) => setNumReportFecha(e.target.value)}
+                        className="bg-gray-50 border border-gray-300 rounded-xl px-3 py-2 min-h-[44px] text-xs font-bold text-gray-800 font-mono focus:outline-none focus:border-violet-400 transition-colors"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Table */}
+                <div className="overflow-y-auto max-h-80 rounded-xl border border-gray-200">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-gray-100 text-gray-600 uppercase text-[9px] font-mono tracking-wider sticky top-0 z-10">
+                        <th className="p-3 rounded-l-xl">#</th>
+                        <th className="p-3">Número</th>
+                        <th className="p-3 rounded-r-xl text-right">Monto Acumulado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {!numReportVendedorId ? (
+                        <tr>
+                          <td colSpan={3} className="p-8 text-center text-gray-400 text-xs">
+                            Seleccione un vendedor para ver el reporte.
+                          </td>
+                        </tr>
+                      ) : numReportData.length === 0 ? (
+                        <tr>
+                          <td colSpan={3} className="p-8 text-center text-gray-400 text-xs">
+                            Sin ventas registradas para este vendedor en la fecha seleccionada.
+                          </td>
+                        </tr>
+                      ) : (
+                        numReportData.map((item, idx) => {
+                          const pct = numReportTotal > 0 ? (item.total / numReportTotal) * 100 : 0;
+                          const isTop = idx < 3 && numReportData.length > 3;
+                          return (
+                            <tr
+                              key={idx}
+                              className={`transition-colors ${
+                                isTop
+                                  ? "bg-violet-50/60 hover:bg-violet-50"
+                                  : idx % 2 === 0
+                                    ? "bg-white hover:bg-gray-50"
+                                    : "bg-gray-50/50 hover:bg-gray-50"
+                              }`}
+                            >
+                              <td className="p-3 font-mono text-gray-400 text-[10px]">{idx + 1}</td>
+                              <td className="p-3">
+                                <span className={`font-mono font-black text-xs px-2.5 py-1 rounded-lg border ${
+                                  isTop
+                                    ? "bg-violet-100 border-violet-300 text-violet-900"
+                                    : "bg-indigo-50 border-indigo-200 text-indigo-900"
+                                }`}>
+                                  {item.numero}
+                                </span>
+                              </td>
+                              <td className="p-3 text-right">
+                                <div className="flex flex-col items-end">
+                                  <span className={`font-mono font-bold text-xs ${isTop ? "text-violet-900" : "text-gray-900"}`}>
+                                    C$ {item.total.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
+                                  </span>
+                                  <div className="w-20 h-1.5 bg-gray-100 rounded-full mt-1 overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full ${isTop ? "bg-violet-500" : "bg-indigo-400"}`}
+                                      style={{ width: `${Math.max(2, pct)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Total Footer */}
+                {numReportData.length > 0 && (
+                  <div className="border-t border-gray-100 pt-3 mt-4 flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-200">
+                    <span className="text-xs font-display font-black text-gray-900 uppercase">
+                      Total Acumulado ({numReportData.length} números)
+                    </span>
+                    <span className="font-mono font-black text-lg text-violet-800">
+                      C$ {numReportTotal.toLocaleString("es-ES", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
               </div>
 
             </div>

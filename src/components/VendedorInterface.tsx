@@ -1164,7 +1164,12 @@ export default function VendedorInterface({
 
       // Match number (normalizado)
       const limitNum = matchedLimit.numero ?? matchedLimit.numero_jugado ?? "TODOS";
-      if (limitNum !== "TODOS" && String(v.numero_jugado).padStart(2, "0") !== String(limitNum).padStart(2, "0")) return false;
+      if (limitNum !== "TODOS") {
+        const padLimitNum = String(limitNum).padStart(2, "0");
+        const matchesLegacy = String(v.numero_jugado).padStart(2, "0") === padLimitNum;
+        const matchesJugadas = v.jugadas && v.jugadas.some((j: any) => String(j.numero).padStart(2, "0") === padLimitNum);
+        if (!matchesLegacy && !matchesJugadas) return false;
+      }
 
       // Match Sorteo
       const limitSorteoName = matchedLimit.sorteo || "";
@@ -1192,22 +1197,30 @@ export default function VendedorInterface({
       return true;
     });
 
-    // Bug #1 fix: sumar SOLO las jugadas del número específico, no monto_pago total
+    // Sum matching plays/sales to C$
     const totalPrevSalesCs = matchingSales.reduce((sum: number, v: any) => {
       const limitNum = matchedLimit.numero ?? matchedLimit.numero_jugado ?? "TODOS";
-      if (limitNum !== "TODOS" && v.jugadas && v.jugadas.length > 0) {
-        const matchedJugadas = v.jugadas.filter((j: any) =>
-          String(j.numero).padStart(2, "0") === String(limitNum).padStart(2, "0")
-        );
-        const amtInCs = matchedJugadas.reduce((s: number, j: any) => {
-          const monto = Number(j.monto) || 0;
-          return s + (v.moneda === "C$" ? monto : monto * (config?.tasa_cambio || 36));
-        }, 0);
+      if (limitNum !== "TODOS") {
+        const padLimitNum = String(limitNum).padStart(2, "0");
+        if (v.jugadas && v.jugadas.length > 0) {
+          const matchedJugadas = v.jugadas.filter((j: any) =>
+            String(j.numero).padStart(2, "0") === padLimitNum
+          );
+          const amtInCs = matchedJugadas.reduce((s: number, j: any) => {
+            const monto = Number(j.monto) || 0;
+            return s + (v.moneda === "C$" ? monto : monto * (config?.tasa_cambio || 36));
+          }, 0);
+          return sum + amtInCs;
+        } else {
+          // Legacy ticket sin jugadas[]: NO podemos descomponer monto_pago por número.
+          // monto_pago incluye TODAS las jugadas del ticket, omitir para no inflar el límite.
+          return sum;
+        }
+      } else {
+        // limitNum === "TODOS" (Global limit for game/seller/etc)
+        const amtInCs = v.moneda === "C$" ? v.monto_pago : v.monto_pago * (config?.tasa_cambio || 36);
         return sum + amtInCs;
       }
-      // Fallback para tickets legacy sin jugadas[]
-      const amtInCs = v.moneda === "C$" ? v.monto_pago : v.monto_pago * (config?.tasa_cambio || 36);
-      return sum + amtInCs;
     }, 0);
 
     // Accumulated cart total for this number matching the limit criteria

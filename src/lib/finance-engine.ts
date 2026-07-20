@@ -135,3 +135,40 @@ export function calculateAllSellerSummaries(
     calculateSellerSummary(s, fechaInicio, fechaFin, tickets, config, cobros),
   );
 }
+
+/**
+ * Get the accumulated sales grouped by played number for a specific seller on a selected date.
+ * Returns an array of { numero: string, total: number } sorted by total descending.
+ */
+export function getVendedorReporteAcumulado(
+  vendedorId: string,
+  fecha: string, // YYYY-MM-DD
+  tickets: Venta[]
+): { numero: string; total: number }[] {
+  const sellerTickets = tickets.filter((t) => {
+    if (t.anulado) return false;
+    const ticketDateStr = getTicketDate(t);
+    return ticketDateStr === fecha && t.id_vendedor === vendedorId;
+  });
+
+  const totalsByNumber: Record<string, number> = {};
+
+  sellerTickets.forEach((t) => {
+    if (t.jugadas && t.jugadas.length > 0) {
+      t.jugadas.forEach((j) => {
+        const num = String(j.numero).padStart(2, "0");
+        const amount = Number(j.monto) || 0;
+        totalsByNumber[num] = (totalsByNumber[num] || 0) + amount;
+      });
+    }
+    // Legacy tickets sin jugadas[]: omitidos porque monto_pago incluye
+    // todas las jugadas y no podemos descomponerlo por número.
+  });
+
+  return Object.entries(totalsByNumber)
+    .map(([numero, total]) => ({
+      numero,
+      total,
+    }))
+    .sort((a, b) => b.total - a.total);
+}
