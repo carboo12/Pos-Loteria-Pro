@@ -339,6 +339,7 @@ export default function AdminInterface({
   const [ingresoFormMontoUsd, setIngresoFormMontoUsd] = useState("");
   const [ingresoFormComentario, setIngresoFormComentario] = useState("");
   const [ingresoFormVendedor, setIngresoFormVendedor] = useState("");
+  const [ingresoFormFecha, setIngresoFormFecha] = useState(() => getLocalTodayStr());
   const [ingresoSubmitting, setIngresoSubmitting] = useState(false);
 
   // Fetch lists
@@ -406,7 +407,8 @@ export default function AdminInterface({
           monto_cs: Number(ingresoFormMontoCs) || 0,
           monto_usd: Number(ingresoFormMontoUsd) || 0,
           comentario: ingresoFormComentario,
-          id_vendedor: ingresoFormVendedor
+          id_vendedor: ingresoFormVendedor,
+          fecha: ingresoFormFecha
         })
       });
       if (res.ok) {
@@ -4135,6 +4137,7 @@ export default function AdminInterface({
                                   setIngresoFormMontoUsd(String(ingreso.monto_usd));
                                   setIngresoFormComentario(ingreso.comentario || "");
                                   setIngresoFormVendedor(ingreso.id_vendedor || "");
+                                  setIngresoFormFecha(ingreso.fecha || getLocalTodayStr());
                                 }}
                                 className="p-1.5 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded-lg transition-colors inline-flex items-center justify-center cursor-pointer"
                                 title="Editar Ingreso"
@@ -4638,6 +4641,18 @@ export default function AdminInterface({
                     <option key={v.id} value={v.id}>{v.nombre} ({v.usuario})</option>
                   ))}
                 </select>
+              </div>
+
+              {/* Fecha del Ingreso */}
+              <div>
+                <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Fecha del Ingreso</label>
+                <input
+                  type="date"
+                  value={ingresoFormFecha}
+                  onChange={(e) => setIngresoFormFecha(e.target.value)}
+                  max={getLocalTodayStr()}
+                  className="w-full px-4 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-emerald-900 focus:bg-white transition-all"
+                />
               </div>
 
               {/* Monto C$ */}

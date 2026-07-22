@@ -1591,7 +1591,7 @@ app.get("/api/ingresos", checkAuth(), (req, res) => {
 });
 
 app.post("/api/ingresos", checkAuth(), async (req, res) => {
-  const { id_vendedor, id_supervisor, monto_cs, monto_usd, comentario } = req.body;
+  const { id_vendedor, id_supervisor, monto_cs, monto_usd, comentario, fecha: fechaOverride } = req.body;
   if (!id_vendedor || !id_supervisor) {
     return res.status(400).json({ error: "Vendedor y Supervisor son obligatorios." });
   }
@@ -1609,7 +1609,7 @@ app.post("/api/ingresos", checkAuth(), async (req, res) => {
     id_supervisor,
     monto_cs: Number(monto_cs) || 0,
     monto_usd: Number(monto_usd) || 0,
-    fecha: getLocalDateString(),
+    fecha: (fechaOverride && /^\d{4}-\d{2}-\d{2}$/.test(fechaOverride)) ? fechaOverride : getLocalDateString(),
     timestamp: getNicaraguaISOString(),
     comentario: comentario || ""
   };
@@ -1637,7 +1637,7 @@ app.post("/api/ingresos", checkAuth(), async (req, res) => {
 // Update income (admin only)
 app.put("/api/ingresos/:id", requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { monto_cs, monto_usd, comentario, id_vendedor } = req.body;
+  const { monto_cs, monto_usd, comentario, id_vendedor, fecha: fechaOverride } = req.body;
 
   (db.configuracion as any).ingresos = (db.configuracion as any).ingresos || [];
   const index = (db.configuracion as any).ingresos.findIndex((i: any) => i.id === id);
@@ -1660,7 +1660,8 @@ app.put("/api/ingresos/:id", requireAdmin, async (req, res) => {
     nombre_vendedor,
     monto_cs: monto_cs !== undefined ? Number(monto_cs) || 0 : existing.monto_cs,
     monto_usd: monto_usd !== undefined ? Number(monto_usd) || 0 : existing.monto_usd,
-    comentario: comentario !== undefined ? comentario || "" : existing.comentario
+    comentario: comentario !== undefined ? comentario || "" : existing.comentario,
+    fecha: (fechaOverride && /^\d{4}-\d{2}-\d{2}$/.test(fechaOverride)) ? fechaOverride : existing.fecha
   };
 
   (db.configuracion as any).ingresos[index] = updatedIngreso;

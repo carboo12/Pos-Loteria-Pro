@@ -135,6 +135,7 @@ export default function SupervisorInterface({
   const [montoIngresoCs, setMontoIngresoCs] = useState("");
   const [montoIngresoUsd, setMontoIngresoUsd] = useState("");
   const [comentarioIngreso, setComentarioIngreso] = useState("");
+  const [fechaIngreso, setFechaIngreso] = useState(() => getLocalTodayStr());
   
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -349,7 +350,8 @@ export default function SupervisorInterface({
           id_supervisor: user.id,
           monto_cs: amtCs || 0,
           monto_usd: amtUsd || 0,
-          comentario: comentarioIngreso
+          comentario: comentarioIngreso,
+          fecha: fechaIngreso
         })
       });
 
@@ -363,6 +365,7 @@ export default function SupervisorInterface({
       setMontoIngresoCs("");
       setMontoIngresoUsd("");
       setComentarioIngreso("");
+      setFechaIngreso(getLocalTodayStr());
 
       await handleRefreshAll();
     } catch (err: any) {
@@ -1186,6 +1189,17 @@ export default function SupervisorInterface({
                 <span className="block text-xs font-black text-gray-950 uppercase tracking-tight mt-1 bg-slate-50 p-3 rounded-xl border border-gray-200 font-sans">
                   {selectedSellerForIngreso.nombre}
                 </span>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Fecha del Ingreso</label>
+                <input
+                  type="date"
+                  value={fechaIngreso}
+                  onChange={(e) => setFechaIngreso(e.target.value)}
+                  max={getLocalTodayStr()}
+                  className="w-full bg-slate-50 border border-gray-300 rounded-xl px-3.5 py-3 font-mono text-xs focus:outline-none focus:border-blue-900 focus:bg-white min-h-[48px]"
+                />
               </div>
 
               <div className="bg-blue-50 border border-blue-200 p-3.5 rounded-xl text-xs text-blue-900 space-y-1">

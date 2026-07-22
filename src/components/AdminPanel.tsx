@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { Usuario, Venta, Configuracion } from "../types";
+import { getLocalTodayStr } from "../lib/date-utils";
 
 interface AdminPanelProps {
   user: Usuario;
@@ -101,6 +102,7 @@ export default function AdminPanel({
   const [ingresoFormMontoCs, setIngresoFormMontoCs] = useState("");
   const [ingresoFormMontoUsd, setIngresoFormMontoUsd] = useState("");
   const [ingresoFormComentario, setIngresoFormComentario] = useState("");
+  const [ingresoFormFecha, setIngresoFormFecha] = useState(() => getLocalTodayStr());
 
   const incomesList = useMemo(() => {
     return [...(config.ingresos || [])].sort((a, b) => {
@@ -128,7 +130,8 @@ export default function AdminPanel({
           id_supervisor: user.id, // Admin acts as supervisor
           monto_cs: Number(ingresoFormMontoCs) || 0,
           monto_usd: Number(ingresoFormMontoUsd) || 0,
-          comentario: ingresoFormComentario
+          comentario: ingresoFormComentario,
+          fecha: ingresoFormFecha
         })
       });
       const data = await response.json();
@@ -161,7 +164,8 @@ export default function AdminPanel({
           monto_cs: Number(ingresoFormMontoCs) || 0,
           monto_usd: Number(ingresoFormMontoUsd) || 0,
           comentario: ingresoFormComentario,
-          id_vendedor: ingresoFormVendedor
+          id_vendedor: ingresoFormVendedor,
+          fecha: ingresoFormFecha
         })
       });
       const data = await response.json();
@@ -205,6 +209,7 @@ export default function AdminPanel({
     setIngresoFormMontoCs("");
     setIngresoFormMontoUsd("");
     setIngresoFormComentario("");
+    setIngresoFormFecha(getLocalTodayStr());
   };
 
   return (
@@ -442,6 +447,7 @@ export default function AdminPanel({
                               setIngresoFormMontoCs(String(ing.monto_cs));
                               setIngresoFormMontoUsd(String(ing.monto_usd));
                               setIngresoFormComentario(ing.comentario || "");
+                              setIngresoFormFecha(ing.fecha || getLocalTodayStr());
                             }}
                             className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-all inline-flex items-center justify-center cursor-pointer"
                             title="Editar"
@@ -494,6 +500,17 @@ export default function AdminPanel({
                     <option key={s.id} value={s.id}>{s.nombre.toUpperCase()}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Fecha del Ingreso</label>
+                <input
+                  type="date"
+                  value={ingresoFormFecha}
+                  onChange={(e) => setIngresoFormFecha(e.target.value)}
+                  max={getLocalTodayStr()}
+                  className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold border border-gray-200 focus:ring-2 focus:ring-emerald-500"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -579,6 +596,17 @@ export default function AdminPanel({
                     <option key={s.id} value={s.id}>{s.nombre.toUpperCase()}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Fecha del Ingreso</label>
+                <input
+                  type="date"
+                  value={ingresoFormFecha}
+                  onChange={(e) => setIngresoFormFecha(e.target.value)}
+                  max={getLocalTodayStr()}
+                  className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold border border-gray-200 focus:ring-2 focus:ring-blue-500"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
