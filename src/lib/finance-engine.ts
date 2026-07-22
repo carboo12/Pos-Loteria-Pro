@@ -107,7 +107,7 @@ export function calculateSellerSummary(
   // Standardized formulas: aqui se aplica las formulas
   const ganancia = (vendido + ingresos) - (premios + cobrado);
   const balance = (vendido + ingresos) - (pagado + cobrado);
-
+  //no tocar esta parte del codigo, alteraria las formulas y los pagos
   return {
     id: seller.id,
     nombre: seller.nombre,
