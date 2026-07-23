@@ -18,7 +18,7 @@ const SuspenseLoader = () => (
 
 import { auth, firestore } from "./lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { collection, doc, onSnapshot } from "firebase/firestore";
+import { collection, doc, onSnapshot, query, orderBy, limit } from "firebase/firestore";
 import { AlertTriangle, Lock, Sun } from "lucide-react";
 import { Toaster } from "react-hot-toast";
 
@@ -126,7 +126,6 @@ export default function App() {
         await Promise.all([
           fetchUsers(),
           fetchConfig(),
-          fetchSales(),
           fetchClosures(),
           fetchClock()
         ]);
@@ -162,18 +161,21 @@ export default function App() {
 
   // ─── FIRESTORE REAL-TIME LISTENERS (reemplaza polling de 4s) ────────
 
-  // Listener 1: Tickets en tiempo real → setSales (handles added/modified/removed)
+  // Listener 1: Tickets en tiempo real (limitado a los últimos 500 para máximo rendimiento móvil)
   useEffect(() => {
-    const unsubscribe = onSnapshot(
+    const ticketsQuery = query(
       collection(firestore, "tickets"),
+      orderBy("timestamp_servidor", "desc"),
+      limit(500)
+    );
+
+    const unsubscribe = onSnapshot(
+      ticketsQuery,
       (snapshot) => {
         // Process only what actually changed — prevents re-inserting deleted tickets
         let hasChanges = false;
         snapshot.docChanges().forEach((change) => {
-          if (change.type === "added" || change.type === "modified") {
-            hasChanges = true;
-          }
-          if (change.type === "removed") {
+          if (change.type === "added" || change.type === "modified" || change.type === "removed") {
             hasChanges = true;
           }
         });

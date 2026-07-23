@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, FormEvent, useMemo } from "react";
 import { 
   Users, 
   History, 
@@ -32,6 +32,7 @@ import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
 import FacturacionVendedorCard from "./FacturacionVendedorCard";
 import ResumenFacturacionCard from "./ResumenFacturacionCard";
+import LiveClock from "./LiveClock";
 import { useFacturacion } from "../hooks/useFacturacion";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
@@ -169,15 +170,7 @@ export default function SupervisorInterface({
   }, []);
   
   
-  const [timeText, setTimeText] = useState("");
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const now = new Date();
-      setTimeText(formatTo12HourTime(now));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   const fetchCobros = async () => {
     try {
@@ -257,22 +250,28 @@ export default function SupervisorInterface({
     };
   }, [linkedSellersIds.join(",")]);
 
-  const linkedSales = sales
-    .filter(s => {
-      if (s.id_vendedor) return linkedSellersIds.includes(s.id_vendedor);
-      return linkedSellerNames.has((s.nombre_vendedor || '').toUpperCase().trim());
-    })
-    .sort((a, b) => new Date(b.timestamp_servidor).getTime() - new Date(a.timestamp_servidor).getTime());
+  const linkedSales = useMemo(() => {
+    return sales
+      .filter(s => {
+        if (s.id_vendedor) return linkedSellersIds.includes(s.id_vendedor);
+        return linkedSellerNames.has((s.nombre_vendedor || '').toUpperCase().trim());
+      })
+      .sort((a, b) => new Date(b.timestamp_servidor).getTime() - new Date(a.timestamp_servidor).getTime());
+  }, [sales, linkedSellersIds, linkedSellerNames]);
 
   // 3. Closures of linked vendedores
-  const linkedClosures = closures
-    .filter(c => linkedSellersIds.includes(c.id_vendedor))
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const linkedClosures = useMemo(() => {
+    return closures
+      .filter(c => linkedSellersIds.includes(c.id_vendedor))
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [closures, linkedSellersIds]);
 
   // My supervisors cobros list
-  const myCobros = allCobros
-    .filter(cob => cob.id_supervisor === user.id)
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const myCobros = useMemo(() => {
+    return allCobros
+      .filter(cob => cob.id_supervisor === user.id)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [allCobros, user.id]);
 
   // Submit collection handler
   const handleRegisterCobro = async (e: FormEvent) => {
@@ -500,7 +499,7 @@ export default function SupervisorInterface({
         {/* Live Exchange Rate and clock display matching Vendedor */}
         <div className="mt-2 pt-2 border-t border-blue-800 flex justify-between items-center text-[11px] font-mono font-bold text-blue-200">
           <span>T. CAMBIO: C$ {config.tasa_cambio.toFixed(2)}</span>
-          <span className="bg-blue-950 px-2 py-0.5 rounded text-white animate-pulse">Reloj: {timeText}</span>
+          <LiveClock />
         </div>
       </div>
 

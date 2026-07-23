@@ -34,8 +34,9 @@ import TicketPreviewModal from "./TicketPreviewModal";
 import { QrScannerModal } from "./QrScannerModal";
 import ResumenFacturacionCard from "./ResumenFacturacionCard";
 import FacturacionVendedorCard from "./FacturacionVendedorCard";
+import LiveClock from "./LiveClock";
 import { useFacturacion } from "../hooks/useFacturacion";
-import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy, limit } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
 import { BluetoothPrinterService, PrinterStatus } from "../services/BluetoothPrinterService";
 import { buildTicketBuffer, ticketDataFromVenta, loadLogoBitmap } from "../services/escpos-builder";
@@ -420,8 +421,12 @@ export default function VendedorInterface({
     setMontoPago("");
     setActiveField("numero");
     if (selectedJuego === "Fechas") {
+      setFechaVenta(prev => ({ ...prev, dia: "", mes: "" }));
       const diaInput = document.getElementById("fecha-dia-input") as HTMLInputElement;
-      if (diaInput) setTimeout(() => diaInput.focus(), 0);
+      if (diaInput) setTimeout(() => {
+        diaInput.focus();
+        diaInput.select();
+      }, 0);
     } else {
       setTimeout(() => numeroInputRef.current?.focus(), 0);
     }
@@ -721,7 +726,8 @@ export default function VendedorInterface({
     setReportLoading(true);
     const q = query(
       collection(firestore, "tickets"),
-      where("id_vendedor", "==", user.id)
+      where("id_vendedor", "==", user.id),
+      limit(300)
     );
 
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
@@ -1037,14 +1043,15 @@ export default function VendedorInterface({
     
     // Set default value for Fechas and auto-focus the appropriate input
     if (selectedJuego === "Fechas") {
-      const fechaStr = newActiveDraw ? getNextValidDate(newActiveDraw, getNicaraguaNow()) : getLocalTodayStr();
-      const d = new Date(fechaStr + "T12:00:00");
-      const diaF = String(d.getDate()).padStart(2, "0");
-      setNumeroJugado(`${diaF}-${MESES[d.getMonth()]}`);
+      setFechaVenta(prev => ({ ...prev, dia: "", mes: "" }));
+      setNumeroJugado("");
       // Auto-focus the Día input when switching to Fechas game
       setTimeout(() => {
         const diaInput = document.getElementById("fecha-dia-input") as HTMLInputElement;
-        if (diaInput) diaInput.focus();
+        if (diaInput) {
+          diaInput.focus();
+          diaInput.select();
+        }
       }, 80);
     } else {
       setNumeroJugado("");
@@ -1052,37 +1059,36 @@ export default function VendedorInterface({
     }
   }, [selectedJuego, selectedPais, config.sorteos]);
 
-  // Keep simulated clock updated
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const now = new Date();
-      setTimeText(formatTo12HourTime(now));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  // Filter vendor sales: primary by id_vendedor, fallback by normalized name for legacy tickets (Memoized for mobile performance)
+  const allMySales = useMemo(() => {
+    return sales
+      .filter(s => {
+        if (s.id_vendedor) return s.id_vendedor === user.id;
+        return (s.nombre_vendedor || '').toUpperCase().trim() === (user.nombre || '').toUpperCase().trim();
+      })
+      .sort((a, b) => new Date(b.timestamp_servidor).getTime() - new Date(a.timestamp_servidor).getTime());
+  }, [sales, user.id, user.nombre]);
 
-  // Filter vendor sales: primary by id_vendedor, fallback by normalized name for legacy tickets
-  const allMySales = sales
-    .filter(s => {
-      if (s.id_vendedor) return s.id_vendedor === user.id;
-      return (s.nombre_vendedor || '').toUpperCase().trim() === (user.nombre || '').toUpperCase().trim();
-    })
-    .sort((a, b) => new Date(b.timestamp_servidor).getTime() - new Date(a.timestamp_servidor).getTime());
-
-  // Filtered list based on Search and Date
-  const displayedSales = allMySales.filter(s => {
-    // Check Date match
-    const saleDateStr = getTicketDate(s); // YYYY-MM-DD
-    const dateMatches = filterDate ? (saleDateStr === filterDate) : true;
-    
-    // Check search query (by Ticket # or Number played or Game)
-    const query = searchQuery.trim().toLowerCase();
-    const searchMatches = query
-      ? (s.numero_ticket.toLowerCase().includes(query) || s.numero_jugado.includes(query) || s.juego.toLowerCase().includes(query))
-      : true;
+  // Filtered list based on Search and Date (Memoized for mobile performance)
+  const displayedSales = useMemo(() => {
+    return allMySales.filter(s => {
+      // Check Date match
+      const saleDateStr = getTicketDate(s); // YYYY-MM-DD
+      const dateMatches = filterDate ? (saleDateStr === filterDate) : true;
+      if (!dateMatches) return false;
       
-    return dateMatches && searchMatches;
-  });
+      // Check search query (by Ticket # or Number played or Game)
+      const query = searchQuery.trim().toLowerCase();
+      if (!query) return true;
+      const searchMatches = 
+        (s.codigo_ticket || '').toLowerCase().includes(query) ||
+        (s.juego || '').toLowerCase().includes(query) ||
+        (s.sorteo || '').toLowerCase().includes(query) ||
+        (s.jugadas || []).some(j => (j.numero || '').includes(query));
+      
+      return searchMatches;
+    });
+  }, [allMySales, filterDate, searchQuery]);
 
   // Calculations for current cashier (based on today's active sales)
   const myTodaySales = allMySales.filter(s => getTicketDate(s) === getTodayString());
@@ -1632,7 +1638,7 @@ export default function VendedorInterface({
             }
           </span>
 
-          <span className="bg-blue-950 px-2 py-0.5 rounded text-white animate-pulse">Reloj: {timeText}</span>
+          <LiveClock />
         </div>
       </div>
 
@@ -1991,7 +1997,11 @@ export default function VendedorInterface({
                         value={fechaVenta.dia}
                         onChange={(e) => {
                           const val = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
-                          setFechaVenta(prev => ({ ...prev, dia: val }));
+                          setFechaVenta(prev => {
+                            const newDia = val;
+                            setNumeroJugado(newDia ? `${newDia.padStart(2, "0")}-${prev.mes}` : "");
+                            return { ...prev, dia: newDia };
+                          });
                           if (val.length === 2 && parseInt(val, 10) >= 1 && parseInt(val, 10) <= 31) {
                             const mesSelect = document.getElementById("fecha-mes-select") as HTMLSelectElement;
                             if (mesSelect) mesSelect.focus();
@@ -2004,7 +2014,10 @@ export default function VendedorInterface({
                             if (mesSelect) mesSelect.focus();
                           }
                         }}
-                        onFocus={() => setActiveField("fecha")}
+                        onFocus={(e) => {
+                          setActiveField("fecha");
+                          e.target.select();
+                        }}
                         className={`w-full h-12 px-1 rounded-xl border-2 font-mono text-lg font-black text-center shadow-inner transition-colors focus:outline-none ${
                           isInvalidDay
                             ? "border-[#EF4444] text-[#EF4444] bg-red-50"
@@ -2022,10 +2035,13 @@ export default function VendedorInterface({
                         id="fecha-mes-select"
                         value={fechaVenta.mes}
                         onChange={(e) => {
-                          setFechaVenta(prev => ({ ...prev, mes: e.target.value }));
-                          setNumeroJugado(`${fechaVenta.dia.padStart(2, "0")}-${e.target.value}`);
-                          const montoInput = document.getElementById("monto-input") as HTMLInputElement;
-                          if (montoInput) montoInput.focus();
+                          const newMes = e.target.value;
+                          setFechaVenta(prev => ({ ...prev, mes: newMes }));
+                          setNumeroJugado(fechaVenta.dia && newMes ? `${fechaVenta.dia.padStart(2, "0")}-${newMes}` : "");
+                          if (newMes) {
+                            const montoInput = document.getElementById("monto-input") as HTMLInputElement;
+                            if (montoInput) montoInput.focus();
+                          }
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.keyCode === 13) {
@@ -2037,6 +2053,7 @@ export default function VendedorInterface({
                         onFocus={() => setActiveField("fecha")}
                         className="w-full h-12 px-0.5 rounded-xl border-2 border-gray-300 bg-white font-sans text-[11px] font-bold text-gray-900 text-center focus:outline-none focus:border-blue-500 cursor-pointer transition-colors"
                       >
+                        <option value="">MES</option>
                         {MESES.map(m => (
                           <option key={m} value={m}>{m.slice(0, 3).toUpperCase()}</option>
                         ))}
