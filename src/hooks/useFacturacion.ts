@@ -61,10 +61,13 @@ export function useFacturacion(
         const snapshot = await getDocs(q);
         if (!isMounted) return;
 
-        const docs: Venta[] = snapshot.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data(),
-        } as Venta));
+        const docs: Venta[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() as Record<string, any>;
+          return {
+            id: docSnap.id,
+            ...data,
+          } as Venta;
+        });
 
         setRangeTickets(docs);
       } catch (err) {
