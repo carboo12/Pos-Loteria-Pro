@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { Usuario, Venta, Configuracion } from "../types";
-import { getLocalTodayStr } from "../lib/date-utils";
+import { getLocalTodayStr, getTicketDate } from "../lib/date-utils";
 
 interface AdminPanelProps {
   user: Usuario;
@@ -77,7 +77,7 @@ export default function AdminPanel({
         return false;
       }
       // Filter by date
-      if (rescueDate && ticket.fecha_venta !== rescueDate) {
+      if (rescueDate && getTicketDate(ticket) !== rescueDate) {
         return false;
       }
       // Filter by query (ticket number or customer)

@@ -299,10 +299,40 @@ export default function AdminInterface({
     return Array.from(sorteosSet).sort();
   }, [config.sorteos, sales]);
 
+  // Dynamic Firestore fetch for "Acumulados por Número" report date
+  const [numReportFetchedTickets, setNumReportFetchedTickets] = useState<Venta[]>([]);
+
+  useEffect(() => {
+    if (!numReportFecha) return;
+    let isMounted = true;
+    const fetchDateTickets = async () => {
+      try {
+        const q = query(
+          collection(firestore, "tickets"),
+          where("fecha_venta", "==", numReportFecha)
+        );
+        const snapshot = await getDocs(q);
+        if (!isMounted) return;
+        setNumReportFetchedTickets(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Venta)));
+      } catch (err) {
+        console.error("Error loading tickets for numReportFecha:", err);
+      }
+    };
+    fetchDateTickets();
+    return () => { isMounted = false; };
+  }, [numReportFecha]);
+
+  const numReportCombinedTickets = useMemo(() => {
+    const map = new Map<string, Venta>();
+    numReportFetchedTickets.forEach(t => { if (t.id) map.set(t.id, t); });
+    sales.forEach(t => { if (t.id) map.set(t.id, t); });
+    return Array.from(map.values());
+  }, [sales, numReportFetchedTickets]);
+
   // Memoized data for "Acumulados por Número" report
   const numReportData = useMemo(() => {
     if (!numReportVendedorId) return [];
-    let data = getVendedorReporteAcumulado(numReportVendedorId, numReportFecha, sales);
+    let data = getVendedorReporteAcumulado(numReportVendedorId, numReportFecha, numReportCombinedTickets);
     if (numReportJuego !== "TODOS") {
       data = data.filter(item => item.juego.toLowerCase() === numReportJuego.toLowerCase());
     }
@@ -310,7 +340,7 @@ export default function AdminInterface({
       data = data.filter(item => item.sorteo.toLowerCase() === numReportSorteo.toLowerCase());
     }
     return data;
-  }, [numReportVendedorId, numReportFecha, numReportJuego, numReportSorteo, sales]);
+  }, [numReportVendedorId, numReportFecha, numReportJuego, numReportSorteo, numReportCombinedTickets]);
 
   const numReportTotal = useMemo(() => {
     return numReportData.reduce((sum, item) => sum + item.total, 0);

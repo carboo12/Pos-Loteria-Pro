@@ -50,9 +50,9 @@ export function calculateSellerSummary(
     const ticketDateStr = getTicketDate(s);
     const dateMatch = ticketDateStr >= fechaInicio && ticketDateStr <= fechaFin;
     const activeMatch = !s.anulado;
-    const sellerMatch = s.id_vendedor
-      ? s.id_vendedor === seller.id
-      : (s.nombre_vendedor || "").toUpperCase().trim() === vNameNorm;
+    const idMatch = s.id_vendedor && s.id_vendedor.toLowerCase() === (seller.id || "").toLowerCase();
+    const nameMatch = s.nombre_vendedor && s.nombre_vendedor.toUpperCase().trim() === vNameNorm;
+    const sellerMatch = idMatch || nameMatch;
     return dateMatch && activeMatch && sellerMatch;
   });
 
@@ -151,7 +151,9 @@ export function getVendedorReporteAcumulado(
   const sellerTickets = tickets.filter((t) => {
     if (t.anulado) return false;
     const ticketDateStr = getTicketDate(t);
-    return ticketDateStr === fecha && t.id_vendedor === vendedorId;
+    const dateMatch = ticketDateStr === fecha;
+    const sellerMatch = !vendedorId || (t.id_vendedor && t.id_vendedor.toLowerCase() === vendedorId.toLowerCase());
+    return dateMatch && sellerMatch;
   });
 
   const totalsByKey: Record<string, { numero: string; juego: string; sorteo: string; total: number }> = {};

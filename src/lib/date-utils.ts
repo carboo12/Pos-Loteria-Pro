@@ -60,21 +60,33 @@ export function toISOString(value: unknown): string {
 /**
  * Extract the YYYY-MM-DD date string from a ticket, normalizing across formats.
  * Priority: fecha_venta (YYYY-MM-DD string) > timestamp_servidor > fecha_emision.
- * This ensures filtering works regardless of which field the ticket was written with.
+ * Normalizes YYYY-MM-DD, DD/MM/YYYY, ISO strings, and Firestore Timestamp objects safely.
  */
 export function getTicketDate(ticket: { fecha_venta?: string; timestamp_servidor?: string; fecha_emision?: string; [key: string]: unknown }): string {
-  if (ticket.fecha_venta && typeof ticket.fecha_venta === "string" && ticket.fecha_venta.length >= 10) {
-    return ticket.fecha_venta.substring(0, 10);
+  if (!ticket) return localDateStr(new Date());
+  const fv = ticket.fecha_venta;
+  if (typeof fv === "string" && fv.trim().length >= 10) {
+    const clean = fv.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(clean)) {
+      return clean.substring(0, 10);
+    }
+    const matchDMY = clean.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (matchDMY) {
+      return `${matchDMY[3]}-${matchDMY[2]}-${matchDMY[1]}`;
+    }
   }
-  return toDateStr(ticket.timestamp_servidor || ticket.fecha_emision);
+  return toDateStr(ticket.fecha_venta || ticket.timestamp_servidor || ticket.fecha_emision);
 }
 
 /**
- * Extract the monetary amount from a ticket, normalizing across field names.
+ * Extract the monetary amount from a ticket, normalizing across field names and string values.
  * Priority: total_apostado (new) > monto_pago (legacy).
  */
-export function getTicketAmount(ticket: { total_apostado?: number; monto_pago?: number; [key: string]: unknown }): number {
-  return (ticket.total_apostado ?? ticket.monto_pago ?? 0) as number;
+export function getTicketAmount(ticket: { total_apostado?: number | string; monto_pago?: number | string; [key: string]: unknown }): number {
+  if (!ticket) return 0;
+  const raw = ticket.total_apostado ?? ticket.monto_pago ?? 0;
+  const num = typeof raw === "number" ? raw : parseFloat(String(raw));
+  return isNaN(num) ? 0 : num;
 }
 
 /** Returns today's YYYY-MM-DD in the Nicaragua timezone. */
