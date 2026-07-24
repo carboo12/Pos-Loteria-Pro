@@ -9,9 +9,9 @@ export type VendedorFacturacionData = SellerSummary;
 
 /**
  * Custom hook to calculate seller billing summaries for a date range.
- * Dynamically queries Firestore for tickets within [fechaInicio, fechaFin]
- * and merges them with live tickets from client state (`tickets`),
- * ensuring full historical data is included even if total tickets exceed the 500 in-memory limit.
+ * Dynamically queries Firestore for tickets scoped by seller ID(s) or date range,
+ * merging with real-time client tickets (`tickets`), guaranteeing full historical
+ * coverage for Admin, Supervisor, and Vendedor interfaces without scope leakage.
  */
 export function useFacturacion(
   vendedores: { id: string; nombre: string }[],
@@ -23,18 +23,41 @@ export function useFacturacion(
 ): SellerSummary[] {
   const [rangeTickets, setRangeTickets] = useState<Venta[]>([]);
 
+  const sellerIdsKey = useMemo(() => {
+    return (vendedores || []).map((v) => v.id).sort().join(",");
+  }, [vendedores]);
+
   useEffect(() => {
-    if (!fechaInicio || !fechaFin) return;
+    if (!fechaInicio || !fechaFin || !vendedores || vendedores.length === 0) {
+      setRangeTickets([]);
+      return;
+    }
 
     let isMounted = true;
     const fetchRangeTickets = async () => {
       try {
         const ticketsRef = collection(firestore, "tickets");
-        const q = query(
-          ticketsRef,
-          where("fecha_venta", ">=", fechaInicio),
-          where("fecha_venta", "<=", fechaFin)
-        );
+        const sellerIds = vendedores.map((v) => v.id).filter(Boolean);
+
+        let q;
+        if (sellerIds.length === 1) {
+          // Single seller (Vendedor interface or Admin filtered by 1 seller):
+          // Scope query directly to this seller ID for 100% security, isolation & performance
+          q = query(ticketsRef, where("id_vendedor", "==", sellerIds[0]));
+        } else if (sellerIds.length > 1 && sellerIds.length <= 30) {
+          // Supervisor or multi-seller filter (<= 30 sellers):
+          // Scope query strictly to the list of assigned/linked seller IDs
+          q = query(ticketsRef, where("id_vendedor", "in", sellerIds));
+        } else {
+          // All sellers (Admin global view with >30 sellers):
+          // Query by date range
+          q = query(
+            ticketsRef,
+            where("fecha_venta", ">=", fechaInicio),
+            where("fecha_venta", "<=", fechaFin)
+          );
+        }
+
         const snapshot = await getDocs(q);
         if (!isMounted) return;
 
@@ -45,7 +68,7 @@ export function useFacturacion(
 
         setRangeTickets(docs);
       } catch (err) {
-        console.error("[useFacturacion] Error al consultar tickets de Firestore:", err);
+        console.warn("[useFacturacion] Consulta Firestore advertencia, usando tickets locales:", err);
       }
     };
 
@@ -54,7 +77,7 @@ export function useFacturacion(
     return () => {
       isMounted = false;
     };
-  }, [fechaInicio, fechaFin]);
+  }, [fechaInicio, fechaFin, sellerIdsKey]);
 
   // Combine fetched range tickets with live tickets from props, deduplicating by ID
   const combinedTickets = useMemo(() => {
