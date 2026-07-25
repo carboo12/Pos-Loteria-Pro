@@ -720,42 +720,30 @@ export default function VendedorInterface({
   };
 
   // Real-time Firestore listener for this vendor's tickets (replaces one-shot fetchReportTickets)
-  // This ensures the "A Pagar" total updates instantly when the server runs escrutinio after
-  // the admin publishes a winning number.
+  // This ensures the "A Pagar" total and boletos list update instantly in real-time for the selected date range.
   useEffect(() => {
+    if (!user.id || !reportFilterFechaInicio || !reportFilterFechaFin) return;
     setReportLoading(true);
     const q = query(
       collection(firestore, "tickets"),
       where("id_vendedor", "==", user.id),
-      limit(300)
+      where("fecha_venta", ">=", reportFilterFechaInicio),
+      where("fecha_venta", "<=", reportFilterFechaFin)
     );
 
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      // Process docChanges to handle added/modified/removed correctly
-      let changed = false;
-      querySnapshot.docChanges().forEach((change) => {
-        if (change.type === "added" || change.type === "modified") {
-          changed = true;
-        }
-        if (change.type === "removed") {
-          changed = true;
-        }
+      // Rebuild full list from current snapshot (excludes deleted docs)
+      const tickets = querySnapshot.docs.map(docVal => {
+        const data = docVal.data();
+        return {
+          id: docVal.id,
+          ...data,
+          fecha_emision_date: toDateSafe(data.timestamp_servidor || data.fecha_emision || data.fecha_venta)
+        };
       });
-
-      if (changed) {
-        // Rebuild full list from current snapshot (excludes deleted docs)
-        const tickets = querySnapshot.docs.map(docVal => {
-          const data = docVal.data();
-          return {
-            id: docVal.id,
-            ...data,
-            fecha_emision_date: toDateSafe(data.fecha_emision)
-          };
-        });
-        // Sort descending by emission date
-        tickets.sort((a, b) => b.fecha_emision_date.getTime() - a.fecha_emision_date.getTime());
-        setReportTickets(tickets);
-      }
+      // Sort descending by emission date/time
+      tickets.sort((a, b) => b.fecha_emision_date.getTime() - a.fecha_emision_date.getTime());
+      setReportTickets(tickets);
       setReportLoading(false);
     }, (err) => {
       console.error("Error in onSnapshot tickets:", err);
@@ -764,7 +752,7 @@ export default function VendedorInterface({
     });
 
     return () => unsubscribe();
-  }, [user.id]);
+  }, [user.id, reportFilterFechaInicio, reportFilterFechaFin]);
 
   // Reactive "A Pagar" total computed from real-time ticket data
   const liveAPagar = useMemo(() => {

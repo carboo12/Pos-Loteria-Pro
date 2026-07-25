@@ -42,15 +42,16 @@ export function useFacturacion(
         let q;
         if (sellerIds.length === 1) {
           // Single seller (Vendedor interface or Admin filtered by 1 seller):
-          // Scope query directly to this seller ID for 100% security, isolation & performance
-          q = query(ticketsRef, where("id_vendedor", "==", sellerIds[0]));
-        } else if (sellerIds.length > 1 && sellerIds.length <= 30) {
-          // Supervisor or multi-seller filter (<= 30 sellers):
-          // Scope query strictly to the list of assigned/linked seller IDs
-          q = query(ticketsRef, where("id_vendedor", "in", sellerIds));
+          // Scope query directly to this seller ID and date range for 100% accuracy & performance
+          q = query(
+            ticketsRef,
+            where("id_vendedor", "==", sellerIds[0]),
+            where("fecha_venta", ">=", fechaInicio),
+            where("fecha_venta", "<=", fechaFin)
+          );
         } else {
-          // All sellers (Admin global view with >30 sellers):
-          // Query by date range
+          // Multi-seller or All sellers:
+          // Query by date range for complete coverage
           q = query(
             ticketsRef,
             where("fecha_venta", ">=", fechaInicio),
@@ -61,13 +62,18 @@ export function useFacturacion(
         const snapshot = await getDocs(q);
         if (!isMounted) return;
 
-        const docs: Venta[] = snapshot.docs.map((docSnap) => {
+        let docs: Venta[] = snapshot.docs.map((docSnap) => {
           const data = docSnap.data() as Record<string, any>;
           return {
             id: docSnap.id,
             ...data,
           } as Venta;
         });
+
+        if (sellerIds.length > 1) {
+          const sellerSet = new Set(sellerIds);
+          docs = docs.filter((d) => d.id_vendedor && sellerSet.has(d.id_vendedor));
+        }
 
         setRangeTickets(docs);
       } catch (err) {
