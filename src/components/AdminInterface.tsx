@@ -363,6 +363,15 @@ export default function AdminInterface({
   const [lastCobroId, setLastCobroId] = useState("");
   const [historialCobros, setHistorialCobros] = useState<any[]>([]);
 
+  // Cobros editing states
+  const [editingCobro, setEditingCobro] = useState<any | null>(null);
+  const [cobroFormMontoCs, setCobroFormMontoCs] = useState("");
+  const [cobroFormMontoUsd, setCobroFormMontoUsd] = useState("");
+  const [cobroFormComentario, setCobroFormComentario] = useState("");
+  const [cobroFormVendedor, setCobroFormVendedor] = useState("");
+  const [cobroFormFecha, setCobroFormFecha] = useState(() => getLocalTodayStr());
+  const [cobroSubmitting, setCobroSubmitting] = useState(false);
+
   // Ingresos editing states
   const [editingIngreso, setEditingIngreso] = useState<any | null>(null);
   const [ingresoFormMontoCs, setIngresoFormMontoCs] = useState("");
@@ -412,16 +421,48 @@ export default function AdminInterface({
     }
   }, [activeSection]);
 
-  const handleAnularCobro = async (id: string) => {
-    if (!window.confirm("ATENCIÓN: ¿Estás completamente seguro de anular este cobro? Esto revertirá los balances y cancelará comisiones pagadas.")) return;
+  const handleDeleteCobro = async (id: string) => {
+    if (!window.confirm("¿Está seguro de que desea eliminar este cobro de forma permanente? Se registrará en la auditoría.")) {
+      return;
+    }
     try {
-      const res = await fetch(`/api/cobros/${id}/anular`, { method: "POST" });
+      const res = await fetch(`/api/cobros/${id}`, { method: "DELETE" });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Cobro anulado. Se revirtieron ${data.resumenes_revertidos} días y ${data.comisiones_anuladas} pagos de comisión.`);
+      if (!res.ok) throw new Error(data.error || "Error al eliminar cobro");
+      toast.success("Cobro eliminado exitosamente.");
       fetchHistorialCobros();
+      if (onRefreshConfig) await onRefreshConfig();
     } catch (e: any) {
-      toast.error(e.message || "Error al anular cobro");
+      toast.error(e.message || "Error al eliminar cobro");
+    }
+  };
+
+  const handleUpdateCobro = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editingCobro) return;
+    setCobroSubmitting(true);
+    try {
+      const res = await fetch(`/api/cobros/${editingCobro.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          monto_cs: Number(cobroFormMontoCs) || 0,
+          monto_usd: Number(cobroFormMontoUsd) || 0,
+          comentario: cobroFormComentario,
+          id_vendedor: cobroFormVendedor,
+          fecha: cobroFormFecha
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Error al actualizar cobro");
+      toast.success("Cobro actualizado exitosamente.");
+      setEditingCobro(null);
+      fetchHistorialCobros();
+      if (onRefreshConfig) await onRefreshConfig();
+    } catch (e: any) {
+      toast.error(e.message || "Error al actualizar cobro");
+    } finally {
+      setCobroSubmitting(false);
     }
   };
 
@@ -4081,41 +4122,54 @@ export default function AdminInterface({
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-gray-50 text-[10px] uppercase font-bold text-gray-500 tracking-wider">
-                      <th className="p-3 border-b border-gray-200 rounded-tl-xl">Fecha de Cobro</th>
-                      <th className="p-3 border-b border-gray-200">Rango Evaluado</th>
+                      <th className="p-3 border-b border-gray-200 rounded-tl-xl">Fecha</th>
                       <th className="p-3 border-b border-gray-200">Vendedor</th>
-                      <th className="p-3 border-b border-gray-200 text-right">Total Neto</th>
+                      <th className="p-3 border-b border-gray-200 text-right">Monto C$</th>
+                      <th className="p-3 border-b border-gray-200 text-right">Monto USD</th>
+                      <th className="p-3 border-b border-gray-200">Comentario</th>
                       <th className="p-3 border-b border-gray-200 rounded-tr-xl text-center">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="text-xs font-sans">
-                    {historialCobros.length === 0 ? (
+                    {!(config.cobros && config.cobros.length > 0) ? (
                       <tr>
-                        <td colSpan={5} className="p-6 text-center text-gray-400 font-medium">No hay cobros registrados.</td>
+                        <td colSpan={6} className="p-6 text-center text-gray-400 font-medium">No hay cobros registrados.</td>
                       </tr>
                     ) : (
-                      historialCobros.map(cobro => (
-                        <tr key={cobro.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                          <td className="p-3 text-gray-800 font-semibold">{new Date(cobro.timestamp).toLocaleString("es-NI")}</td>
-                          <td className="p-3 text-gray-500 font-mono text-[10px]">{cobro.rango_inicio} a {cobro.rango_fin}</td>
-                          <td className="p-3 font-bold text-blue-900">{cobro.nombre_vendedor}</td>
-                          <td className="p-3 text-right font-black text-green-700">C$ {cobro.total_neto.toFixed(2)}</td>
-                          <td className="p-3 text-center">
-                            <button
-                              onClick={async () => {
-                                if (window.confirm("¿Seguro que desea anular este cobro? Esta acción revertirá el balance del vendedor.")) {
-                                  await handleAnularCobro(cobro.id);
-                                  await fetchHistorialCobros();
-                                }
-                              }}
-                              className="p-1.5 bg-red-100 text-red-600 hover:bg-red-200 rounded-lg transition-colors inline-flex items-center justify-center cursor-pointer"
-                              title="Anular Cobro"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
+                      [...(config.cobros || [])]
+                        .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
+                        .map(cobro => (
+                          <tr key={cobro.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                            <td className="p-3 text-gray-800 font-semibold">{cobro.timestamp ? new Date(cobro.timestamp).toLocaleString("es-NI") : cobro.fecha}</td>
+                            <td className="p-3 font-bold text-blue-900">{cobro.nombre_vendedor}</td>
+                            <td className="p-3 text-right font-black text-emerald-700">C$ {Number(cobro.monto_cs).toFixed(2)}</td>
+                            <td className="p-3 text-right font-black text-emerald-950">$ {Number(cobro.monto_usd).toFixed(2)}</td>
+                            <td className="p-3 text-gray-600 truncate max-w-[200px]" title={cobro.comentario}>{cobro.comentario || "-"}</td>
+                            <td className="p-3 text-center space-x-2">
+                              <button
+                                onClick={() => {
+                                  setEditingCobro(cobro);
+                                  setCobroFormMontoCs(String(cobro.monto_cs));
+                                  setCobroFormMontoUsd(String(cobro.monto_usd));
+                                  setCobroFormComentario(cobro.comentario || "");
+                                  setCobroFormVendedor(cobro.id_vendedor || "");
+                                  setCobroFormFecha(cobro.fecha || getLocalTodayStr());
+                                }}
+                                className="p-1.5 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded-lg transition-colors inline-flex items-center justify-center cursor-pointer"
+                                title="Editar Cobro"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteCobro(cobro.id)}
+                                className="p-1.5 bg-red-100 text-red-600 hover:bg-red-200 rounded-lg transition-colors inline-flex items-center justify-center cursor-pointer"
+                                title="Eliminar Cobro"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
                     )}
                   </tbody>
                 </table>
@@ -4740,6 +4794,122 @@ export default function AdminInterface({
                 >
                   <Check className="w-4.5 h-4.5 stroke-[2.5]" />
                   <span>{ingresoSubmitting ? "GUARDANDO..." : "GUARDAR CAMBIOS"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Cobro Modal */}
+      {editingCobro && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in text-left">
+          <div className="bg-white rounded-3xl max-w-lg w-full border border-gray-300 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-6 bg-blue-900 text-white flex justify-between items-center">
+              <div className="flex items-center space-x-2.5">
+                <Edit2 className="w-5 h-5 text-blue-300" />
+                <h3 className="font-display font-black text-sm uppercase tracking-wider">
+                  Editar Cobro
+                </h3>
+              </div>
+              <button
+                onClick={() => setEditingCobro(null)}
+                className="w-11 h-11 flex items-center justify-center text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleUpdateCobro} className="p-6 space-y-4 overflow-y-auto flex-1">
+              <div className="p-3 bg-blue-50 border border-blue-200 text-blue-900 text-xs font-mono font-bold rounded-xl">
+                ID del Registro: {editingCobro.id}
+              </div>
+
+              {/* Vendedor selection */}
+              <div>
+                <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Vendedor *</label>
+                <select
+                  required
+                  value={cobroFormVendedor}
+                  onChange={(e) => setCobroFormVendedor(e.target.value)}
+                  className="w-full px-4 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-blue-900 focus:bg-white transition-all"
+                >
+                  <option value="">Seleccione un vendedor</option>
+                  {users.filter(u => u.rol === 'vendedor').map(v => (
+                    <option key={v.id} value={v.id}>{v.nombre} ({v.usuario})</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Fecha del Cobro */}
+              <div>
+                <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Fecha del Cobro</label>
+                <input
+                  type="date"
+                  value={cobroFormFecha}
+                  onChange={(e) => setCobroFormFecha(e.target.value)}
+                  max={getLocalTodayStr()}
+                  className="w-full px-4 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-blue-900 focus:bg-white transition-all"
+                />
+              </div>
+
+              {/* Monto C$ */}
+              <div>
+                <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Monto (C$) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={cobroFormMontoCs}
+                  onChange={(e) => setCobroFormMontoCs(e.target.value)}
+                  className="w-full px-4 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-blue-900 focus:bg-white transition-all font-mono"
+                />
+              </div>
+
+              {/* Monto USD */}
+              <div>
+                <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Monto (USD) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={cobroFormMontoUsd}
+                  onChange={(e) => setCobroFormMontoUsd(e.target.value)}
+                  className="w-full px-4 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-blue-900 focus:bg-white transition-all font-mono"
+                />
+              </div>
+
+              {/* Comentario */}
+              <div>
+                <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Comentario</label>
+                <textarea
+                  placeholder="Detalles adicionales del cobro..."
+                  value={cobroFormComentario}
+                  onChange={(e) => setCobroFormComentario(e.target.value)}
+                  className="w-full px-4 py-2.5 min-h-[80px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-blue-900 focus:bg-white transition-all"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-4 border-t border-gray-100 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingCobro(null)}
+                  className="flex-1 py-3 min-h-[44px] flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 font-display font-bold text-xs uppercase tracking-wider rounded-xl border border-gray-300 cursor-pointer text-center transition-colors font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={cobroSubmitting}
+                  className="flex-1 py-3 min-h-[44px] bg-blue-900 hover:bg-blue-800 text-white font-display font-black text-xs uppercase tracking-wider rounded-xl border-b-2 border-blue-950 cursor-pointer shadow-md flex items-center justify-center space-x-2 transition-all active:translate-y-0.5 font-bold"
+                >
+                  <Check className="w-4.5 h-4.5 stroke-[2.5]" />
+                  <span>{cobroSubmitting ? "GUARDANDO..." : "GUARDAR CAMBIOS"}</span>
                 </button>
               </div>
             </form>

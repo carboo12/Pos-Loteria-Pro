@@ -1550,10 +1550,15 @@ app.get("/api/cobros", (req, res) => {
   res.json(db.configuracion.cobros || []);
 });
 
-app.post("/api/cobros", checkAuth(), (req, res) => {
-  const { id_vendedor, id_supervisor, monto_cs, monto_usd, comentario } = req.body;
+app.post("/api/cobros", checkAuth(), async (req, res) => {
+  const { id_vendedor, id_supervisor, monto_cs, monto_usd, comentario, fecha: fechaOverride } = req.body;
   if (!id_vendedor || !id_supervisor || monto_cs === undefined || monto_usd === undefined) {
     return res.status(400).json({ error: "Vendedor, Supervisor, monto en C$ y monto en USD son obligatorios." });
+  }
+
+  const supervisor = db.usuarios.find((u: any) => u.id === id_supervisor);
+  if (!supervisor || (supervisor.rol !== "supervisor" && supervisor.rol !== "administrador")) {
+    return res.status(403).json({ error: "El usuario que autoriza no es un supervisor o administrador autorizado." });
   }
 
   const user = db.usuarios.find((u: any) => u.id === id_vendedor);
@@ -1562,9 +1567,9 @@ app.post("/api/cobros", checkAuth(), (req, res) => {
     id_vendedor,
     nombre_vendedor: user ? (user.nombre || '').toUpperCase().trim() : "VENDEDOR DESCONOCIDO",
     id_supervisor,
-    monto_cs: Number(monto_cs),
-    monto_usd: Number(monto_usd),
-    fecha: getLocalDateString(),
+    monto_cs: Number(monto_cs) || 0,
+    monto_usd: Number(monto_usd) || 0,
+    fecha: (fechaOverride && /^\d{4}-\d{2}-\d{2}$/.test(fechaOverride)) ? fechaOverride : getLocalDateString(),
     timestamp: getNicaraguaISOString(),
     comentario: comentario || ""
   };
@@ -1572,7 +1577,6 @@ app.post("/api/cobros", checkAuth(), (req, res) => {
   db.configuracion.cobros = db.configuracion.cobros || [];
   db.configuracion.cobros.push(newCobro);
 
-  // We can automatically mark all previous uncollected closures of this seller as collected!
   if (db.cierres_caja) {
     db.cierres_caja.forEach((cc: any) => {
       if (cc.id_vendedor === id_vendedor) {
@@ -1581,8 +1585,100 @@ app.post("/api/cobros", checkAuth(), (req, res) => {
     });
   }
 
-  saveToDB();
+  await saveToDB();
+
+  try {
+    const firestoreDb = getFirestoreInstance();
+    await firestoreDb.collection("logs_auditoria").add({
+      admin_id: (req as any).user.id,
+      accion: "CREATE_COBRO",
+      id_cobro_afectado: newCobro.id,
+      timestamp: getNicaraguaISOString()
+    });
+  } catch (err) {
+    console.error("[Audit Log] Error writing CREATE_COBRO logs_auditoria:", err);
+  }
+
   res.status(201).json(newCobro);
+});
+
+// Update cobro (admin only)
+app.put("/api/cobros/:id", requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { monto_cs, monto_usd, comentario, id_vendedor, fecha: fechaOverride } = req.body;
+
+  db.configuracion.cobros = db.configuracion.cobros || [];
+  const index = db.configuracion.cobros.findIndex((c: any) => c.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "Cobro no encontrado." });
+  }
+
+  const existing = db.configuracion.cobros[index];
+  
+  let nombre_vendedor = existing.nombre_vendedor;
+  if (id_vendedor && id_vendedor !== existing.id_vendedor) {
+    const user = db.usuarios.find((u: any) => u.id === id_vendedor);
+    nombre_vendedor = user ? (user.nombre || '').toUpperCase().trim() : "VENDEDOR DESCONOCIDO";
+  }
+
+  const updatedCobro = {
+    ...existing,
+    id_vendedor: id_vendedor !== undefined ? id_vendedor : existing.id_vendedor,
+    nombre_vendedor,
+    monto_cs: monto_cs !== undefined ? Number(monto_cs) || 0 : existing.monto_cs,
+    monto_usd: monto_usd !== undefined ? Number(monto_usd) || 0 : existing.monto_usd,
+    comentario: comentario !== undefined ? comentario || "" : existing.comentario,
+    fecha: (fechaOverride && /^\d{4}-\d{2}-\d{2}$/.test(fechaOverride)) ? fechaOverride : existing.fecha
+  };
+
+  db.configuracion.cobros[index] = updatedCobro;
+
+  await saveToDB();
+
+  try {
+    const firestoreDb = getFirestoreInstance();
+    await firestoreDb.collection("logs_auditoria").add({
+      admin_id: (req as any).user.id,
+      accion: "EDIT_COBRO",
+      id_cobro_afectado: id,
+      timestamp: getNicaraguaISOString()
+    });
+  } catch (err) {
+    console.error("[Audit Log] Error writing EDIT_COBRO logs_auditoria:", err);
+  }
+
+  res.json({ success: true, cobro: updatedCobro });
+});
+
+// Delete cobro (admin only)
+app.delete("/api/cobros/:id", requireAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  db.configuracion.cobros = db.configuracion.cobros || [];
+  const index = db.configuracion.cobros.findIndex((c: any) => c.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "Cobro no encontrado." });
+  }
+
+  db.configuracion.cobros.splice(index, 1);
+
+  await saveToDB();
+
+  try {
+    const firestoreDb = getFirestoreInstance();
+    await firestoreDb.collection("logs_auditoria").add({
+      admin_id: (req as any).user.id,
+      accion: "DELETE_COBRO",
+      id_cobro_afectado: id,
+      timestamp: getNicaraguaISOString()
+    });
+  } catch (err) {
+    console.error("[Audit Log] Error writing DELETE_COBRO logs_auditoria:", err);
+  }
+
+  res.json({ success: true, message: "Cobro eliminado exitosamente." });
 });
 
 // ─── INGRESOS (Supervisor entrega dinero al vendedor) ──────────────────────

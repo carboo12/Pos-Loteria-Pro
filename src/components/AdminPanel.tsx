@@ -49,8 +49,8 @@ export default function AdminPanel({
     );
   }
 
-  // Section Selector: 'tickets' (Rescate) or 'ingresos' (Gestión de Ingresos)
-  const [activeTab, setActiveTab] = useState<"tickets" | "ingresos">("tickets");
+  // Section Selector: 'tickets' (Rescate), 'ingresos' (Gestión de Ingresos) or 'cobros' (Gestión de Cobros)
+  const [activeTab, setActiveTab] = useState<"tickets" | "ingresos" | "cobros">("tickets");
 
   // ─── RESCATE DE TICKETS STATE ───────────────────────────────────────
   const [rescueSellerId, setRescueSellerId] = useState<string>("TODOS");
@@ -212,18 +212,138 @@ export default function AdminPanel({
     setIngresoFormFecha(getLocalTodayStr());
   };
 
+  // ─── GESTIÓN DE COBROS STATE ───────────────────────────────────────
+  const [editingCobro, setEditingCobro] = useState<any | null>(null);
+  const [cobroSubmitting, setCobroSubmitting] = useState(false);
+  const [showAddCobroModal, setShowAddCobroModal] = useState(false);
+
+  // Form states (Add/Edit Cobro)
+  const [cobroFormVendedor, setCobroFormVendedor] = useState("");
+  const [cobroFormMontoCs, setCobroFormMontoCs] = useState("");
+  const [cobroFormMontoUsd, setCobroFormMontoUsd] = useState("");
+  const [cobroFormComentario, setCobroFormComentario] = useState("");
+  const [cobroFormFecha, setCobroFormFecha] = useState(() => getLocalTodayStr());
+
+  const cobrosList = useMemo(() => {
+    return [...(config.cobros || [])].sort((a, b) => {
+      return new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime();
+    });
+  }, [config.cobros]);
+
+  const resetCobroForm = () => {
+    setCobroFormVendedor("");
+    setCobroFormMontoCs("");
+    setCobroFormMontoUsd("");
+    setCobroFormComentario("");
+    setCobroFormFecha(getLocalTodayStr());
+  };
+
+  // Handle Add new Cobro (acting as Admin)
+  const handleAddCobro = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cobroFormVendedor || (!cobroFormMontoCs && !cobroFormMontoUsd)) {
+      toast.error("Por favor complete el vendedor y al menos un monto.");
+      return;
+    }
+    setCobroSubmitting(true);
+    try {
+      const response = await fetch("/api/cobros", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem("token") || ""}`
+        },
+        body: JSON.stringify({
+          id_vendedor: cobroFormVendedor,
+          id_supervisor: user.id, // Admin acts as supervisor/admin
+          monto_cs: Number(cobroFormMontoCs) || 0,
+          monto_usd: Number(cobroFormMontoUsd) || 0,
+          comentario: cobroFormComentario,
+          fecha: cobroFormFecha
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Error al guardar el cobro");
+      
+      toast.success("Cobro registrado correctamente.");
+      setShowAddCobroModal(false);
+      resetCobroForm();
+      await onRefreshConfig();
+    } catch (err: any) {
+      toast.error(err.message || "Error al crear el cobro");
+    } finally {
+      setCobroSubmitting(false);
+    }
+  };
+
+  // Handle Update Cobro
+  const handleUpdateCobro = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCobro) return;
+    setCobroSubmitting(true);
+    try {
+      const response = await fetch(`/api/cobros/${editingCobro.id}`, {
+        method: "PUT",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem("token") || ""}`
+        },
+        body: JSON.stringify({
+          monto_cs: Number(cobroFormMontoCs) || 0,
+          monto_usd: Number(cobroFormMontoUsd) || 0,
+          comentario: cobroFormComentario,
+          id_vendedor: cobroFormVendedor,
+          fecha: cobroFormFecha
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Error al actualizar");
+      
+      toast.success("Cobro actualizado con éxito.");
+      setEditingCobro(null);
+      resetCobroForm();
+      await onRefreshConfig();
+    } catch (err: any) {
+      toast.error(err.message || "Error al actualizar cobro");
+    } finally {
+      setCobroSubmitting(false);
+    }
+  };
+
+  // Handle Delete Cobro
+  const handleDeleteCobro = async (id: string) => {
+    if (!window.confirm("¿Está seguro de que desea eliminar este cobro de forma permanente? Se registrará en la auditoría.")) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/cobros/${id}`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${localStorage.getItem("token") || ""}`
+        }
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Error al eliminar");
+      
+      toast.success("Cobro eliminado de la base de datos.");
+      await onRefreshConfig();
+    } catch (err: any) {
+      toast.error(err.message || "Error al eliminar cobro");
+    }
+  };
+
   return (
     <div className="w-full flex-1 flex flex-col min-h-0 bg-gray-50 p-4 md:p-6 font-sans">
       {/* Header and navigation tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
         <div>
           <h2 className="text-xl font-display font-black uppercase text-gray-900 tracking-wider">Panel Modular Admin</h2>
-          <p className="text-xs text-gray-500 font-medium">Gestión de Rescate de Boletos y Control Centralizado de Ingresos</p>
+          <p className="text-xs text-gray-500 font-medium">Gestión de Rescate de Boletos, Control de Ingresos y Cobros</p>
         </div>
-        <div className="flex p-1 bg-gray-200/80 backdrop-blur rounded-2xl border border-gray-300 max-w-xs">
+        <div className="flex p-1 bg-gray-200/80 backdrop-blur rounded-2xl border border-gray-300 max-w-md">
           <button
             onClick={() => setActiveTab("tickets")}
-            className={`flex-1 text-center py-2 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+            className={`flex-1 text-center py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === "tickets" ? "bg-white text-blue-900 shadow-md font-extrabold" : "text-gray-600 hover:text-gray-800"
             }`}
           >
@@ -231,11 +351,19 @@ export default function AdminPanel({
           </button>
           <button
             onClick={() => setActiveTab("ingresos")}
-            className={`flex-1 text-center py-2 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+            className={`flex-1 text-center py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === "ingresos" ? "bg-white text-blue-900 shadow-md font-extrabold" : "text-gray-600 hover:text-gray-800"
             }`}
           >
             Gestión Ingresos
+          </button>
+          <button
+            onClick={() => setActiveTab("cobros")}
+            className={`flex-1 text-center py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+              activeTab === "cobros" ? "bg-white text-blue-900 shadow-md font-extrabold" : "text-gray-600 hover:text-gray-800"
+            }`}
+          >
+            Gestión Cobros
           </button>
         </div>
       </div>
@@ -472,6 +600,104 @@ export default function AdminPanel({
         </div>
       )}
 
+      {/* ─── SECTION 3: GESTIÓN DE COBROS ───────────────────────────────── */}
+      {activeTab === "cobros" && (
+        <div className="flex-1 flex flex-col min-h-0 space-y-6">
+          {/* Top Control Bar */}
+          <div className="bg-white rounded-3xl p-5 border border-gray-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <h3 className="font-display font-black text-sm uppercase text-gray-900 tracking-wider">Control de Cobros Administrativos</h3>
+              <p className="text-xs text-gray-500 font-medium">Añada, edite y elimine los cobros de caja recaudados o reportados por supervisores.</p>
+            </div>
+            <div className="flex items-center space-x-3 w-full md:w-auto">
+              <button
+                onClick={() => {
+                  resetCobroForm();
+                  setShowAddCobroModal(true);
+                }}
+                className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 shadow-md hover:shadow-lg transition-all active:translate-y-0.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" />
+                <span>Nuevo Cobro</span>
+              </button>
+              <button
+                onClick={onRefreshConfig}
+                title="Actualizar datos"
+                className="bg-gray-100 hover:bg-gray-200 text-gray-700 p-2.5 rounded-xl border border-gray-200 transition-all cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Cobros Table */}
+          <div className="flex-1 bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h3 className="font-display font-black text-xs uppercase text-gray-700 tracking-wider">Historial de Cobros ({cobrosList.length})</h3>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {cobrosList.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-12 text-center text-gray-400 font-medium">
+                  <FileText className="w-12 h-12 text-gray-300 mb-3" />
+                  <p className="text-sm">No hay cobros registrados en la configuración.</p>
+                  <p className="text-[10px] text-gray-400 mt-1">Haga clic en 'Nuevo Cobro' para añadir el primero.</p>
+                </div>
+              ) : (
+                <table className="w-full text-left border-collapse">
+                  <thead className="sticky top-0 bg-gray-50 z-10">
+                    <tr className="text-[9px] uppercase font-black text-gray-500 tracking-wider border-b border-gray-200">
+                      <th className="p-3">Fecha</th>
+                      <th className="p-3">Vendedor</th>
+                      <th className="p-3 text-right">Monto C$</th>
+                      <th className="p-3 text-right">Monto USD</th>
+                      <th className="p-3">Comentario</th>
+                      <th className="p-3 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-xs font-sans">
+                    {cobrosList.map(cob => (
+                      <tr key={cob.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                        <td className="p-3 text-gray-800 font-semibold">
+                          {cob.timestamp ? new Date(cob.timestamp).toLocaleString("es-NI") : cob.fecha}
+                        </td>
+                        <td className="p-3 font-bold text-blue-900 uppercase">{cob.nombre_vendedor}</td>
+                        <td className="p-3 text-right font-black text-emerald-700">C$ {Number(cob.monto_cs).toFixed(2)}</td>
+                        <td className="p-3 text-right font-black text-emerald-950">$ {Number(cob.monto_usd).toFixed(2)}</td>
+                        <td className="p-3 text-gray-600 truncate max-w-[200px]" title={cob.comentario}>{cob.comentario || "-"}</td>
+                        <td className="p-3 text-center space-x-2 w-28">
+                          <button
+                            onClick={() => {
+                              setEditingCobro(cob);
+                              setCobroFormVendedor(cob.id_vendedor || "");
+                              setCobroFormMontoCs(String(cob.monto_cs));
+                              setCobroFormMontoUsd(String(cob.monto_usd));
+                              setCobroFormComentario(cob.comentario || "");
+                              setCobroFormFecha(cob.fecha || getLocalTodayStr());
+                            }}
+                            className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition-all inline-flex items-center justify-center cursor-pointer"
+                            title="Editar"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCobro(cob.id)}
+                            className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-all inline-flex items-center justify-center cursor-pointer"
+                            title="Eliminar"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── MODAL: NUEVO INGRESO ───────────────────────────────────────── */}
       {showAddIngresoModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -657,6 +883,197 @@ export default function AdminPanel({
                 className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all disabled:opacity-50 cursor-pointer"
               >
                 {ingresoSubmitting ? "Guardando..." : "Guardar Cambios"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ─── MODAL: NUEVO COBRO ─────────────────────────────────────────── */}
+      {showAddCobroModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <form onSubmit={handleAddCobro} className="bg-white rounded-3xl shadow-2xl max-w-md w-full border border-gray-200 overflow-hidden">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h3 className="font-display font-black text-sm uppercase text-gray-800">Registrar Nuevo Cobro</h3>
+              <button 
+                type="button" 
+                onClick={() => setShowAddCobroModal(false)}
+                className="p-1.5 hover:bg-gray-200 rounded-lg transition-all text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Vendedor</label>
+                <select
+                  value={cobroFormVendedor}
+                  onChange={(e) => setCobroFormVendedor(e.target.value)}
+                  className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold text-gray-800 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                  required
+                >
+                  <option value="">Seleccione Vendedor</option>
+                  {sellersList.map(s => (
+                    <option key={s.id} value={s.id}>{s.nombre.toUpperCase()}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Fecha del Cobro</label>
+                <input
+                  type="date"
+                  value={cobroFormFecha}
+                  onChange={(e) => setCobroFormFecha(e.target.value)}
+                  max={getLocalTodayStr()}
+                  className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold border border-gray-200 focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Monto C$ (Córdobas)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={cobroFormMontoCs}
+                    onChange={(e) => setCobroFormMontoCs(e.target.value)}
+                    className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold border border-gray-200 focus:ring-2 focus:ring-emerald-500"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Monto USD (Dólares)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={cobroFormMontoUsd}
+                    onChange={(e) => setCobroFormMontoUsd(e.target.value)}
+                    className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold border border-gray-200 focus:ring-2 focus:ring-emerald-500"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Comentario / Concepto</label>
+                <textarea
+                  value={cobroFormComentario}
+                  onChange={(e) => setCobroFormComentario(e.target.value)}
+                  className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold border border-gray-200 focus:ring-2 focus:ring-emerald-500 h-20 resize-none"
+                  placeholder="Ej: Cobro de caja de ruta..."
+                />
+              </div>
+            </div>
+            <div className="p-4 border-t border-gray-100 flex justify-end space-x-2 bg-gray-50/50">
+              <button 
+                type="button" 
+                onClick={() => setShowAddCobroModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-100 transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button 
+                type="submit" 
+                disabled={cobroSubmitting}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {cobroSubmitting ? "Guardando..." : "Registrar"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ─── MODAL: EDITAR COBRO ─────────────────────────────────────────── */}
+      {editingCobro && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <form onSubmit={handleUpdateCobro} className="bg-white rounded-3xl shadow-2xl max-w-md w-full border border-gray-200 overflow-hidden">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h3 className="font-display font-black text-sm uppercase text-gray-800">Modificar Cobro</h3>
+              <button 
+                type="button" 
+                onClick={() => setEditingCobro(null)}
+                className="p-1.5 hover:bg-gray-200 rounded-lg transition-all text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Vendedor</label>
+                <select
+                  value={cobroFormVendedor}
+                  onChange={(e) => setCobroFormVendedor(e.target.value)}
+                  className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold text-gray-800 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  required
+                >
+                  <option value="">Seleccione Vendedor</option>
+                  {sellersList.map(s => (
+                    <option key={s.id} value={s.id}>{s.nombre.toUpperCase()}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Fecha del Cobro</label>
+                <input
+                  type="date"
+                  value={cobroFormFecha}
+                  onChange={(e) => setCobroFormFecha(e.target.value)}
+                  max={getLocalTodayStr()}
+                  className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold border border-gray-200 focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Monto C$</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={cobroFormMontoCs}
+                    onChange={(e) => setCobroFormMontoCs(e.target.value)}
+                    className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold border border-gray-200 focus:ring-2 focus:ring-blue-500"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Monto USD</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={cobroFormMontoUsd}
+                    onChange={(e) => setCobroFormMontoUsd(e.target.value)}
+                    className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold border border-gray-200 focus:ring-2 focus:ring-blue-500"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1 tracking-wider">Comentario / Concepto</label>
+                <textarea
+                  value={cobroFormComentario}
+                  onChange={(e) => setCobroFormComentario(e.target.value)}
+                  className="w-full bg-gray-50 p-2.5 rounded-xl text-xs font-semibold border border-gray-200 focus:ring-2 focus:ring-blue-500 h-20 resize-none"
+                />
+              </div>
+            </div>
+            <div className="p-4 border-t border-gray-100 flex justify-end space-x-2 bg-gray-50/50">
+              <button 
+                type="button" 
+                onClick={() => setEditingCobro(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-100 transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button 
+                type="submit" 
+                disabled={cobroSubmitting}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {cobroSubmitting ? "Guardando..." : "Guardar Cambios"}
               </button>
             </div>
           </form>
