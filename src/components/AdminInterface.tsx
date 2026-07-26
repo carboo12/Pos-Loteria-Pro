@@ -146,6 +146,7 @@ interface AdminInterfaceProps {
   onRefreshConfig: () => Promise<void>;
   onRefreshSales: () => Promise<void>;
   onRefreshUsers: () => Promise<void>;
+  onRefreshClosures?: () => Promise<void>;
   users: Usuario[];
   sales: Venta[];
   closures: CierreCaja[];
@@ -162,6 +163,7 @@ export default function AdminInterface({
   onRefreshConfig,
   onRefreshSales,
   onRefreshUsers,
+  onRefreshClosures,
   users,
   sales,
   closures,
@@ -2057,13 +2059,25 @@ export default function AdminInterface({
               id="refresh-all-btn"
               onClick={async () => {
                 setSubmitting(true);
-                await Promise.all([onRefreshConfig(), onRefreshSales(), onRefreshUsers()]);
-                setSubmitting(false);
+                try {
+                  await Promise.all([
+                    onRefreshConfig(),
+                    onRefreshSales(),
+                    onRefreshUsers(),
+                    onRefreshClosures ? onRefreshClosures() : Promise.resolve(),
+                    fetchHistorialCobros()
+                  ]);
+                  toast.success("Sincronización completa: Ventas, Usuarios, Configuración, Ingresos, Cobros y Cierres actualizados.");
+                } catch (e: any) {
+                  toast.error("Error al sincronizar datos: " + (e.message || e));
+                } finally {
+                  setSubmitting(false);
+                }
               }}
               className="flex items-center space-x-2 py-2 px-4 min-h-[44px] bg-white hover:bg-gray-100 text-gray-700 rounded-xl border border-gray-300 shadow-xs font-sans font-bold text-xs uppercase tracking-wider cursor-pointer transition-colors"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${submitting ? "animate-spin" : ""}`} />
-              <span>Sincronizar</span>
+              <span>{submitting ? "Sincronizando..." : "Sincronizar"}</span>
             </button>
           </div>
         </div>

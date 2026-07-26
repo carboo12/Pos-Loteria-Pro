@@ -405,6 +405,7 @@ export default function App() {
                 onRefreshConfig={fetchConfig}
                 onRefreshSales={fetchSales}
                 onRefreshUsers={fetchUsers}
+                onRefreshClosures={fetchClosures}
                 users={users}
                 sales={sales}
                 closures={closures}
