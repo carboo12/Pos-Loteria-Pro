@@ -2397,10 +2397,17 @@ app.post("/api/ventas/:id/pagar", requireAdmin, async (req, res) => {
       const montoInCs = sale.moneda === "USD" ? sale.monto_pago * (db.configuracion.tasa_cambio || 36.5) : sale.monto_pago;
       const premioReal = montoInCs * multiplicador;
 
+      // fecha_pago: día real del desembolso (no la fecha del ticket)
+      // Garantiza que el motor financiero descuente en el corte del día correcto.
+      const fechaPago = getLocalDateString();
+      const timestampPago = getNicaraguaISOString(); // Sello de auditoría
+
       sale.estado = "pagado";
       sale.premio_posible_cs = premioReal; // Sobrescribir con el calculado por el servidor
       sale.monto_premio = premioReal;
       sale.es_premiado = true;
+      sale.fecha_pago = fechaPago;
+      sale.timestamp_pago = timestampPago;
 
       // Direct Firestore write to tickets collection for real-time vendor notification
       if (initFirebaseAdmin()) {
@@ -2409,9 +2416,11 @@ app.post("/api/ventas/:id/pagar", requireAdmin, async (req, res) => {
           await firestoreDb.collection("tickets").doc(id).update({
             estado: "pagado",
             monto_premio: premioReal,
-            es_premiado: true
+            es_premiado: true,
+            fecha_pago: fechaPago,
+            timestamp_pago: timestampPago
           });
-          console.log(`[Pago] Ticket ${id} actualizado en Firestore (pagado)`);
+          console.log(`[Pago] Ticket ${id} actualizado en Firestore (pagado) | fecha_pago=${fechaPago}`);
         } catch (fireErr: any) {
           console.error("[Pago] Firestore direct write failed (fallback to saveToDB):", fireErr.message);
         }

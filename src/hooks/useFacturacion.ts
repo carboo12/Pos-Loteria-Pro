@@ -39,37 +39,66 @@ export function useFacturacion(
         const ticketsRef = collection(firestore, "tickets");
         const sellerIds = vendedores.map((v) => v.id).filter(Boolean);
 
-        let q;
+        // ── Query 1: Tickets EMITIDOS en el rango (fecha_venta) ──────────────
+        // Necesarios para calcular: vendido, premios (A Pagar)
+        let qEmitidos;
         if (sellerIds.length === 1) {
-          // Single seller (Vendedor interface or Admin filtered by 1 seller):
-          // Scope query directly to this seller ID and date range for 100% accuracy & performance
-          q = query(
+          qEmitidos = query(
             ticketsRef,
             where("id_vendedor", "==", sellerIds[0]),
             where("fecha_venta", ">=", fechaInicio),
             where("fecha_venta", "<=", fechaFin)
           );
         } else {
-          // Multi-seller or All sellers:
-          // Query by date range for complete coverage
-          q = query(
+          qEmitidos = query(
             ticketsRef,
             where("fecha_venta", ">=", fechaInicio),
             where("fecha_venta", "<=", fechaFin)
           );
         }
 
-        const snapshot = await getDocs(q);
+        // ── Query 2: Tickets PAGADOS en el rango (fecha_pago) ─────────────────
+        // Necesarios para calcular: pagado (el día real del desembolso del premio)
+        // Esto captura tickets emitidos en otros días pero pagados dentro del rango.
+        let qPagados;
+        if (sellerIds.length === 1) {
+          qPagados = query(
+            ticketsRef,
+            where("id_vendedor", "==", sellerIds[0]),
+            where("fecha_pago", ">=", fechaInicio),
+            where("fecha_pago", "<=", fechaFin)
+          );
+        } else {
+          qPagados = query(
+            ticketsRef,
+            where("fecha_pago", ">=", fechaInicio),
+            where("fecha_pago", "<=", fechaFin)
+          );
+        }
+
+        const [snapEmitidos, snapPagados] = await Promise.all([
+          getDocs(qEmitidos),
+          getDocs(qPagados),
+        ]);
+
         if (!isMounted) return;
 
-        let docs: Venta[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data() as Record<string, any>;
-          return {
-            id: docSnap.id,
-            ...data,
-          } as Venta;
+        // Merge y deduplicar por ID (los tickets live de props tienen prioridad)
+        const map = new Map<string, Venta>();
+
+        const toVenta = (docSnap: any): Venta => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        } as Venta);
+
+        snapEmitidos.docs.forEach((d) => map.set(d.id, toVenta(d)));
+        snapPagados.docs.forEach((d) => {
+          if (!map.has(d.id)) map.set(d.id, toVenta(d));
         });
 
+        let docs = Array.from(map.values());
+
+        // Filtrar por vendedores en modo multi-seller
         if (sellerIds.length > 1) {
           const sellerSet = new Set(sellerIds);
           docs = docs.filter((d) => d.id_vendedor && sellerSet.has(d.id_vendedor));

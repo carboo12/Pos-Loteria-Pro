@@ -1,0 +1,21 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "tickets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "id_vendedor", "order": "ASCENDING" },
+        { "fieldPath": "fecha_pago",  "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tickets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "id_vendedor", "order": "ASCENDING" },
+        { "fieldPath": "fecha_venta", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

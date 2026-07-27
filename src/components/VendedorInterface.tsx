@@ -652,8 +652,16 @@ export default function VendedorInterface({
     setLoading(true);
     try {
       const docRef = doc(firestore, "tickets", tId);
+      // Inyección automática de fecha_pago: el egreso siempre se registra
+      // en el día en que el vendedor/admin ejecuta el pago, no en la fecha
+      // de emisión del ticket. Esto garantiza que el motor financiero descuente
+      // el premio del corte de caja del día real del desembolso.
+      const fechaPago = getLocalTodayStr();
+      const timestampPago = getNicaraguaISOString(); // Para auditoría
       await updateDoc(docRef, {
         estado: "pagado",
+        fecha_pago: fechaPago,
+        timestamp_pago: timestampPago,
         ...(montoPremio != null && montoPremio > 0 ? { monto_premio: montoPremio } : {})
       });
 

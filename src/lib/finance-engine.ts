@@ -73,8 +73,21 @@ export function calculateSellerSummary(
     }
   });
 
-  const pagado = sellerTickets
-    .filter((s) => s.estado === "pagado" || s.estado === "cobrado")
+  // pagado: se filtra del universo TOTAL de tickets del vendedor (no sólo
+  // los emitidos en el rango), usando fecha_pago para determinar en qué
+  // día real salió el dinero de caja. Si el ticket no tiene fecha_pago aún
+  // (tickets legacy), se usa getTicketDate() como fallback.
+  const pagado = tickets
+    .filter((s) => {
+      if (s.anulado) return false;
+      if (s.estado !== "pagado" && s.estado !== "cobrado") return false;
+      const idMatch = s.id_vendedor && s.id_vendedor.toLowerCase() === (seller.id || "").toLowerCase();
+      const nameMatch = s.nombre_vendedor && s.nombre_vendedor.toUpperCase().trim() === vNameNorm;
+      if (!idMatch && !nameMatch) return false;
+      // Usar fecha_pago si existe; si no, caer en fecha de emisión (legado)
+      const egresoDate: string = (s as any).fecha_pago || getTicketDate(s);
+      return egresoDate >= fechaInicio && egresoDate <= fechaFin;
+    })
     .reduce(
       (sum, s) =>
         sum +
