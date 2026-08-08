@@ -8,12 +8,15 @@
 
 ## Comandos
 ```bash
-npm run dev          # tsx watch server.ts (Vite HMR on 5173, Express on 3000)
+npm run dev          # concurrently: Express API en :8080 + Vite (HMR) en :5173
+npm run dev:api      # solo Express (tsx watch server.ts, puerto 8080)
+npm run dev:web      # solo Vite (puerto 5173, proxy /api → localhost:8080)
 npm run build        # vite build + esbuild server.ts → dist/
 npm run start        # node dist/server.cjs
 npx tsc server.ts --noEmit --esModuleInterop --resolveJsonModule --moduleResolution node --target ES2022 --module ESNext --skipLibCheck
 npx vite build       # Build solo frontend
 ```
+- Frontend local: abrir `http://localhost:5173` (NUNCA 8080/5173 para API; `/api/*` va por proxy de Vite al backend).
 
 ## Arquitectura de Datos
 - **Firestore 100%**, sin fallback a archivos locales. `data-store.json` eliminado.

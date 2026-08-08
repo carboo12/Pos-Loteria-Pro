@@ -35,10 +35,11 @@ export default defineConfig(() => {
       },
     },
     server: {
-      // Proxy all /api/ requests to the Express backend on port 3000
+      // Proxy /api/* al backend Express. El puerto debe coincidir con el
+      // del servidor (server.ts usa PORT || 8080). Configurable con $env:PORT.
       proxy: {
         '/api': {
-          target: 'http://localhost:3000',
+          target: `http://localhost:${process.env.PORT || '8080'}`,
           changeOrigin: true,
         },
       },

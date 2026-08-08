@@ -2811,19 +2811,12 @@ app.post("/api/pagos/registrar", requireAdmin, (req, res) => {
 });
 
 // ─── STARTUP: listen FIRST, sync Firestore in background ───────────
+// Dev: Express expone SOLO la API (puerto 8080). El frontend corre en
+// Vite (5173) con proxy /api → localhost:8080 (ver vite.config.ts).
+// Prod: Express sirve el build de dist/.
 function startServer() {
   if (process.env.NODE_ENV !== "production") {
-    // Dynamic import so Vite is NOT bundled into the production build
-    import("vite").then(({ createServer: createViteServer }) => {
-      createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa",
-      }).then((vite) => {
-        app.use(vite.middlewares);
-        registerCatchAllRoutes();
-        listen();
-      });
-    });
+    listen();
   } else {
     registerCatchAllRoutes();
     listen();

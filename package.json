@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch server.ts",
+    "dev": "concurrently -k -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "tsx watch server.ts",
+    "dev:web": "vite",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
@@ -47,6 +49,7 @@
     "@types/node": "^22.14.0",
     "@types/web-bluetooth": "^0.0.21",
     "autoprefixer": "^10.4.21",
+    "concurrently": "^10.0.4",
     "picomatch": "^4.0.5",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
