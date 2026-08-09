@@ -25,7 +25,8 @@ import {
   Plus,
   Printer,
   Loader2,
-  Unlink
+  Unlink,
+  Menu
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Html5QrcodeScanner } from "html5-qrcode";
@@ -128,8 +129,9 @@ export default function VendedorInterface({
   onNewSaleCreated,
   serverTime
 }: VendedorInterfaceProps) {
-  // Navigation tabs
+  // Navigation tabs & Sidebar Drawer state
   const [activeTab, setActiveTab] = useState<"venta" | "reportes" | "pagos">("venta");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   // Filtros y estados de Firestore para Reportes
   const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => getLocalTodayStr());
@@ -160,8 +162,11 @@ export default function VendedorInterface({
   // País state
   const [selectedPais, setSelectedPais] = useState<"Nicaragua" | "Honduras" | "El Salvador" | "La Primera" | "Costa Rica">("Nicaragua");
   
+  // Venta Navigation Level State (1: Juegos Grid, 2: Sorteos Grid, 3: Facturación Form)
+  const [ventaStep, setVentaStep] = useState<1 | 2 | 3>(1);
+  
   // Venta Form State
-  const [selectedJuego, setSelectedJuego] = useState("Diaria");
+  const [selectedJuego, setSelectedJuego] = useState("");
   const [selectedSorteo, setSelectedSorteo] = useState("");
   const [numeroJugado, setNumeroJugado] = useState("");
   const [montoPago, setMontoPago] = useState("");
@@ -933,7 +938,7 @@ export default function VendedorInterface({
   const PAISES_GAMES = {
     Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"],
     Honduras: ["La Diaria", "Premia2", "Pega 3"],
-    "El Salvador": ["Diaria"],
+    "El Salvador": ["SALVADOR"],
     "La Primera": ["La Primera"],
     "Costa Rica": ["3 Monazos", "Tica"]
   };
@@ -996,27 +1001,28 @@ export default function VendedorInterface({
   // Time remaining tracker (just to show active feedback)
   const [timeText, setTimeText] = useState("");
 
+  const isSorteoSV = (s: any) =>
+    String(s.nombre || "").includes("(SV)") ||
+    String(s.id || "").startsWith("sv_") ||
+    String(s.id || "").startsWith("sv-");
+
   const getSorteosByGame = (game: string) => {
-    let suffix = "(NI)";
-    if (selectedPais === "Honduras") suffix = "(HN)";
-    else if (selectedPais === "El Salvador") suffix = "(SV)";
-    else if (selectedPais === "La Primera") suffix = "(LP)";
-    else if (selectedPais === "Costa Rica") suffix = "(CR)";
     const now = getNicaraguaNow();
     return config?.sorteos?.filter(s =>
-      s.juego === game && s.nombre.includes(suffix) && isSorteoHabilitado(s, now)
-    );
+      (isSorteoSV(s) ? "SALVADOR" : s.juego) === game && isSorteoHabilitado(s, now)
+    ) || [];
   };
 
   // Synchronize game selection when country changes
   useEffect(() => {
-    const games = PAISES_GAMES[selectedPais as keyof typeof PAISES_GAMES] || [];
-    if (games.length > 0 && !games.includes(selectedJuego)) {
-      setSelectedJuego(games[0]);
-    }
+    setVentaStep(1);
+    setSelectedJuego("");
+    setSelectedSorteo("");
   }, [selectedPais]);
 
   useEffect(() => {
+    if (!selectedJuego) return;
+    
     // Select default draw when game or drawings change
     const filteredSorteos = getSorteosByGame(selectedJuego);
     const activeDraw = filteredSorteos.find(s => !isSorteoCerrado(s));
@@ -1041,19 +1047,22 @@ export default function VendedorInterface({
     if (selectedJuego === "Fechas") {
       setFechaVenta(prev => ({ ...prev, dia: "", mes: "" }));
       setNumeroJugado("");
-      // Auto-focus the Día input when switching to Fechas game
-      setTimeout(() => {
-        const diaInput = document.getElementById("fecha-dia-input") as HTMLInputElement;
-        if (diaInput) {
-          diaInput.focus();
-          diaInput.select();
-        }
-      }, 80);
+      if (ventaStep === 3) {
+        setTimeout(() => {
+          const diaInput = document.getElementById("fecha-dia-input") as HTMLInputElement;
+          if (diaInput) {
+            diaInput.focus();
+            diaInput.select();
+          }
+        }, 80);
+      }
     } else {
       setNumeroJugado("");
-      setTimeout(() => numeroInputRef.current?.focus(), 80);
+      if (ventaStep === 3) {
+        setTimeout(() => numeroInputRef.current?.focus(), 80);
+      }
     }
-  }, [selectedJuego, selectedPais, config.sorteos]);
+  }, [selectedJuego, selectedPais, config.sorteos, ventaStep]);
 
   // Filter vendor sales: primary by id_vendedor, fallback by normalized name for legacy tickets (Memoized for mobile performance)
   const allMySales = useMemo(() => {
@@ -1566,7 +1575,16 @@ export default function VendedorInterface({
       {/* Vendedor Bar — fixed, never shrinks */}
       <div className="bg-[#1E3A8A] text-white px-4 py-3 flex flex-col justify-between border-b border-blue-950 shrink-0">
         <div className="flex justify-between items-center">
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-3">
+            {/* Botón Hamburguesa */}
+            <button
+              id="sidebar-toggle-btn"
+              onClick={() => setIsSidebarOpen(true)}
+              className="p-1.5 rounded-lg bg-blue-900/80 hover:bg-blue-800 text-white transition-colors cursor-pointer border border-blue-700/60"
+              title="Abrir menú"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
             <div className="relative">
               <span className="text-sm font-display font-black tracking-wide uppercase">{user.nombre}</span>
               <span className="block text-[10px] text-blue-200 uppercase font-mono tracking-wider font-bold">Vendedor POS</span>
@@ -1656,540 +1674,515 @@ export default function VendedorInterface({
           </div>
         )}
 
-        {/* TAB 1: PANTALLA DE VENTA */}
+        {/* TAB 1: PANTALLA DE VENTA CON FLUJO DE 3 NIVELES EN CASCADA */}
         {activeTab === "venta" && (
           <div className="space-y-4 animate-fade-in pb-6">
             
-            {/* 0. Country Selector */}
-            <div>
-              <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1.5">0. Seleccione País</label>
-              <div className="grid grid-cols-5 gap-1">
-                <button
-                  id="pais-select-ni"
-                  onClick={() => {
-                    setSelectedPais("Nicaragua");
-                    setErrorMessage(null);
-                    setSuccessMessage(null);
-                  }}
-                  className={`py-2 px-1 rounded-xl text-[9px] font-display font-black transition-all border flex flex-col items-center justify-center space-y-1 cursor-pointer shadow-xs ${
-                    selectedPais === "Nicaragua"
-                      ? "bg-blue-900 text-white border-blue-950 font-bold"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
-                  }`}
-                >
-                  <span className="text-sm">🇳🇮</span>
-                  <span>NICARAGUA</span>
-                </button>
-                <button
-                  id="pais-select-hn"
-                  onClick={() => {
-                    setSelectedPais("Honduras");
-                    setErrorMessage(null);
-                    setSuccessMessage(null);
-                  }}
-                  className={`py-2 px-1 rounded-xl text-[9px] font-display font-black transition-all border flex flex-col items-center justify-center space-y-1 cursor-pointer shadow-xs ${
-                    selectedPais === "Honduras"
-                      ? "bg-blue-900 text-white border-blue-950 font-bold"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
-                  }`}
-                >
-                  <span className="text-sm">🇭🇳</span>
-                  <span>HONDURAS</span>
-                </button>
-                <button
-                  id="pais-select-sv"
-                  onClick={() => {
-                    setSelectedPais("El Salvador");
-                    setErrorMessage(null);
-                    setSuccessMessage(null);
-                  }}
-                  className={`py-2 px-1 rounded-xl text-[9px] font-display font-black transition-all border flex flex-col items-center justify-center space-y-1 cursor-pointer shadow-xs ${
-                    selectedPais === "El Salvador"
-                      ? "bg-blue-900 text-white border-blue-950 font-bold"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
-                  }`}
-                >
-                  <span className="text-sm">🇸🇻</span>
-                  <span>LOTO SV</span>
-                </button>
-                <button
-                  id="pais-select-lp"
-                  onClick={() => {
-                    setSelectedPais("La Primera");
-                    setErrorMessage(null);
-                    setSuccessMessage(null);
-                  }}
-                  className={`py-2 px-1 rounded-xl text-[9px] font-display font-black transition-all border flex flex-col items-center justify-center space-y-1 cursor-pointer shadow-xs ${
-                    selectedPais === "La Primera"
-                      ? "bg-blue-900 text-white border-blue-950 font-bold"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
-                  }`}
-                >
-                  <span className="text-sm">🎰</span>
-                  <span>PRIMERA</span>
-                </button>
-                <button
-                  id="pais-select-cr"
-                  onClick={() => {
-                    setSelectedPais("Costa Rica");
-                    setErrorMessage(null);
-                    setSuccessMessage(null);
-                  }}
-                  className={`py-2 px-1 rounded-xl text-[9px] font-display font-black transition-all border flex flex-col items-center justify-center space-y-1 cursor-pointer shadow-xs ${
-                    selectedPais === "Costa Rica"
-                      ? "bg-blue-900 text-white border-blue-950 font-bold"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
-                  }`}
-                >
-                  <span className="text-sm">🇨🇷</span>
-                  <span>LA TICA</span>
-                </button>
+            {/* Top Navigation Bar / Breadcrumb for Cascading Levels */}
+            <div className="bg-white rounded-2xl p-3 shadow-sm border border-gray-200 flex justify-between items-center">
+              <div className="flex items-center space-x-2">
+                {ventaStep > 1 && (
+                  <button
+                    onClick={() => {
+                      setErrorMessage(null);
+                      setSuccessMessage(null);
+                      if (ventaStep === 3) setVentaStep(2);
+                      else if (ventaStep === 2) {
+                        setSelectedJuego("");
+                        setVentaStep(1);
+                      }
+                    }}
+                    className="p-1.5 rounded-xl bg-blue-50 text-[#1E3A8A] hover:bg-blue-100 transition-colors cursor-pointer flex items-center justify-center"
+                    title="Regresar"
+                  >
+                    <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
+                  </button>
+                )}
+                <div>
+                  <span className="text-[10px] font-black uppercase text-gray-400 block tracking-wider">
+                    {ventaStep === 1 ? "Nivel 1 de 3" : ventaStep === 2 ? "Nivel 2 de 3" : "Nivel 3 de 3"}
+                  </span>
+                  <div className="flex items-center space-x-1 text-xs font-display font-black text-gray-800">
+                    <span className={ventaStep === 1 ? "text-[#1E3A8A] font-extrabold" : "text-gray-600"}>
+                      {selectedJuego || "Juegos"}
+                    </span>
+                    {ventaStep >= 2 && (
+                      <>
+                        <span className="text-gray-400">&gt;</span>
+                        <span className={ventaStep === 2 ? "text-[#1E3A8A] font-extrabold text-ellipsis overflow-hidden max-w-[130px] whitespace-nowrap" : "text-gray-600"}>
+                          {selectedSorteo ? selectedSorteo.replace(/\s*\(NI\)|\s*\(HN\)|\s*\(SV\)|\s*\(LP\)|\s*\(CR\)/g, "") : "Sorteo"}
+                        </span>
+                      </>
+                    )}
+                    {ventaStep === 3 && (
+                      <>
+                        <span className="text-gray-400">&gt;</span>
+                        <span className="text-[#1E3A8A] font-extrabold">Facturación</span>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* 1. Dynamic Game Selector */}
-            <div>
-              <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1.5">1. Seleccione Juego ({selectedPais})</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {PAISES_GAMES[selectedPais as keyof typeof PAISES_GAMES]?.map((juego) => {
-                  const isSabadito = juego === "Sabadito";
-                  const isWeekend = [0, 6].includes(getNicaraguaNow().getDay());
-                  const disabled = isSabadito && !isWeekend;
+            {/* NIVEL 1: SELECCIÓN DE JUEGO (DASHBOARD PRINCIPAL DE TARJETAS AZULES - TODOS LOS JUEGOS) */}
+            {ventaStep === 1 && (() => {
+              // Obtener la lista completa de todos los juegos configurados en Firestore en tiempo real
+              const allGamesFromConfig = Array.from(new Set(config?.sorteos?.map(s => s.juego).filter(Boolean) || []));
+              
+              // Fallback por si la configuración todavía no ha cargado los sorteos desde Firestore
+              const defaultFallbackGames = ["Diaria", "SALVADOR", "HONDURAS", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito", "Pega 3", "3 Monazos", "Tica", "La Primera"];
+              const gamesToDisplay = allGamesFromConfig.length > 0 ? allGamesFromConfig : defaultFallbackGames;
 
-                  return (
-                    <button
-                      key={juego}
-                      id={`game-select-${juego.replace(/\s+/g, "-")}`}
-                      onClick={() => {
-                        if (disabled) {
-                          setErrorMessage("Sabadito solo está disponible Sábados y Domingos.");
-                          return;
-                        }
-                        setSelectedJuego(juego);
-                        setErrorMessage(null);
-                        setSuccessMessage(null);
-                      }}
-                      disabled={disabled}
-                      className={`py-2.5 px-1 rounded-xl text-[10px] font-display font-black transition-all border text-center truncate shadow-xs ${
-                        disabled ? "opacity-50 cursor-not-allowed bg-gray-200 text-gray-500 border-gray-300" : "cursor-pointer"
-                      } ${
-                        !disabled && selectedJuego === juego
-                          ? "bg-[#1E3A8A] text-white border-blue-900 font-bold"
-                          : !disabled ? "bg-white text-gray-800 border-gray-300 hover:bg-gray-100" : ""
-                      }`}
-                    >
-                      {juego.toUpperCase()}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+              return (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h2 className="text-xs font-display font-black text-gray-700 uppercase tracking-wider">
+                      Seleccione un Juego ({gamesToDisplay.length} Juegos Disponibles)
+                    </h2>
+                  </div>
+                  <div className="grid grid-cols-2 gap-5 sm:gap-6 p-1">
+                    {gamesToDisplay.map((juego) => {
+                      const isSabadito = juego === "Sabadito";
+                      const isWeekend = [0, 6].includes(getNicaraguaNow().getDay());
+                      const disabled = isSabadito && !isWeekend;
 
-            {/* 2. Sorteo Selector with automatic locking */}
-            <div>
-              <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1.5">2. Horario del Sorteo</label>
-              <div className="flex flex-col space-y-1.5">
+                      return (
+                        <button
+                          key={juego}
+                          id={`game-card-${juego.replace(/\s+/g, "-")}`}
+                          disabled={disabled}
+                          onClick={() => {
+                            if (disabled) {
+                              setErrorMessage("Sabadito solo está disponible Sábados y Domingos.");
+                              return;
+                            }
+                            setSelectedJuego(juego);
+                            setVentaStep(2);
+                            setErrorMessage(null);
+                            setSuccessMessage(null);
+                          }}
+                          className={`min-h-[150px] sm:min-h-[170px] rounded-3xl shadow-xl border-2 font-display font-black text-lg sm:text-2xl tracking-wider flex flex-col items-center justify-center text-center p-4 sm:p-6 transition-all duration-200 active:scale-95 cursor-pointer my-1 ${
+                            disabled
+                              ? "bg-gray-200 text-gray-400 border-gray-300 opacity-60 cursor-not-allowed shadow-none"
+                              : "bg-[#1E3A8A] hover:bg-blue-800 active:bg-blue-950 text-white border-blue-900 shadow-blue-950/30 hover:shadow-2xl"
+                          }`}
+                        >
+                          <span className="uppercase font-extrabold leading-tight drop-shadow-sm">{juego}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* NIVEL 2: SELECCIÓN DE SORTEO */}
+            {ventaStep === 2 && (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <h2 className="text-xs font-display font-black text-gray-700 uppercase tracking-wider">
+                    Sorteos Disponibles para {selectedJuego}
+                  </h2>
+                </div>
+
                 {getSorteosByGame(selectedJuego).length === 0 ? (
-                  <div className="text-xs text-red-500 bg-red-50 p-2 rounded border border-red-200">No hay sorteos programados para este juego hoy.</div>
+                  <div className="bg-white rounded-2xl p-6 text-center border border-gray-200 shadow-sm">
+                    <AlertCircle className="w-10 h-10 text-amber-500 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-gray-800 uppercase">No hay sorteos disponibles</p>
+                    <p className="text-xs text-gray-500 mt-1">No existen sorteos programados o habilitados para este juego hoy.</p>
+                    <button
+                      onClick={() => setVentaStep(1)}
+                      className="mt-4 px-4 py-2 bg-[#1E3A8A] text-white rounded-xl text-xs font-bold uppercase cursor-pointer"
+                    >
+                      Volver a Juegos
+                    </button>
+                  </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {getSorteosByGame(selectedJuego).map((s) => {
                       const cerrado = isSorteoCerrado(s);
-                      const isSelected = selectedSorteo === s.nombre;
+                      // Extraer o formatear un título limpio de hora (ej: "11:00 AM", "3:00 PM")
+                      const timeInTitle = formatTo12Hour(s.hora_sorteo);
+                      const displayTitle = timeInTitle ? `${selectedJuego} ${timeInTitle}` : s.nombre.replace(/\s*\(NI\)|\s*\(HN\)|\s*\(SV\)|\s*\(LP\)|\s*\(CR\)/g, "");
+
                       return (
                         <button
                           key={s.id}
-                          id={`sorteo-select-${s.id}`}
+                          id={`sorteo-card-${s.id}`}
                           disabled={cerrado}
                           onClick={() => {
                             if (!cerrado) {
                               setSelectedSorteo(s.nombre);
+                              setVentaStep(3);
+                              setErrorMessage(null);
+                              setSuccessMessage(null);
                             }
                           }}
-                          className={`py-2.5 px-2 rounded-xl text-center font-sans text-xs transition-all border relative overflow-hidden ${
+                          className={`p-4 rounded-2xl text-left border-2 transition-all duration-200 flex flex-col justify-between shadow-sm relative overflow-hidden active:scale-95 ${
                             cerrado
-                              ? "bg-gray-150 text-gray-400 border-gray-200 opacity-60 cursor-not-allowed"
-                              : isSelected
-                              ? "bg-blue-900 text-white border-blue-950 font-bold cursor-pointer"
-                              : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50 cursor-pointer"
+                              ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-75"
+                              : "bg-white hover:bg-blue-50/60 border-blue-200 hover:border-blue-500 cursor-pointer text-gray-900 shadow-blue-900/5"
                           }`}
                         >
-                          <div className="font-bold flex items-center justify-center space-x-1">
-                            <span>{s.nombre.replace(/\s*\(NI\)|\s*\(HN\)|\s*\(SV\)|\s*\(LP\)|\s*\(CR\)/g, "")}</span>
-                            {cerrado && <span className="text-[9px] bg-red-100 text-red-700 px-1 py-0.2 rounded font-black">CERRADO</span>}
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <span className="text-base sm:text-lg font-display font-black text-[#1E3A8A] block leading-tight">
+                                {displayTitle}
+                              </span>
+                              <span className="text-xs font-mono font-bold text-gray-500 block mt-1">
+                                Cierre de Ventas: <strong className={cerrado ? "text-red-500 font-extrabold" : "text-gray-700 font-extrabold"}>{formatTo12Hour(s.hora_cierre)}</strong>
+                              </span>
+                            </div>
+                            {cerrado ? (
+                              <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-md font-black uppercase tracking-wider shrink-0 shadow-2xs">
+                                CERRADO
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-emerald-500 text-white px-2 py-0.5 rounded-md font-black uppercase tracking-wider shrink-0 shadow-2xs">
+                                ABIERTO
+                              </span>
+                            )}
                           </div>
+
                           {s.dias_habilitados && s.dias_habilitados.length > 0 && (
-                            <div className="text-[8px] bg-orange-100 text-orange-700 px-1 py-0.2 rounded font-black mt-0.5">
+                            <div className="mt-2 text-[9px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md font-black inline-block border border-amber-200 w-fit">
                               {getDiasHabilitadosShortLabel(s)}
                             </div>
                           )}
-                          <div className={`text-[9px] font-mono mt-0.5 ${isSelected && !cerrado ? "text-blue-200" : "text-gray-400"}`}>
-                            Cierre: {formatTo12Hour(s.hora_cierre)}
-                          </div>
                         </button>
                       );
                     })}
                   </div>
                 )}
               </div>
-            </div>
-
-            {/* Action Buttons — Stitch 3-Button Control Bar */}
-            <div className="flex flex-row gap-3 w-full">
-              {/* BORRAR — Stitch Red */}
-              <button
-                type="button"
-                onClick={clearForm}
-                disabled={loading}
-                className="h-14 px-4 rounded-xl bg-red-500 hover:bg-red-600 active:bg-red-700 text-white font-display font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Trash2 className="w-4 h-4 stroke-[2.5]" />
-                <span>Borrar</span>
-              </button>
-
-              {/* AÑADIR JUGADA — Stitch Blue */}
-              <button
-                id="btn-agregar-jugada"
-                type="button"
-                onClick={addJugadaAlCarrito}
-                disabled={loading}
-                className={`flex-1 h-14 rounded-xl flex items-center justify-center font-bold text-white shadow-sm transition-all duration-200 active:scale-95 cursor-pointer ${
-                  loading
-                    ? "bg-blue-300 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-500 active:bg-blue-700"
-                }`}
-              >
-                <Plus className="w-6 h-6 stroke-[2.5]" />
-              </button>
-
-              {/* GENERAR TICKET — Stitch Green */}
-              <button
-                type="button"
-                id="vender-submit-btn"
-                onClick={handleGenerarTicket}
-                disabled={isSubmittingTicket}
-                className={`flex-1 h-14 rounded-xl flex items-center justify-center font-bold text-white shadow-sm transition-all duration-200 active:scale-95 cursor-pointer ${
-                  isSubmittingTicket
-                    ? "bg-emerald-300 cursor-not-allowed"
-                    : "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700"
-                }`}
-              >
-                {isSubmittingTicket ? (
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Printer className="w-6 h-6 stroke-[2.5]" />
-                )}
-              </button>
-            </div>
-
-            {/* Cart de Jugadas Acumuladas — DRAFT STATE, scrollable */}
-            {jugadas.length > 0 && (
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
-                <div className="px-3 py-2 bg-amber-50 border-b border-amber-200 flex justify-between items-center shrink-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-display font-black text-gray-600 uppercase tracking-wider">
-                      Carrito ({jugadas.length} jugada{jugadas.length > 1 ? "s" : ""})
-                    </span>
-                    <span className="text-[9px] font-mono font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full uppercase">
-                      Preparación
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono font-black text-blue-900">
-                    Total: {moneda} {totalTicketMonto.toFixed(2)}
-                  </span>
-                </div>
-                <div ref={cartContainerRef} className="max-h-[132px] overflow-y-auto divide-y divide-gray-100">
-                  {jugadas.map((j, i) => (
-                    <div key={i} className="flex items-center justify-between px-3 py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
-                      <span className="font-mono font-black text-black w-20 text-2xl shrink-0">{j.numero}</span>
-                      <span className="font-mono font-black text-gray-700 flex-1 text-right text-2xl">
-                        {moneda} {j.monto.toFixed(0)}
-                      </span>
-                      <span className="font-mono font-black text-emerald-600 w-36 text-right text-2xl">
-                        C$ {j.premio_posible.toFixed(0)}
-                      </span>
-                      <button
-                        onClick={() => removeJugada(i)}
-                        className="ml-4 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
             )}
 
-            {/* Play Form — NÚMERO | FECHA | MONTO inline row */}
-            <form onSubmit={handlePlayFormSubmit} className="flex gap-2 items-end">
-              
-              {/* NÚMERO JUGADO */}
-              <div className="flex-1 min-w-0">
-                <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">NÚMERO JUGADO</label>
-                <input
-                  ref={numeroInputRef}
-                  id="lotto-digit-input"
-                  name="lotto-digit"
-                  type="text"
-                  autoComplete="off"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={
-                    selectedJuego === "Premia2" ? 4 :
-                    selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos" ? 3 :
-                    selectedJuego === "Pega 3" ? 3 :
-                    selectedJuego === "Súper Premio" ? 12 : 2
-                  }
-                  value={numeroJugado}
-                  readOnly={selectedJuego === "Fechas"}
-                  tabIndex={selectedJuego === "Fechas" ? -1 : 0}
-                  onChange={(e) => {
-                    if (selectedJuego === "Fechas") return;
-                    const val = e.target.value.replace(/[^0-9]/g, "");
-                    const maxLen = getMaxLen(selectedJuego);
-                    const sliced = val.slice(0, maxLen);
-                    setNumeroJugado(sliced);
-                    if (sliced.length === maxLen && maxLen > 0) {
-                      setTimeout(() => montoInputRef.current?.focus(), 0);
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if ((e.key === "Enter" || e.keyCode === 13) && numeroJugado && selectedJuego !== "Fechas") {
-                      e.preventDefault();
-                      montoInputRef.current?.focus();
-                    }
-                  }}
-                  onFocus={() => setActiveField("numero")}
-                  placeholder={selectedJuego === "Fechas" ? "DD-MM" : "00"}
-                  className={`w-full h-12 px-2 rounded-xl border-2 font-mono text-lg font-black text-center shadow-inner transition-colors focus:outline-none ${
-                    isLimitBlocked
-                      ? "border-[#EF4444] text-[#EF4444] bg-red-50 focus:border-red-600"
-                      : activeField === "numero"
-                      ? "border-blue-500 text-blue-900 bg-blue-50 shadow-md focus:border-blue-600"
-                      : "border-gray-300 text-gray-900 bg-white focus:border-blue-500"
-                  }`}
-                />
-              </div>
+            {/* NIVEL 3: FACTURACIÓN DE NÚMEROS (PANTALLA FINAL) */}
+            {ventaStep === 3 && (
+              <>
+                {/* Cart de Jugadas Acumuladas — DRAFT STATE, scrollable */}
+                {jugadas.length > 0 && (
+                  <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
+                    <div className="px-3 py-2 bg-amber-50 border-b border-amber-200 flex justify-between items-center shrink-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-display font-black text-gray-600 uppercase tracking-wider">
+                          Carrito ({jugadas.length} jugada{jugadas.length > 1 ? "s" : ""})
+                        </span>
+                        <span className="text-[9px] font-mono font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full uppercase">
+                          Preparación
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono font-black text-blue-900">
+                        Total: {moneda} {totalTicketMonto.toFixed(2)}
+                      </span>
+                    </div>
+                    <div ref={cartContainerRef} className="max-h-[132px] overflow-y-auto divide-y divide-gray-100">
+                      {jugadas.map((j, i) => (
+                        <div key={i} className="flex items-center justify-between px-3 py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
+                          <span className="font-mono font-black text-black w-20 text-2xl shrink-0">{j.numero}</span>
+                          <span className="font-mono font-black text-gray-700 flex-1 text-right text-2xl">
+                            {moneda} {j.monto.toFixed(0)}
+                          </span>
+                          <span className="font-mono font-black text-emerald-600 w-36 text-right text-2xl">
+                            C$ {j.premio_posible.toFixed(0)}
+                          </span>
+                          <button
+                            onClick={() => removeJugada(i)}
+                            className="ml-4 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-              {/* FECHA DEL SORTEO — Día + Mes calculator-style (solo para juego Fechas) */}
-              {selectedJuego === "Fechas" && (() => {
-                const currentSorteo = config?.sorteos?.find(s => s.nombre === selectedSorteo);
-                const hasDiasRestriction = currentSorteo?.dias_habilitados && currentSorteo.dias_habilitados.length > 0;
-                const diaNum = parseInt(fechaVenta.dia, 10);
-                const isInvalidDay = fechaVenta.dia.length > 0 && (isNaN(diaNum) || diaNum < 1 || diaNum > 31);
-                return (
-                  <div className="flex gap-1 flex-shrink-0">
-                    {/* DÍA */}
-                    <div className="w-12">
-                      <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">DÍA</label>
+                {/* Play Form — NÚMERO | FECHA | MONTO inline row */}
+                <form onSubmit={handlePlayFormSubmit} className="flex gap-2 items-end">
+                  
+                  {/* NÚMERO JUGADO */}
+                  <div className="flex-1 min-w-0">
+                    <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">NÚMERO JUGADO</label>
+                    <input
+                      ref={numeroInputRef}
+                      id="lotto-digit-input"
+                      name="lotto-digit"
+                      type="text"
+                      autoComplete="off"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={
+                        selectedJuego === "Premia2" ? 4 :
+                        selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos" ? 3 :
+                        selectedJuego === "Pega 3" ? 3 :
+                        selectedJuego === "Súper Premio" ? 12 : 2
+                      }
+                      value={numeroJugado}
+                      readOnly={selectedJuego === "Fechas"}
+                      tabIndex={selectedJuego === "Fechas" ? -1 : 0}
+                      onChange={(e) => {
+                        if (selectedJuego === "Fechas") return;
+                        const val = e.target.value.replace(/[^0-9]/g, "");
+                        const maxLen = getMaxLen(selectedJuego);
+                        const sliced = val.slice(0, maxLen);
+                        setNumeroJugado(sliced);
+                        if (sliced.length === maxLen && maxLen > 0) {
+                          setTimeout(() => montoInputRef.current?.focus(), 0);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if ((e.key === "Enter" || e.keyCode === 13) && numeroJugado && selectedJuego !== "Fechas") {
+                          e.preventDefault();
+                          montoInputRef.current?.focus();
+                        }
+                      }}
+                      onFocus={() => setActiveField("numero")}
+                      placeholder={selectedJuego === "Fechas" ? "DD-MM" : "00"}
+                      className={`w-full h-12 px-2 rounded-xl border-2 font-mono text-lg font-black text-center shadow-inner transition-colors focus:outline-none ${
+                        isLimitBlocked
+                          ? "border-[#EF4444] text-[#EF4444] bg-red-50 focus:border-red-600"
+                          : activeField === "numero"
+                          ? "border-blue-500 text-blue-900 bg-blue-50 shadow-md focus:border-blue-600"
+                          : "border-gray-300 text-gray-900 bg-white focus:border-blue-500"
+                      }`}
+                    />
+                  </div>
+
+                  {/* FECHA DEL SORTEO — Día + Mes calculator-style (solo para juego Fechas) */}
+                  {selectedJuego === "Fechas" && (() => {
+                    const currentSorteo = config?.sorteos?.find(s => s.nombre === selectedSorteo);
+                    const hasDiasRestriction = currentSorteo?.dias_habilitados && currentSorteo.dias_habilitados.length > 0;
+                    const diaNum = parseInt(fechaVenta.dia, 10);
+                    const isInvalidDay = fechaVenta.dia.length > 0 && (isNaN(diaNum) || diaNum < 1 || diaNum > 31);
+                    return (
+                      <div className="flex gap-1 flex-shrink-0">
+                        {/* DÍA */}
+                        <div className="w-12">
+                          <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">DÍA</label>
+                          <input
+                            id="fecha-dia-input"
+                            type="number"
+                            autoComplete="off"
+                            inputMode="numeric"
+                            min="1"
+                            max="31"
+                            placeholder="DD"
+                            value={fechaVenta.dia}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
+                              setFechaVenta(prev => {
+                                const newDia = val;
+                                setNumeroJugado(newDia ? `${newDia.padStart(2, "0")}-${prev.mes}` : "");
+                                return { ...prev, dia: newDia };
+                              });
+                              if (val.length === 2 && parseInt(val, 10) >= 1 && parseInt(val, 10) <= 31) {
+                                const mesSelect = document.getElementById("fecha-mes-select") as HTMLSelectElement;
+                                if (mesSelect) mesSelect.focus();
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.keyCode === 13) {
+                                e.preventDefault();
+                                const mesSelect = document.getElementById("fecha-mes-select") as HTMLSelectElement;
+                                if (mesSelect) mesSelect.focus();
+                              }
+                            }}
+                            onFocus={(e) => {
+                              setActiveField("fecha");
+                              e.target.select();
+                            }}
+                            className={`w-full h-12 px-1 rounded-xl border-2 font-mono text-lg font-black text-center shadow-inner transition-colors focus:outline-none ${
+                              isInvalidDay
+                                ? "border-[#EF4444] text-[#EF4444] bg-red-50"
+                                : activeField === "fecha"
+                                ? "border-blue-500 text-blue-900 bg-blue-50 shadow-md focus:border-blue-600"
+                                : "border-gray-300 text-gray-900 bg-white focus:border-blue-500"
+                            }`}
+                          />
+                        </div>
+
+                        {/* MES */}
+                        <div className="w-[72px]">
+                          <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">MES</label>
+                          <select
+                            id="fecha-mes-select"
+                            value={fechaVenta.mes}
+                            onChange={(e) => {
+                              const newMes = e.target.value;
+                              setFechaVenta(prev => ({ ...prev, mes: newMes }));
+                              setNumeroJugado(fechaVenta.dia && newMes ? `${fechaVenta.dia.padStart(2, "0")}-${newMes}` : "");
+                              if (newMes) {
+                                const montoInput = document.getElementById("monto-input") as HTMLInputElement;
+                                if (montoInput) montoInput.focus();
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.keyCode === 13) {
+                                e.preventDefault();
+                                const montoInput = document.getElementById("monto-input") as HTMLInputElement;
+                                if (montoInput) montoInput.focus();
+                              }
+                            }}
+                            onFocus={() => setActiveField("fecha")}
+                            className="w-full h-12 px-0.5 rounded-xl border-2 border-gray-300 bg-white font-sans text-[11px] font-bold text-gray-900 text-center focus:outline-none focus:border-blue-500 cursor-pointer transition-colors"
+                          >
+                            <option value="">MES</option>
+                            {MESES.map(m => (
+                              <option key={m} value={m}>{m.slice(0, 3).toUpperCase()}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Year badge + restriction hint */}
+                        <div className="flex flex-col items-center justify-end pb-1 gap-0.5">
+                          <span className="text-[10px] font-mono font-black text-gray-400">{String(fechaVenta.anio).slice(2)}</span>
+                          {isInvalidDay && (
+                            <span className="text-[8px] font-black text-red-500">1-31</span>
+                          )}
+                          {hasDiasRestriction && !isInvalidDay && (
+                            <span className="text-[7px] font-black text-orange-600 leading-tight text-center">{getDiasHabilitadosShortLabel(currentSorteo!).replace("SOLO ", "")}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* MONTO */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider">MONTO</label>
+                      
+                      {/* Currency Toggle */}
+                      <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-150">
+                        <button
+                          id="curr-toggle-cs"
+                          onClick={() => setMoneda("C$")}
+                          className={`px-1.5 py-0.5 rounded text-[8px] font-black transition-all cursor-pointer ${
+                            moneda === "C$" 
+                              ? "bg-blue-900 text-white font-bold shadow-xs" 
+                              : "text-gray-600"
+                          }`}
+                        >
+                          C$
+                        </button>
+                        <button
+                          id="curr-toggle-usd"
+                          onClick={() => setMoneda("USD")}
+                          className={`px-1.5 py-0.5 rounded text-[8px] font-black transition-all cursor-pointer ${
+                            moneda === "USD" 
+                              ? "bg-blue-900 text-white font-bold shadow-xs" 
+                              : "text-gray-600"
+                          }`}
+                        >
+                          USD
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono font-bold text-gray-400 text-sm">{moneda}</span>
                       <input
-                        id="fecha-dia-input"
+                        ref={montoInputRef}
+                        id="monto-input"
                         type="number"
-                        autoComplete="off"
                         inputMode="numeric"
+                        enterKeyHint="enter"
+                        pattern="[0-9]*"
                         min="1"
-                        max="31"
-                        placeholder="DD"
-                        value={fechaVenta.dia}
-                        onChange={(e) => {
-                          const val = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
-                          setFechaVenta(prev => {
-                            const newDia = val;
-                            setNumeroJugado(newDia ? `${newDia.padStart(2, "0")}-${prev.mes}` : "");
-                            return { ...prev, dia: newDia };
-                          });
-                          if (val.length === 2 && parseInt(val, 10) >= 1 && parseInt(val, 10) <= 31) {
-                            const mesSelect = document.getElementById("fecha-mes-select") as HTMLSelectElement;
-                            if (mesSelect) mesSelect.focus();
-                          }
-                        }}
+                        value={montoPago}
+                        onFocus={() => setActiveField('monto')}
+                        onChange={(e) => setMontoPago(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.keyCode === 13) {
+                          if (e.key === "Enter" || e.keyCode === 13 || e.key === "Tab" || e.keyCode === 9) {
                             e.preventDefault();
-                            const mesSelect = document.getElementById("fecha-mes-select") as HTMLSelectElement;
-                            if (mesSelect) mesSelect.focus();
+                            e.stopPropagation();
+                            const montoDirecto = (e.currentTarget as HTMLInputElement).value;
+                            console.log("Intento de agregar mediante Enter/Tab", { key: e.key, montoDirecto });
+                            setMontoPago(montoDirecto);
+                            addJugadaAlCarrito(montoDirecto);
                           }
                         }}
-                        onFocus={(e) => {
-                          setActiveField("fecha");
-                          e.target.select();
+                        onBlur={(e) => {
+                          const next = e.relatedTarget as HTMLElement | null;
+                          if (next && (next.id === "monto-input" || next.id === "lotto-digit-input")) return;
+                          if (montoPago) {
+                            setTimeout(() => numeroInputRef.current?.focus(), 0);
+                          }
                         }}
-                        className={`w-full h-12 px-1 rounded-xl border-2 font-mono text-lg font-black text-center shadow-inner transition-colors focus:outline-none ${
-                          isInvalidDay
-                            ? "border-[#EF4444] text-[#EF4444] bg-red-50"
-                            : activeField === "fecha"
-                            ? "border-blue-500 text-blue-900 bg-blue-50 shadow-md focus:border-blue-600"
-                            : "border-gray-300 text-gray-900 bg-white focus:border-blue-500"
+                        placeholder="0"
+                        className={`w-full h-12 pl-10 pr-4 rounded-xl font-mono text-lg font-black shadow-inner focus:outline-none border-2 transition-colors ${
+                          isLimitBlocked 
+                            ? 'border-[#EF4444] text-[#EF4444] bg-red-50 focus:border-red-600' 
+                            : activeField === 'monto'
+                            ? 'border-blue-500 text-blue-900 bg-blue-50 shadow-md focus:border-blue-600'
+                            : 'border-gray-300 text-gray-900 bg-white focus:border-blue-500'
                         }`}
                       />
                     </div>
-
-                    {/* MES */}
-                    <div className="w-[72px]">
-                      <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">MES</label>
-                      <select
-                        id="fecha-mes-select"
-                        value={fechaVenta.mes}
-                        onChange={(e) => {
-                          const newMes = e.target.value;
-                          setFechaVenta(prev => ({ ...prev, mes: newMes }));
-                          setNumeroJugado(fechaVenta.dia && newMes ? `${fechaVenta.dia.padStart(2, "0")}-${newMes}` : "");
-                          if (newMes) {
-                            const montoInput = document.getElementById("monto-input") as HTMLInputElement;
-                            if (montoInput) montoInput.focus();
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.keyCode === 13) {
-                            e.preventDefault();
-                            const montoInput = document.getElementById("monto-input") as HTMLInputElement;
-                            if (montoInput) montoInput.focus();
-                          }
-                        }}
-                        onFocus={() => setActiveField("fecha")}
-                        className="w-full h-12 px-0.5 rounded-xl border-2 border-gray-300 bg-white font-sans text-[11px] font-bold text-gray-900 text-center focus:outline-none focus:border-blue-500 cursor-pointer transition-colors"
-                      >
-                        <option value="">MES</option>
-                        {MESES.map(m => (
-                          <option key={m} value={m}>{m.slice(0, 3).toUpperCase()}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Year badge + restriction hint */}
-                    <div className="flex flex-col items-center justify-end pb-1 gap-0.5">
-                      <span className="text-[10px] font-mono font-black text-gray-400">{String(fechaVenta.anio).slice(2)}</span>
-                      {isInvalidDay && (
-                        <span className="text-[8px] font-black text-red-500">1-31</span>
-                      )}
-                      {hasDiasRestriction && !isInvalidDay && (
-                        <span className="text-[7px] font-black text-orange-600 leading-tight text-center">{getDiasHabilitadosShortLabel(currentSorteo!).replace("SOLO ", "")}</span>
-                      )}
-                    </div>
+                    {/* Dummy input: captura navegación forzada por Android */}
+                    <input
+                      id="android-nav-dummy"
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      onFocus={() => setTimeout(() => numeroInputRef.current?.focus(), 0)}
+                      className="absolute opacity-0 h-0 w-0 pointer-events-none"
+                    />
                   </div>
-                );
-              })()}
-
-              {/* MONTO */}
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-center mb-1">
-                  <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider">MONTO</label>
-                  
-                  {/* Currency Toggle */}
-                  <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-150">
-                    <button
-                      id="curr-toggle-cs"
-                      onClick={() => setMoneda("C$")}
-                      className={`px-1.5 py-0.5 rounded text-[8px] font-black transition-all cursor-pointer ${
-                        moneda === "C$" 
-                          ? "bg-blue-900 text-white font-bold shadow-xs" 
-                          : "text-gray-600"
-                      }`}
-                    >
-                      C$
-                    </button>
-                    <button
-                      id="curr-toggle-usd"
-                      onClick={() => setMoneda("USD")}
-                      className={`px-1.5 py-0.5 rounded text-[8px] font-black transition-all cursor-pointer ${
-                        moneda === "USD" 
-                          ? "bg-blue-900 text-white font-bold shadow-xs" 
-                          : "text-gray-600"
-                      }`}
-                    >
-                      USD
-                    </button>
-                  </div>
-                </div>
-
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono font-bold text-gray-400 text-sm">{moneda}</span>
+                </form>
+                <div>
+                  <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">Nombre del Cliente</label>
                   <input
-                    ref={montoInputRef}
-                    id="monto-input"
-                    type="number"
-                    inputMode="numeric"
-                    enterKeyHint="enter"
-                    pattern="[0-9]*"
-                    min="1"
-                    value={montoPago}
-                    onFocus={() => setActiveField('monto')}
-                    onChange={(e) => setMontoPago(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.keyCode === 13 || e.key === "Tab" || e.keyCode === 9) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const montoDirecto = (e.currentTarget as HTMLInputElement).value;
-                        console.log("Intento de agregar mediante Enter/Tab", { key: e.key, montoDirecto });
-                        setMontoPago(montoDirecto);
-                        setTimeout(() => {
-                          const btn = document.getElementById("btn-agregar-jugada");
-                          if (btn) btn.click();
-                        }, 50);
-                      }
-                    }}
-                    onBlur={(e) => {
-                      const next = e.relatedTarget as HTMLElement | null;
-                      if (next && (next.id === "monto-input" || next.id === "lotto-digit-input")) return;
-                      if (montoPago) {
-                        setTimeout(() => numeroInputRef.current?.focus(), 0);
-                      }
-                    }}
-                    placeholder="0"
-                    className={`w-full h-12 pl-10 pr-4 rounded-xl font-mono text-lg font-black shadow-inner focus:outline-none border-2 transition-colors ${
-                      isLimitBlocked 
-                        ? 'border-[#EF4444] text-[#EF4444] bg-red-50 focus:border-red-600' 
-                        : activeField === 'monto'
-                        ? 'border-blue-500 text-blue-900 bg-blue-50 shadow-md focus:border-blue-600'
-                        : 'border-gray-300 text-gray-900 bg-white focus:border-blue-500'
-                    }`}
+                    type="text"
+                    value={nombreCliente}
+                    onChange={(e) => setNombreCliente(e.target.value)}
+                    placeholder="Genérico"
+                    className="w-full p-2.5 rounded-xl border-2 border-gray-300 text-sm font-semibold focus:outline-none focus:border-blue-900 bg-white text-gray-900 shadow-inner"
                   />
                 </div>
-                {/* Dummy input: captura navegación forzada por Android */}
-                <input
-                  id="android-nav-dummy"
-                  tabIndex={-1}
-                  aria-hidden="true"
-                  onFocus={() => setTimeout(() => numeroInputRef.current?.focus(), 0)}
-                  className="absolute opacity-0 h-0 w-0 pointer-events-none"
-                />
-              </div>
-            </form>
-            <div>
-              <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">Nombre del Cliente</label>
-              <input
-                type="text"
-                value={nombreCliente}
-                onChange={(e) => setNombreCliente(e.target.value)}
-                placeholder="Genérico"
-                className="w-full p-2.5 rounded-xl border-2 border-gray-300 text-sm font-semibold focus:outline-none focus:border-blue-900 bg-white text-gray-900 shadow-inner"
-              />
-            </div>
 
-            {/* Posible Premio Indicator — shows current input + accumulated cart */}
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex justify-between items-center">
-              <span className="text-xs font-display font-black text-blue-900 uppercase tracking-wider">Premio Posible:</span>
-              <span className="font-mono text-lg font-black text-emerald-600">
-                C$ {(() => {
-                  const currentPremio = (() => {
-                    const amt = Number(montoPago) || 0;
-                    const amtCs = moneda === "USD" ? amt * (config.tasa_cambio || 36.50) : amt;
-                    return amtCs * calculatePrizeMultiplier(selectedJuego, selectedSorteo);
-                  })();
-                  const total = totalTicketPremio + currentPremio;
-                  return total.toFixed(2);
-                })()}
-              </span>
-            </div>
+                {/* Posible Premio Indicator — shows current input + accumulated cart */}
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex justify-between items-center">
+                  <span className="text-xs font-display font-black text-blue-900 uppercase tracking-wider">Premio Posible:</span>
+                  <span className="font-mono text-lg font-black text-emerald-600">
+                    C$ {(() => {
+                      if (!selectedJuego || !selectedSorteo) return "0.00";
+                      const currentPremio = (() => {
+                        const amt = Number(montoPago) || 0;
+                        const amtCs = moneda === "USD" ? amt * (config.tasa_cambio || 36.50) : amt;
+                        return amtCs * calculatePrizeMultiplier(selectedJuego, selectedSorteo);
+                      })();
+                      const total = totalTicketPremio + currentPremio;
+                      return total.toFixed(2);
+                    })()}
+                  </span>
+                </div>
 
-            {/* Dynamic Alarm for Granular Risk Control */}
-            {isLimitBlocked && limitCheckResult && (
-              <div id="monto-max-alerta" className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-2 text-xs text-red-950 font-sans font-bold shadow-xs animate-pulse">
-                <AlertCircle className="w-4.5 h-4.5 text-[#EF4444] shrink-0 mt-0.5" />
-                <span>
-                  NÚMERO BLOQUEADO: Límite de C$ {limitCheckResult.limitMontoCs.toLocaleString("es-ES")} alcanzado. Vendido hoy: C$ {limitCheckResult.totalPrevSalesCs.toLocaleString("es-ES")} | En carrito: C$ {(limitCheckResult.cartMatchingSum || 0).toLocaleString("es-ES")} | Disponible: C$ {(limitCheckResult.disponibleCs ?? 0).toLocaleString("es-ES")}.
-                </span>
-              </div>
+                {/* Dynamic Alarm for Granular Risk Control */}
+                {isLimitBlocked && limitCheckResult && (
+                  <div id="monto-max-alerta" className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-2 text-xs text-red-950 font-sans font-bold shadow-xs animate-pulse">
+                    <AlertCircle className="w-4.5 h-4.5 text-[#EF4444] shrink-0 mt-0.5" />
+                    <span>
+                      NÚMERO BLOQUEADO: Límite de C$ {limitCheckResult.limitMontoCs.toLocaleString("es-ES")} alcanzado. Vendido hoy: C$ {limitCheckResult.totalPrevSalesCs.toLocaleString("es-ES")} | En carrito: C$ {(limitCheckResult.cartMatchingSum || 0).toLocaleString("es-ES")} | Disponible: C$ {(limitCheckResult.disponibleCs ?? 0).toLocaleString("es-ES")}.
+                    </span>
+                  </div>
+                )}
+
+                {/* Action Buttons — Clean Control Bar */}
+                <div className="flex flex-row gap-3 w-full">
+                  {/* BORRAR — Stitch Red */}
+                  <button
+                    type="button"
+                    onClick={clearForm}
+                    disabled={loading}
+                    className="w-full h-14 rounded-xl bg-red-500 hover:bg-red-600 active:bg-red-700 text-white font-display font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Trash2 className="w-5 h-5 stroke-[2.5]" />
+                    <span>Borrar Jugadas</span>
+                  </button>
+                </div>
+              </>
             )}
 
           </div>
@@ -2897,22 +2890,130 @@ export default function VendedorInterface({
 
       </div>
 
-      
-      {/* Bottom Navigation Bar — fixed, never shrinks */}
-      <div className="bg-white border-t border-gray-300 py-1 px-2 flex justify-between items-center z-10 shrink-0">
-        <button id="nav-venta" onClick={() => { setActiveTab("venta"); setErrorMessage(null); setSuccessMessage(null); }} className={`flex flex-col items-center flex-1 py-1 px-1 text-center transition-all cursor-pointer ${activeTab === "venta" ? "text-[#1E3A8A] scale-105" : "text-gray-400 hover:text-gray-600"}`}>
-          <Gamepad2 className={`w-5 h-5 stroke-[2.5] ${activeTab === "venta" ? "text-[#1E3A8A]" : ""}`} />
-          <span className="text-[9px] font-display font-black uppercase tracking-wider mt-0.5">Venta</span>
+      {/* Menú Lateral Deslizante (Sidebar Drawer) */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <div className="fixed inset-0 z-50 flex">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSidebarOpen(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs"
+            />
+
+            {/* Panel Sidebar */}
+            <motion.div
+              initial={{ x: "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "-100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="relative w-72 max-w-[80vw] bg-[#1E3A8A] text-white h-full flex flex-col shadow-2xl z-10"
+            >
+              {/* Header del Sidebar */}
+              <div className="p-4 border-b border-blue-800 flex justify-between items-center bg-blue-950/50">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-800 flex items-center justify-center font-bold text-lg border border-blue-600 shadow-inner">
+                    {user.nombre?.charAt(0)?.toUpperCase() || "V"}
+                  </div>
+                  <div>
+                    <h3 className="font-display font-black text-sm uppercase tracking-wide text-white">{user.nombre}</h3>
+                    <span className="text-[10px] text-blue-200 uppercase font-mono font-semibold">Vendedor POS</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsSidebarOpen(false)}
+                  className="p-1.5 rounded-lg hover:bg-blue-800/80 text-blue-200 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Opciones de Navegación del Sidebar */}
+              <div className="flex-1 py-4 px-3 space-y-2 overflow-y-auto">
+                <button
+                  id="nav-venta"
+                  onClick={() => {
+                    setActiveTab("venta");
+                    setErrorMessage(null);
+                    setSuccessMessage(null);
+                    setIsSidebarOpen(false);
+                  }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all font-display text-xs font-black uppercase tracking-wider cursor-pointer ${
+                    activeTab === "venta"
+                      ? "bg-blue-600 text-white shadow-md border border-blue-400"
+                      : "text-blue-200 hover:bg-blue-800/60 hover:text-white"
+                  }`}
+                >
+                  <Gamepad2 className="w-5 h-5" />
+                  <span>Venta</span>
+                </button>
+
+                <button
+                  id="nav-reportes"
+                  onClick={() => {
+                    setActiveTab("reportes");
+                    setErrorMessage(null);
+                    setSuccessMessage(null);
+                    setIsSidebarOpen(false);
+                  }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all font-display text-xs font-black uppercase tracking-wider cursor-pointer ${
+                    activeTab === "reportes"
+                      ? "bg-blue-600 text-white shadow-md border border-blue-400"
+                      : "text-blue-200 hover:bg-blue-800/60 hover:text-white"
+                  }`}
+                >
+                  <History className="w-5 h-5" />
+                  <span>Reportes</span>
+                </button>
+
+                <button
+                  id="nav-pagos"
+                  onClick={() => {
+                    setActiveTab("pagos");
+                    setErrorMessage(null);
+                    setSuccessMessage(null);
+                    setIsSidebarOpen(false);
+                  }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all font-display text-xs font-black uppercase tracking-wider cursor-pointer ${
+                    activeTab === "pagos"
+                      ? "bg-blue-600 text-white shadow-md border border-blue-400"
+                      : "text-blue-200 hover:bg-blue-800/60 hover:text-white"
+                  }`}
+                >
+                  <CheckCircle className="w-5 h-5" />
+                  <span>Pagos</span>
+                </button>
+              </div>
+
+              {/* Footer del Sidebar */}
+              <div className="p-4 border-t border-blue-800/60 text-center bg-blue-950/30">
+                <span className="text-[10px] text-blue-300 font-mono font-semibold block">LOTERIA PRO2</span>
+                <span className="text-[9px] text-blue-400 font-mono block mt-0.5">T. Cambio: C$ {(config?.tasa_cambio ?? 36.50).toFixed(2)}</span>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Botón Flotante de Impresión (FAB) — Solo visible en Nivel 3 (Facturación) */}
+      {activeTab === "venta" && ventaStep === 3 && (
+        <button
+          id="fab-imprimir-btn"
+          type="button"
+          onClick={handleGenerarTicket}
+          disabled={isSubmittingTicket}
+          className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-2xl flex items-center justify-center cursor-pointer transition-transform hover:scale-105 active:scale-95 border-2 border-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Generar e Imprimir Ticket"
+        >
+          {isSubmittingTicket ? (
+            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <Printer className="w-7 h-7 stroke-[2.2]" />
+          )}
         </button>
-        <button id="nav-reportes" onClick={() => { setActiveTab("reportes"); setErrorMessage(null); setSuccessMessage(null); }} className={`flex flex-col items-center flex-1 py-1 px-1 text-center transition-all cursor-pointer ${activeTab === "reportes" ? "text-[#1E3A8A] scale-105" : "text-gray-400 hover:text-gray-600"}`}>
-          <History className={`w-5 h-5 stroke-[2.5] ${activeTab === "reportes" ? "text-[#1E3A8A]" : ""}`} />
-          <span className="text-[9px] font-display font-black uppercase tracking-wider mt-0.5">Reportes</span>
-        </button>
-        <button id="nav-pagos" onClick={() => { setActiveTab("pagos"); setErrorMessage(null); setSuccessMessage(null); }} className={`flex flex-col items-center flex-1 py-1 px-1 text-center transition-all cursor-pointer ${activeTab === "pagos" ? "text-[#1E3A8A] scale-105" : "text-gray-400 hover:text-gray-600"}`}>
-          <CheckCircle className={`w-5 h-5 stroke-[2.5] ${activeTab === "pagos" ? "text-[#1E3A8A]" : ""}`} />
-          <span className="text-[9px] font-display font-black uppercase tracking-wider mt-0.5">Pagos</span>
-        </button>
-      </div>
+      )}
 
       {/* Ticket Viewer Modal */}
       {activeTicket && (

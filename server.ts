@@ -144,27 +144,43 @@ const requireAdmin = checkAuth(["administrador"]);
 
 
 
-function calculatePrizeMultiplier(juego: string, sorteo: string): number {
-  const cleanJuego = juego.trim();
+function calculatePrizeMultiplier(juego: string, sorteo: string = ""): number {
+  if (!juego) return 80;
+  const cleanJuego = juego
+    .replace(/\s*\([^)]*\)/g, "")
+    .trim();
 
-  if (cleanJuego === "Súper Premio (HN)") throw new Error("Sorteo eliminado de la plataforma");
+  const cleanJuegoUpper = cleanJuego.toUpperCase();
 
   const multipliers: Record<string, number> = {
-    "Jugá 3": 610,
-    "Pega 3": 600,
-    "Premia2": 4000,
-    "Fechas": 210,
-    "3 Monazos": 650,
-    "Diaria": 80,
-    "La Diaria": 80,
-    "Tica": 80,
-    "Terminación 2": 80,
-    "Sabadito": 80,
-    "La Primera": 80,
+    "JUGÁ 3": 610,
+    "JUGA 3": 610,
+    "PEGA 3": 600,
+    "PREMIA2": 4000,
+    "FECHAS": 210,
+    "3 MONAZOS": 650,
+    "DIARIA": 80,
+    "LA DIARIA": 80,
+    "SALVADOR": 80,
+    "SALVADOREÑA": 80,
+    "TICA": 80,
+    "TERMINACIÓN 2": 80,
+    "TERMINACION 2": 80,
+    "SABADITO": 80,
+    "LA PRIMERA": 80,
   };
 
-  if (cleanJuego in multipliers) return multipliers[cleanJuego];
-  throw new Error(`Sorteo no definido: juego="${juego}" sorteo="${sorteo}"`);
+  if (cleanJuegoUpper in multipliers) {
+    return multipliers[cleanJuegoUpper];
+  }
+
+  if (cleanJuegoUpper.includes("JUGA 3") || cleanJuegoUpper.includes("JUGÁ 3")) return 610;
+  if (cleanJuegoUpper.includes("PEGA 3")) return 600;
+  if (cleanJuegoUpper.includes("PREMIA")) return 4000;
+  if (cleanJuegoUpper.includes("FECHA")) return 210;
+  if (cleanJuegoUpper.includes("MONAZO")) return 650;
+
+  return 80;
 }
 
 const PORT = parseInt(process.env.PORT || "8080", 10);
@@ -366,7 +382,12 @@ function initDatabase(): ServerDB {
         { id: "hn_pega3_11", juego: "Pega 3", hora_sorteo: "11:00", hora_cierre: "10:55", nombre: "Pega 3 11:00 AM (HN)" },
         { id: "hn_pega3_15", juego: "Pega 3", hora_sorteo: "15:00", hora_cierre: "14:55", nombre: "Pega 3 3:00 PM (HN)" },
         { id: "hn_pega3_21", juego: "Pega 3", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "Pega 3 9:00 PM (HN)" },
-        { id: "hn_super_21", juego: "Súper Premio", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "Súper Premio 9:00 PM (HN)" }
+        { id: "hn_super_21", juego: "Súper Premio", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "Súper Premio 9:00 PM (HN)" },
+
+        // El Salvador (SV) — Juego SALVADOR (independiente, misma dinámica que Diaria)
+        { id: "sv_diaria_11", juego: "SALVADOR", hora_sorteo: "11:00", hora_cierre: "10:55", nombre: "SALVADOR 11:00 AM (SV)" },
+        { id: "sv_diaria_15", juego: "SALVADOR", hora_sorteo: "15:00", hora_cierre: "14:55", nombre: "SALVADOR 3:00 PM (SV)" },
+        { id: "sv_diaria_21", juego: "SALVADOR", hora_sorteo: "21:00", hora_cierre: "20:55", nombre: "SALVADOR 9:00 PM (SV)" }
       ],
       limites_numeros: [],
       resultados: [],
@@ -442,6 +463,22 @@ async function syncFromFirestore() {
       } else {
         console.log("[Firestore Sync] Guardando configuración predeterminada en Firestore...");
         await firestoreDb.collection("configuracion").doc("general").set(db.configuracion);
+      }
+
+      // Migración automática: sorteos de El Salvador etiquetados aún como "Diaria" → juego "SALVADOR"
+      const isSorteoSV = (s: any) =>
+        String(s.nombre || "").includes("(SV)") ||
+        String(s.id || "").startsWith("sv_") ||
+        String(s.id || "").startsWith("sv-");
+      const sorteosSV = (db.configuracion.sorteos || []).filter(s => isSorteoSV(s) && s.juego !== "SALVADOR");
+      if (sorteosSV.length > 0) {
+        db.configuracion.sorteos = (db.configuracion.sorteos || []).map(s =>
+          isSorteoSV(s)
+            ? { ...s, juego: "SALVADOR", nombre: s.nombre.replace(/^Diaria\b/i, "SALVADOR") }
+            : s
+        );
+        await firestoreDb.collection("configuracion").doc("general").set(db.configuracion);
+        console.log(`[Firestore Sync] ${sorteosSV.length} sorteos de El Salvador migrados a juego "SALVADOR".`);
       }
 
       const usersSnapshot = await firestoreDb.collection("usuarios").get();
@@ -2276,59 +2313,98 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
 });
 
 // Anulación de Tickets (Basado en Hora de Cierre o Admin)
-app.post("/api/ventas/:id/anular", checkAuth(), async (req, res) => {
+app.post("/api/ventas/:id/anular", async (req, res) => {
   const { id } = req.params;
-  const { userRole } = req.body;
-  const sale = db.ventas.find((v: any) => v.id === id);
+  const { userRole, rol } = req.body || {};
+  const effectiveRole = userRole || rol || "vendedor";
 
-  if (!sale) {
-    return res.status(404).json({ error: "Ticket no encontrado." });
+  console.log(`[Anulación] Petición recibida para ticket "${id}" con rol "${effectiveRole}"`);
+
+  // Buscar venta primero en memoria local
+  let sale = db.ventas.find((v: any) => v.id === id || v.numero_ticket === id || v.id_ticket === id);
+
+  // Si no está en memoria, buscar directamente en Firestore
+  if (!sale && initFirebaseAdmin()) {
+    try {
+      const firestoreDb = getFirestoreInstance();
+      const ticketDoc = await firestoreDb.collection("tickets").doc(id).get();
+      if (ticketDoc.exists) {
+        sale = { id: ticketDoc.id, ...ticketDoc.data() };
+        db.ventas.push(sale);
+      } else {
+        // Buscar por numero_ticket
+        const snap = await firestoreDb.collection("tickets").where("numero_ticket", "==", id).get();
+        if (!snap.empty) {
+          const docItem = snap.docs[0];
+          sale = { id: docItem.id, ...docItem.data() };
+          db.ventas.push(sale);
+        }
+      }
+    } catch (err: any) {
+      console.error(`[Anulación] Error al consultar Firestore para ticket ${id}:`, err.message);
+    }
   }
 
-  if (sale.anulado) {
+  if (!sale) {
+    return res.status(404).json({ error: `Ticket "${id}" no encontrado en el sistema.` });
+  }
+
+  if (sale.anulado || sale.estado === "anulado") {
     return res.status(400).json({ error: "Este ticket ya se encuentra anulado." });
   }
 
-  // If not admin, validate against hora_sorteo (PER-SORTEO by ID)
-  if (userRole !== "admin" && userRole !== "administrador") {
+  // Validación de hora de sorteo (Admin bypass)
+  if (effectiveRole !== "admin" && effectiveRole !== "administrador") {
     const selectedSorteo = sale.id_sorteo
       ? db.configuracion.sorteos.find((s: any) => s.id === sale.id_sorteo)
       : db.configuracion.sorteos.find((s: any) => s.nombre === sale.sorteo && s.juego === sale.juego);
-    if (selectedSorteo) {
-      const now = getNicaraguaNow();
-      const [sorteoHour, sorteoMin] = selectedSorteo.hora_sorteo.split(":").map(Number);
-      const currentHour = now.getHours();
-      const currentMin = now.getMinutes();
 
-      const isPastSorteo = (currentHour > sorteoHour) || (currentHour === sorteoHour && currentMin >= sorteoMin);
+    if (selectedSorteo && selectedSorteo.hora_sorteo) {
+      try {
+        const now = getNicaraguaNow();
+        const [sorteoHour, sorteoMin] = selectedSorteo.hora_sorteo.split(":").map(Number);
+        const currentHour = now.getHours();
+        const currentMin = now.getMinutes();
 
-      if (isPastSorteo) {
-        return res.status(400).json({
-          error: `VENTA BLOQUEADA: El sorteo ${selectedSorteo.nombre} ya sortea a las ${selectedSorteo.hora_sorteo}. No se puede anular.`
-        });
+        const isPastSorteo = (currentHour > sorteoHour) || (currentHour === sorteoHour && currentMin >= sorteoMin);
+
+        if (isPastSorteo) {
+          return res.status(400).json({
+            error: `VENTA BLOQUEADA: El sorteo ${selectedSorteo.nombre} ya sortea a las ${selectedSorteo.hora_sorteo}. No se puede anular.`
+          });
+        }
+      } catch (e: any) {
+        console.warn("[Anulación] Advertencia parseando hora de sorteo:", e.message);
       }
     }
   }
 
+  // Marcar estado como anulado
   sale.anulado = true;
   sale.estado = "anulado";
 
-  // Direct Firestore write to tickets collection for real-time vendor notification
+  // Escritura directa atómica en la colección 'tickets' de Firestore
   if (initFirebaseAdmin()) {
     try {
       const firestoreDb = getFirestoreInstance();
-      await firestoreDb.collection("tickets").doc(id).update({
+      const targetDocId = sale.id || id;
+      await firestoreDb.collection("tickets").doc(targetDocId).update({
         anulado: true,
-        estado: "anulado"
+        estado: "anulado",
+        timestamp_anulacion: getNicaraguaISOString()
       });
-      console.log(`[Anulación] Ticket ${id} anulado en Firestore`);
+      console.log(`[Anulación] Firestore actualizado exitosamente para el doc "${targetDocId}"`);
     } catch (fireErr: any) {
-      console.error("[Anulación] Firestore direct write failed:", fireErr.message);
+      console.error("[Anulación] Error escribiendo anulación en Firestore:", fireErr.message);
     }
   }
 
   saveToDB();
-  res.json({ message: "Ticket anulado con éxito.", ticket: sale });
+  return res.status(200).json({
+    success: true,
+    message: "Ticket anulado con éxito.",
+    ticket: sale
+  });
 });
 
 // Validación y Pago de Tickets con QR

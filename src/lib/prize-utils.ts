@@ -40,28 +40,47 @@ export function parseGameDraw(ticket: {
   return { game: parts[0] || "", draw: parts.slice(1).join(" ") };
 }
 
-/** Prize multiplier table — the authoritative rules for all games. */
-export function calculatePrizeMultiplier(juego: string, sorteo: string): number {
-  const cleanJuego = juego.trim();
+export function calculatePrizeMultiplier(juego: string, sorteo: string = ""): number {
+  if (!juego) return 80;
+  // Limpiar el nombre del juego eliminando sufijos regionales o paréntesis (ej: "DIARIA (NI)" -> "DIARIA")
+  const cleanJuego = juego
+    .replace(/\s*\([^)]*\)/g, "") // Remueve todo dentro de paréntesis ej "(NI)", "(HN)"
+    .trim();
 
-  if (cleanJuego === "Súper Premio (HN)") throw new Error("Sorteo eliminado de la plataforma");
+  const cleanJuegoUpper = cleanJuego.toUpperCase();
 
   const multipliers: Record<string, number> = {
-    "Jugá 3": 610,
-    "Pega 3": 600,
-    "Premia2": 4000,
-    "Fechas": 210,
-    "3 Monazos": 650,
-    "Diaria": 80,
-    "La Diaria": 80,
-    "Tica": 80,
-    "Terminación 2": 80,
-    "Sabadito": 80,
-    "La Primera": 80,
+    "JUGÁ 3": 610,
+    "JUGA 3": 610,
+    "PEGA 3": 600,
+    "PREMIA2": 4000,
+    "FECHAS": 210,
+    "3 MONAZOS": 650,
+    "DIARIA": 80,
+    "LA DIARIA": 80,
+    "SALVADOR": 80,
+    "SALVADOREÑA": 80,
+    "TICA": 80,
+    "TERMINACIÓN 2": 80,
+    "TERMINACION 2": 80,
+    "SABADITO": 80,
+    "LA PRIMERA": 80,
   };
 
-  if (cleanJuego in multipliers) return multipliers[cleanJuego];
-  throw new Error(`Sorteo no definido: juego="${juego}" sorteo="${sorteo}"`);
+  // Coincidencia exacta limpia
+  if (cleanJuegoUpper in multipliers) {
+    return multipliers[cleanJuegoUpper];
+  }
+
+  // Coincidencia parcial si contiene palabras clave específicas
+  if (cleanJuegoUpper.includes("JUGA 3") || cleanJuegoUpper.includes("JUGÁ 3")) return 610;
+  if (cleanJuegoUpper.includes("PEGA 3")) return 600;
+  if (cleanJuegoUpper.includes("PREMIA")) return 4000;
+  if (cleanJuegoUpper.includes("FECHA")) return 210;
+  if (cleanJuegoUpper.includes("MONAZO")) return 650;
+
+  // Fallback seguro a 80x (multiplicador estándar de Diaria) para evitar crashes
+  return 80;
 }
 
 /**

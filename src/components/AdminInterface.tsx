@@ -223,6 +223,11 @@ export default function AdminInterface({
   const [newSorteoDias, setNewSorteoDias] = useState<number[]>([]);
   const [sorteoEditando, setSorteoEditando] = useState<any>(null);
 
+  // Rename Game Modal States
+  const [isRenameGameModalOpen, setIsRenameGameModalOpen] = useState(false);
+  const [gameToRename, setGameToRename] = useState("");
+  const [newGameNameInput, setNewGameNameInput] = useState("");
+
   // Results (Resultados) Section States
   const [resultsList, setResultsList] = useState<any[]>([]);
   const [selectedPaisResultados, setSelectedPaisResultados] = useState("Nicaragua");
@@ -740,7 +745,7 @@ export default function AdminInterface({
     const PAISES_GAMES: Record<string, string[]> = {
       Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"],
       Honduras: ["La Diaria", "Premia2", "Pega 3", "Súper Premio"],
-      "El Salvador": ["Diaria"],
+      "El Salvador": ["SALVADOR"],
       "La Primera": ["La Primera"],
       "Costa Rica": ["3 Monazos", "Tica"]
     };
@@ -1508,6 +1513,104 @@ export default function AdminInterface({
       setAlertText("Error al eliminar el sorteo.");
     }
   };
+
+  // Rename Game across all sorteos
+  const handleRenameGame = async (oldGameName: string, newGameName: string) => {
+    const trimmedNew = newGameName.trim();
+    if (!trimmedNew) {
+      toast.error("El nombre del juego no puede estar vacío.");
+      return;
+    }
+    if (oldGameName === trimmedNew) {
+      setIsRenameGameModalOpen(false);
+      return;
+    }
+
+    setSubmitting(true);
+    const updatedSorteos = config.sorteos.map(s => {
+      if (s.juego === oldGameName) {
+        // Actualizar el atributo juego de manera limpia.
+        // Si s.nombre iniciaba exactamente con el nombre antiguo, actualizar el prefijo.
+        let nuevoNombreSorteo = s.nombre;
+        if (s.nombre.startsWith(oldGameName + " ")) {
+          nuevoNombreSorteo = trimmedNew + " " + s.nombre.substring(oldGameName.length + 1);
+        } else if (s.nombre === oldGameName) {
+          nuevoNombreSorteo = trimmedNew;
+        }
+
+        return {
+          ...s,
+          juego: trimmedNew,
+          nombre: nuevoNombreSorteo
+        };
+      }
+      return s;
+    });
+
+    const success = await onUpdateConfig({ sorteos: updatedSorteos });
+    setSubmitting(false);
+    if (success) {
+      toast.success(`Juego "${oldGameName}" cambiado a "${trimmedNew}" exitosamente.`);
+      setIsRenameGameModalOpen(false);
+      setGameToRename("");
+      setNewGameNameInput("");
+    } else {
+      toast.error("Error al renombra el juego.");
+    }
+  };
+
+  // Limpieza y migración automática de sorteos (remover prefijos duplicados tipo "HONDURAS HONDURA 11:00 AM (HN)")
+  const handleLimpiarNombresSorteos = async () => {
+    let huboCambios = false;
+
+    const updatedSorteos = config.sorteos.map(s => {
+      let nuevoNombre = s.nombre;
+
+      // Corregir duplicados como "HONDURAS HONDURA 11:00 AM (HN)" -> "HONDURAS 11:00 AM (HN)"
+      if (/^([A-Z0-9_]+)\s+\1/i.test(nuevoNombre)) {
+        nuevoNombre = nuevoNombre.replace(/^([A-Z0-9_]+)\s+\1/i, "$1");
+        huboCambios = true;
+      }
+      if (/^HONDURAS\s+HONDURA\b/i.test(nuevoNombre)) {
+        nuevoNombre = nuevoNombre.replace(/^HONDURAS\s+HONDURA\b/i, "HONDURAS");
+        huboCambios = true;
+      }
+      if (/^SALVADOR\s+SALVADOR\b/i.test(nuevoNombre)) {
+        nuevoNombre = nuevoNombre.replace(/^SALVADOR\s+SALVADOR\b/i, "SALVADOR");
+        huboCambios = true;
+      }
+
+      // Separación de El Salvador a su propio juego SALVADOR si aún decía Diaria
+      const esSorteoSV = s.nombre.includes("(SV)") || String(s.id || "").startsWith("sv_") || String(s.id || "").startsWith("sv-");
+      let juegoFinal = s.juego;
+      if (esSorteoSV && s.juego !== "SALVADOR") {
+        juegoFinal = "SALVADOR";
+        nuevoNombre = nuevoNombre.replace(/^Diaria\b/i, "SALVADOR");
+        huboCambios = true;
+      }
+
+      if (nuevoNombre !== s.nombre || juegoFinal !== s.juego) {
+        return {
+          ...s,
+          juego: juegoFinal,
+          nombre: nuevoNombre
+        };
+      }
+      return s;
+    });
+
+    if (huboCambios) {
+      console.log("[AdminInterface] Limpiando nombres de sorteos duplicados en Firestore...");
+      await onUpdateConfig({ sorteos: updatedSorteos });
+    }
+  };
+
+  // Ejecutar limpieza al cargar datos de configuración
+  useEffect(() => {
+    if (config?.sorteos && config.sorteos.length > 0) {
+      handleLimpiarNombresSorteos();
+    }
+  }, [config?.sorteos]);
 
   // Save winning number (Resultado)
   const handleSaveResultado = async (e: FormEvent) => {
@@ -2552,10 +2655,112 @@ export default function AdminInterface({
 
             {/* Lottery Draws scheduling */}
             <div className="bg-white p-6 rounded-2xl border border-gray-300 shadow-xs space-y-4">
-              <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block border-b border-gray-100 pb-2">3. Programación de Sorteos y Cierre de Tiempo</span>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-100 pb-2 gap-2">
+                <span className="font-display font-black text-sm text-gray-900 uppercase tracking-wider block">3. Programación de Sorteos y Gestión de Juegos</span>
+              </div>
               <p className="text-xs text-gray-400 font-sans">
-                Determine los horarios límites en que los sorteos bloquean automáticamente las ventas. Los servidores rechazan cualquier ticket ingresado después de la hora de cierre de manera infranqueable.
+                Edite los nombres de los juegos configurados (los cambios se sincronizan en tiempo real con la pantalla del vendedor) o configure horarios de sorteos y cierres automáticos.
               </p>
+
+              {/* Juegos Configurados - Editar Nombres */}
+              <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-2xl space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-display font-black text-blue-900 uppercase tracking-wider">Juegos Configurados en el Sistema</span>
+                  <span className="text-[10px] text-blue-700 font-bold bg-blue-100 px-2 py-0.5 rounded-full">
+                    {Array.from(new Set(config.sorteos.map(s => s.juego))).length} Juegos
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {Array.from(new Set(config.sorteos.map(s => s.juego))).map((juego) => (
+                    <div
+                      key={juego}
+                      className="bg-white border border-blue-200 shadow-2xs rounded-xl px-3 py-1.5 flex items-center space-x-2"
+                    >
+                      <span className="font-display font-black text-xs text-gray-900">{juego}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGameToRename(juego);
+                          setNewGameNameInput(juego);
+                          setIsRenameGameModalOpen(true);
+                        }}
+                        className="p-1 text-blue-600 hover:text-blue-900 hover:bg-blue-100 rounded-md transition-colors cursor-pointer"
+                        title={`Editar nombre del juego ${juego}`}
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {Array.from(new Set(config.sorteos.map(s => s.juego))).length === 0 && (
+                    <span className="text-xs text-gray-400 font-medium">No hay juegos registrados en los sorteos.</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Modal para Renombrar Juego */}
+              <AnimatePresence>
+                {isRenameGameModalOpen && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+                    <motion.div
+                      initial={{ scale: 0.95, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.95, opacity: 0 }}
+                      className="bg-white rounded-2xl p-6 shadow-2xl max-w-md w-full border border-gray-200 space-y-4"
+                    >
+                      <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+                        <div className="flex items-center space-x-2">
+                          <Edit2 className="w-5 h-5 text-blue-600" />
+                          <h3 className="font-display font-black text-sm text-gray-900 uppercase tracking-wider">
+                            Editar Nombre de Juego
+                          </h3>
+                        </div>
+                        <button
+                          onClick={() => setIsRenameGameModalOpen(false)}
+                          className="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      <div className="space-y-3">
+                        <p className="text-xs text-gray-500 font-sans">
+                          Modifique el nombre del juego <strong className="text-gray-900">{gameToRename}</strong>. Se actualizarán automáticamente todos los sorteos vinculados a este juego en Firestore.
+                        </p>
+                        <div>
+                          <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">
+                            Nuevo Nombre del Juego
+                          </label>
+                          <input
+                            type="text"
+                            value={newGameNameInput}
+                            onChange={(e) => setNewGameNameInput(e.target.value)}
+                            placeholder="Ej. Diaria Pro, Fechas Tica..."
+                            className="w-full px-3 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-xs font-bold text-gray-900 focus:outline-none focus:border-blue-900 focus:bg-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex space-x-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsRenameGameModalOpen(false)}
+                          className="flex-1 py-2.5 rounded-xl border border-gray-300 font-display font-bold text-xs text-gray-600 uppercase hover:bg-gray-50 transition-colors cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRenameGame(gameToRename, newGameNameInput)}
+                          disabled={submitting}
+                          className="flex-1 py-2.5 rounded-xl bg-blue-900 hover:bg-blue-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          Guardar Cambios
+                        </button>
+                      </div>
+                    </motion.div>
+                  </div>
+                )}
+              </AnimatePresence>
 
               {/* List of active draws grouped by country */}
               <div className="space-y-4">
@@ -2640,20 +2845,20 @@ export default function AdminInterface({
 
                   <div>
                     <label className="block text-[10px] font-sans font-bold text-gray-500 uppercase mb-1">Juego</label>
-                    <select
+                    <input
                       id="new-sorteo-juego"
+                      type="text"
+                      list="existing-games-list"
+                      placeholder="Ej. SALVADOR, Diaria, Tica..."
                       value={newSorteoJuego}
                       onChange={(e) => setNewSorteoJuego(e.target.value)}
-                      className="w-full px-2 py-2 min-h-[44px] bg-white border border-gray-300 rounded-lg text-xs font-semibold focus:outline-none"
-                    >
-                      {((newSorteoPais === "Nicaragua" ? ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"] :
-                        newSorteoPais === "Honduras" ? ["La Diaria", "Premia2", "Pega 3", "Súper Premio"] :
-                          newSorteoPais === "El Salvador" ? ["Diaria"] :
-                            newSorteoPais === "La Primera" ? ["La Primera"] :
-                              newSorteoPais === "Costa Rica" ? ["3 Monazos", "Tica"] : ["Diaria"]) as string[]).map((game) => (
-                                <option key={game} value={game}>{game}</option>
-                              ))}
-                    </select>
+                      className="w-full px-2 py-2 min-h-[44px] bg-white border border-gray-300 rounded-lg text-xs font-bold text-gray-900 focus:outline-none"
+                    />
+                    <datalist id="existing-games-list">
+                      {Array.from(new Set(config.sorteos.map(s => s.juego))).map(game => (
+                        <option key={game} value={game} />
+                      ))}
+                    </datalist>
                   </div>
 
                   <div>

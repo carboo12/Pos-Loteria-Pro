@@ -39,8 +39,9 @@ export default defineConfig(() => {
       // del servidor (server.ts usa PORT || 8080). Configurable con $env:PORT.
       proxy: {
         '/api': {
-          target: `http://localhost:${process.env.PORT || '8080'}`,
+          target: process.env.VITE_API_URL || `http://127.0.0.1:${process.env.PORT || '8080'}`,
           changeOrigin: true,
+          secure: false,
         },
       },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
