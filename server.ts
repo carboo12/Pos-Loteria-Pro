@@ -416,8 +416,10 @@ async function saveToDB() {
   if (isReady) {
     try {
       const firestoreDb = getFirestoreInstance();
-
-      await firestoreDb.collection("configuracion").doc("general").set(db.configuracion);
+      // Save configuracion/general excluding contador_global_tickets so bulk saves (cierres, admin updates)
+      // NEVER overwrite or rewind the atomic global counter in Firestore.
+      const { contador_global_tickets, ...configWithoutCounter } = db.configuracion;
+      await firestoreDb.collection("configuracion").doc("general").set(configWithoutCounter, { merge: true });
       await firestoreDb.collection("configuracion").doc("fcm").set({ tokens: db.fcm_tokens || [] });
 
       for (const u of db.usuarios) {
@@ -1950,15 +1952,49 @@ app.get("/api/ping", (req, res) => {
 });
 
 // Sales (Ventas)
-app.get("/api/ventas", (req, res) => {
+app.get("/api/ventas", async (req, res) => {
   if (req.query.ticket) {
     const ticketId = (req.query.ticket as string).toUpperCase();
-    const found = db.ventas.find((v: any) =>
+    let found = db.ventas.find((v: any) =>
       v.id === ticketId ||
       v.numero_ticket === ticketId ||
       v.id_ticket === ticketId ||
       (v.firma_digital && v.firma_digital.toUpperCase() === ticketId)
     );
+
+    if (!found && initFirebaseAdmin()) {
+      try {
+        const firestoreDb = getFirestoreInstance();
+        // 1. Direct doc lookup by auto-ID or correlativo ID
+        const docRef = await firestoreDb.collection("tickets").doc(ticketId).get();
+        if (docRef.exists) {
+          found = { id: docRef.id, ...docRef.data() };
+        } else {
+          // 2. Query by numero_ticket field
+          const qNum = await firestoreDb.collection("tickets").where("numero_ticket", "==", ticketId).limit(1).get();
+          if (!qNum.empty) {
+            const doc = qNum.docs[0];
+            found = { id: doc.id, ...doc.data() };
+          } else {
+            // 3. Query by firma_digital field
+            const qFirma = await firestoreDb.collection("tickets").where("firma_digital", "==", ticketId).limit(1).get();
+            if (!qFirma.empty) {
+              const doc = qFirma.docs[0];
+              found = { id: doc.id, ...doc.data() };
+            }
+          }
+        }
+        if (found) {
+          // Cache in memory array if missing
+          if (!db.ventas.some((v: any) => v.id === found.id)) {
+            db.ventas.push(found);
+          }
+        }
+      } catch (fsErr) {
+        console.error("[GET /api/ventas] Error buscando ticket en Firestore:", fsErr);
+      }
+    }
+
     return res.json(found ? [found] : []);
   }
   res.json(db.ventas);
@@ -2176,14 +2212,18 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     }
   }
 
-  // 3. ATOMIC COUNTER: Firestore transaction to get sequential ticket ID
+  // 3. ATOMIC COUNTER: Firestore transaction to get sequential ticket ID and auto-ID doc
   const serverTimeStr = getNicaraguaISOString();
   let numero_ticket = "";
+  let ticketDocId = "";
   let firestoreCreated = false;
+  let newSaleData: any = null;
 
   try {
     const firestoreDb = getFirestoreInstance();
     const configRef = firestoreDb.collection("configuracion").doc("general");
+    const ticketRef = firestoreDb.collection("tickets").doc(); // Auto-ID document reference
+    ticketDocId = ticketRef.id;
 
     await firestoreDb.runTransaction(async (transaction) => {
       const configSnap = await transaction.get(configRef);
@@ -2200,8 +2240,6 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
       // Atomically increment the counter
       transaction.update(configRef, { contador_global_tickets: newCounter });
 
-      // Create the ticket document with sequential ID as the document ID
-      const ticketRef = firestoreDb.collection("tickets").doc(numero_ticket);
       const signature = generateDigitalSignature(numero_ticket, serverTimeStr, juego, numero_jugado, monto_pago, moneda);
 
       // Normalize jugadas: preserve dia_juego if present, but NEVER let a jugada's date
@@ -2215,10 +2253,10 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
         : [{ numero: numero_jugado, monto: Number(monto_pago) }];
 
       // AUDIT: verify fecha_venta is today before writing to Firestore
-      process.stdout.write(`[AUDIT Firestore] ticket ${numero_ticket}: fecha_venta_servidor=${fecha_venta_servidor} | jugadas=${JSON.stringify(jugadasNormalized)}\n`);
+      process.stdout.write(`[AUDIT Firestore] ticket ${numero_ticket} (doc ${ticketDocId}): fecha_venta_servidor=${fecha_venta_servidor} | jugadas=${JSON.stringify(jugadasNormalized)}\n`);
 
-      transaction.set(ticketRef, {
-        // ── New canonical fields ──
+      newSaleData = {
+        id: ticketDocId,
         id_ticket: numero_ticket,
         id_vendedor,
         fecha_emision: serverTimeStr,
@@ -2243,13 +2281,16 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
         moneda,
         juego,
         sorteo,
-      });
+      };
+
+      // transaction.create() guarantees atomic creation and fails immediately if document already exists
+      transaction.create(ticketRef, newSaleData);
     });
 
     firestoreCreated = true;
     // Sync counter to local DB
     db.configuracion.contador_global_tickets = parseInt(numero_ticket, 10);
-    console.log(`[Ventas] Ticket ${numero_ticket} creado en Firestore (transacción atómica)`);
+    console.log(`[Ventas] Ticket ${numero_ticket} (doc ${ticketDocId}) creado en Firestore con transaction.create()`);
   } catch (txErr: any) {
     console.error("[Ventas] FALLO transacción Firestore — ticket NO creado:", txErr.message);
     return res.status(500).json({
@@ -2258,15 +2299,11 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     });
   }
 
-  const ticketId = numero_ticket;
-  const signature = generateDigitalSignature(ticketId, serverTimeStr, juego, numero_jugado, monto_pago, moneda);
-
-  const newSale: any = {
-    id: ticketId,
-    id_ticket: ticketId,
-    numero_ticket: ticketId,
+  const newSale = newSaleData || {
+    id: ticketDocId,
+    id_ticket: numero_ticket,
+    numero_ticket,
     timestamp_servidor: serverTimeStr,
-    // fecha_venta: SIEMPRE la fecha del servidor. Nunca la del sorteo apostado.
     fecha_venta: fecha_venta_servidor,
     juego,
     sorteo,
@@ -2278,10 +2315,9 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     nombre_vendedor: (user.nombre || '').toUpperCase().trim(),
     nombre_cliente: nombre_cliente || "Genérico",
     premio_posible_cs: Number(premio_posible_cs) || 0,
-    firma_digital: signature,
+    firma_digital: generateDigitalSignature(numero_ticket, serverTimeStr, juego, numero_jugado, monto_pago, moneda),
     anulado: false,
     estado: "pendiente",
-    // Multi-número: persistir jugadas con dia_juego si vienen
     ...(Array.isArray(jugadas) && jugadas.length > 0 ? { jugadas: jugadas.map((j: any) => ({ numero: j.numero, monto: Number(j.monto), ...(j.dia_juego ? { dia_juego: j.dia_juego } : {}) })) } : {})
   };
 

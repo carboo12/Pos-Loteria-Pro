@@ -132,6 +132,34 @@ export default function VendedorInterface({
   // Navigation tabs & Sidebar Drawer state
   const [activeTab, setActiveTab] = useState<"venta" | "reportes" | "pagos">("venta");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  // Dynamic viewport listener for mobile keyboard detection on FAB
+  const [fabBottomPx, setFabBottomPx] = useState<number>(24); // default bottom-6 = 24px
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+
+    const handleViewportResize = () => {
+      const vv = window.visualViewport;
+      if (!vv) return;
+      // Calculate how much the viewport shrunk due to virtual keyboard
+      const keyboardHeight = window.innerHeight - vv.height - vv.offsetTop;
+      if (keyboardHeight > 100) {
+        // Keyboard is visible -> float FAB above keyboard with comfortable padding
+        setFabBottomPx(keyboardHeight + 24);
+      } else {
+        setFabBottomPx(24);
+      }
+    };
+
+    const vv = window.visualViewport;
+    vv.addEventListener("resize", handleViewportResize);
+    vv.addEventListener("scroll", handleViewportResize);
+    return () => {
+      vv.removeEventListener("resize", handleViewportResize);
+      vv.removeEventListener("scroll", handleViewportResize);
+    };
+  }, []);
   
   // Filtros y estados de Firestore para Reportes
   const [reportFilterFechaInicio, setReportFilterFechaInicio] = useState(() => getLocalTodayStr());
@@ -2142,23 +2170,6 @@ export default function VendedorInterface({
                   />
                 </div>
 
-                {/* Posible Premio Indicator — shows current input + accumulated cart */}
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex justify-between items-center">
-                  <span className="text-xs font-display font-black text-blue-900 uppercase tracking-wider">Premio Posible:</span>
-                  <span className="font-mono text-lg font-black text-emerald-600">
-                    C$ {(() => {
-                      if (!selectedJuego || !selectedSorteo) return "0.00";
-                      const currentPremio = (() => {
-                        const amt = Number(montoPago) || 0;
-                        const amtCs = moneda === "USD" ? amt * (config.tasa_cambio || 36.50) : amt;
-                        return amtCs * calculatePrizeMultiplier(selectedJuego, selectedSorteo);
-                      })();
-                      const total = totalTicketPremio + currentPremio;
-                      return total.toFixed(2);
-                    })()}
-                  </span>
-                </div>
-
                 {/* Dynamic Alarm for Granular Risk Control */}
                 {isLimitBlocked && limitCheckResult && (
                   <div id="monto-max-alerta" className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-2 text-xs text-red-950 font-sans font-bold shadow-xs animate-pulse">
@@ -2604,7 +2615,8 @@ export default function VendedorInterface({
                                   setJugadas(t.jugadas.map((j: any) => ({
                                     numero: j.numero,
                                     monto: j.monto,
-                                    premio_posible: j.premio_posible || (j.monto * calculatePrizeMultiplier(game, draw))
+                                    premio_posible: j.premio_posible || (j.monto * calculatePrizeMultiplier(game, draw)),
+                                    ...(j.dia_juego ? { dia_juego: j.dia_juego } : {})
                                   })));
                                 } else if (t.numero_jugado) {
                                   const mult = calculatePrizeMultiplier(game, draw);
@@ -3004,7 +3016,8 @@ export default function VendedorInterface({
           type="button"
           onClick={handleGenerarTicket}
           disabled={isSubmittingTicket}
-          className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-2xl flex items-center justify-center cursor-pointer transition-transform hover:scale-105 active:scale-95 border-2 border-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ bottom: `${fabBottomPx}px` }}
+          className="fixed right-6 z-40 w-14 h-14 rounded-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-2xl flex items-center justify-center cursor-pointer transition-[bottom,transform] duration-200 hover:scale-105 active:scale-95 border-2 border-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
           title="Generar e Imprimir Ticket"
         >
           {isSubmittingTicket ? (
