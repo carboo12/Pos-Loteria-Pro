@@ -89,7 +89,7 @@ interface TicketPreviewModalProps {
   onClose: () => void;
   userRole?: string;
   serverTime?: string;
-  onPrint?: () => void;
+  onPrint?: (() => void) | (() => Promise<void>);
   onlyView?: boolean;
   onAnular?: (ticketId: string) => void | Promise<void>;
 }
@@ -135,6 +135,8 @@ function openTicketImage(blob: Blob, fileName: string): void {
 export default function TicketPreviewModal({ ticket, config, onClose, userRole = "vendedor", serverTime, onPrint, onlyView = false, onAnular }: TicketPreviewModalProps) {
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
   const ticketRenderRef = useRef<HTMLDivElement>(null);
 
   // Compute current time in Nicaragua timezone for draw close check
@@ -570,19 +572,50 @@ ${config.formato_ticket.mensaje_pie}
           </div>
         )}
 
+        {/* Aviso de error de impresora */}
+        {printError && (
+          <div className="mx-4 mt-3 p-3 bg-orange-50 border border-orange-300 rounded-xl text-orange-900 font-sans text-xs flex items-start space-x-2.5 shadow-xs animate-pulse">
+            <Printer className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
+            <span className="leading-snug">{printError}</span>
+          </div>
+        )}
+
         {/* Action buttons (Large POS-style) */}
         {!onlyView && (
           <div className="p-4 bg-white grid grid-cols-2 gap-3 border-t border-gray-100">
             <button
               id="print-ticket-btn"
-              onClick={onPrint ? onPrint : handlePrintRaw}
-              className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center cursor-pointer shadow-sm border-b-2 ${isBlocked || sharing
+              disabled={isBlocked || sharing || printing}
+              onClick={async () => {
+                if (!onPrint) {
+                  // Sin impresora BT vinculada: mostrar advertencia clara, NUNCA navigator.share
+                  setPrintError("Ninguna impresora Bluetooth vinculada. Usa el botón \u{1F5A8} para vincular una impresora.");
+                  setTimeout(() => setPrintError(null), 5000);
+                  return;
+                }
+                setPrinting(true);
+                setPrintError(null);
+                try {
+                  await onPrint();
+                } finally {
+                  setPrinting(false);
+                }
+              }}
+              className={`flex items-center justify-center space-x-2 py-3 px-4 rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-center cursor-pointer shadow-sm border-b-2 ${
+                isBlocked || sharing || printing
                   ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed border-b-0"
                   : "bg-blue-900 text-white hover:bg-blue-800 active:scale-95 border-blue-950"
-                }`}
+              }`}
             >
-              <Printer className="w-4 h-4" />
-              <span>Imprimir</span>
+              {printing ? (
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+              ) : (
+                <Printer className="w-4 h-4" />
+              )}
+              <span>{printing ? "Imprimiendo..." : "Imprimir"}</span>
             </button>
 
             <button

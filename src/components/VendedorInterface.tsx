@@ -262,7 +262,14 @@ export default function VendedorInterface({
   const [printerStatus, setPrinterStatus] = useState<PrinterStatus>("disconnected");
   const printerRef = useRef<BluetoothPrinterService | undefined>(undefined);
 
-  if (!printerRef.current) {
+  // Crear (o recrear) la instancia si:
+  //   a) Es la primera vez (montaje inicial)
+  //   b) HMR actualizó el módulo y la instancia anterior no tiene el método nuevo
+  if (
+    !printerRef.current ||
+    typeof (printerRef.current as any).connectForPrint !== "function"
+  ) {
+    printerRef.current?.destroy();
     printerRef.current = new BluetoothPrinterService((status) => setPrinterStatus(status));
   }
 
@@ -497,13 +504,16 @@ export default function VendedorInterface({
   };
 
   const clearForm = () => {
+    setJugadas([]);
     setNumeroJugado("");
     setMontoPago("");
+    setNombreCliente("Genérico");
     const nicNow = getNicaraguaNow();
     setFechaVenta({ dia: String(nicNow.getDate()).padStart(2, "0"), mes: MESES[nicNow.getMonth()], anio: nicNow.getFullYear() });
     setErrorMessage(null);
     setSuccessMessage(null);
     setActiveField("numero");
+    toast.success("Listado de jugadas borrado", { position: 'top-center', duration: 2000 });
     if (selectedJuego === "Fechas") {
       const diaInput = document.getElementById("fecha-dia-input") as HTMLInputElement;
       if (diaInput) setTimeout(() => diaInput.focus(), 0);
@@ -1090,49 +1100,67 @@ export default function VendedorInterface({
     setSelectedSorteo("");
   }, [selectedPais]);
 
+  // Ref para detectar cambio REAL de juego (evitar sobreescribir selección manual del vendedor)
+  const prevSelectedJuegoRef = useRef<string>("");
+
   useEffect(() => {
     if (!selectedJuego) return;
-    
-    // Select default draw when game or drawings change
-    const filteredSorteos = getSorteosByGame(selectedJuego);
-    const activeDraw = filteredSorteos.find(s => !isSorteoCerrado(s));
-    if (activeDraw) {
-      setSelectedSorteo(activeDraw.nombre);
-    } else if (filteredSorteos.length > 0) {
-      setSelectedSorteo(filteredSorteos[0].nombre);
-    } else {
-      setSelectedSorteo("");
-    }
-    
-    // Reset fecha to valid date for the selected sorteo
-    const newActiveDraw = getSorteosByGame(selectedJuego).find(s => !isSorteoCerrado(s)) || getSorteosByGame(selectedJuego)[0];
-    if (newActiveDraw) {
-      setFechaVenta(parseDateStrToFechaVenta(getNextValidDate(newActiveDraw, getNicaraguaNow())));
-    } else {
-      const nicNow = getNicaraguaNow();
-      setFechaVenta({ dia: String(nicNow.getDate()).padStart(2, "0"), mes: MESES[nicNow.getMonth()], anio: nicNow.getFullYear() });
-    }
-    
-    // Set default value for Fechas and auto-focus the appropriate input
-    if (selectedJuego === "Fechas") {
-      setFechaVenta(prev => ({ ...prev, dia: "", mes: "" }));
-      setNumeroJugado("");
-      if (ventaStep === 3) {
-        setTimeout(() => {
-          const diaInput = document.getElementById("fecha-dia-input") as HTMLInputElement;
-          if (diaInput) {
-            diaInput.focus();
-            diaInput.select();
-          }
-        }, 80);
-      }
-    } else {
-      setNumeroJugado("");
-      if (ventaStep === 3) {
-        setTimeout(() => numeroInputRef.current?.focus(), 80);
+
+    const juegoActuallyCambiado = prevSelectedJuegoRef.current !== selectedJuego;
+    prevSelectedJuegoRef.current = selectedJuego;
+
+    // Solo auto-seleccionar sorteo si:
+    //   a) El juego cambió (el vendedor eligió un juego distinto), O
+    //   b) No hay sorteo seleccionado todavía
+    // NUNCA sobreescribir si el vendedor ya eligió un sorteo para este mismo juego.
+    const sorteoActualEsDeEsteJuego = getSorteosByGame(selectedJuego).some(
+      s => s.nombre === selectedSorteo
+    );
+
+    if (juegoActuallyCambiado || !sorteoActualEsDeEsteJuego) {
+      const filteredSorteos = getSorteosByGame(selectedJuego);
+      const activeDraw = filteredSorteos.find(s => !isSorteoCerrado(s));
+      if (activeDraw) {
+        setSelectedSorteo(activeDraw.nombre);
+      } else if (filteredSorteos.length > 0) {
+        setSelectedSorteo(filteredSorteos[0].nombre);
+      } else {
+        setSelectedSorteo("");
       }
     }
-  }, [selectedJuego, selectedPais, config.sorteos, ventaStep]);
+
+    // Resetear fecha al cambiar de juego (no al cambiar sorteo manualmente)
+    if (juegoActuallyCambiado) {
+      const newActiveDraw = getSorteosByGame(selectedJuego).find(s => !isSorteoCerrado(s)) || getSorteosByGame(selectedJuego)[0];
+      if (newActiveDraw) {
+        setFechaVenta(parseDateStrToFechaVenta(getNextValidDate(newActiveDraw, getNicaraguaNow())));
+      } else {
+        const nicNow = getNicaraguaNow();
+        setFechaVenta({ dia: String(nicNow.getDate()).padStart(2, "0"), mes: MESES[nicNow.getMonth()], anio: nicNow.getFullYear() });
+      }
+
+      // Set default value for Fechas and auto-focus the appropriate input
+      if (selectedJuego === "Fechas") {
+        setFechaVenta(prev => ({ ...prev, dia: "", mes: "" }));
+        setNumeroJugado("");
+        if (ventaStep === 3) {
+          setTimeout(() => {
+            const diaInput = document.getElementById("fecha-dia-input") as HTMLInputElement;
+            if (diaInput) {
+              diaInput.focus();
+              diaInput.select();
+            }
+          }, 80);
+        }
+      } else {
+        setNumeroJugado("");
+        if (ventaStep === 3) {
+          setTimeout(() => numeroInputRef.current?.focus(), 80);
+        }
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedJuego, selectedPais]);
 
   // Filter vendor sales: primary by id_vendedor, fallback by normalized name for legacy tickets (Memoized for mobile performance)
   const allMySales = useMemo(() => {
@@ -1746,7 +1774,7 @@ export default function VendedorInterface({
 
         {/* TAB 1: PANTALLA DE VENTA CON FLUJO DE 3 NIVELES EN CASCADA */}
         {activeTab === "venta" && (
-          <div className="space-y-4 animate-fade-in pb-6">
+          <div className="space-y-2.5 animate-fade-in pb-4">
             
             {/* Top Navigation Bar / Breadcrumb for Cascading Levels */}
             <div className="bg-white rounded-2xl p-3 shadow-sm border border-gray-200 flex justify-between items-center">
@@ -1947,9 +1975,9 @@ export default function VendedorInterface({
                         Total: {moneda} {totalTicketMonto.toFixed(2)}
                       </span>
                     </div>
-                    <div ref={cartContainerRef} className="max-h-[132px] overflow-y-auto divide-y divide-gray-100">
+                    <div ref={cartContainerRef} className="max-h-[105px] overflow-y-auto divide-y divide-gray-100">
                       {jugadas.map((j, i) => (
-                        <div key={i} className="flex items-center justify-between px-3 py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
+                        <div key={i} className="flex items-center justify-between px-3 py-1.5 border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
                           <span className="font-mono font-black text-black w-20 text-2xl shrink-0">{j.numero}</span>
                           <span className="font-mono font-black text-gray-700 flex-1 text-right text-2xl">
                             {moneda} {j.monto.toFixed(0)}
@@ -2203,38 +2231,54 @@ export default function VendedorInterface({
                 </form>
                 <div>
                   <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider mb-1">Nombre del Cliente</label>
-                  <input
-                    type="text"
-                    value={nombreCliente}
-                    onChange={(e) => setNombreCliente(e.target.value)}
-                    placeholder="Genérico"
-                    className="w-full p-2.5 rounded-xl border-2 border-gray-300 text-sm font-semibold focus:outline-none focus:border-blue-900 bg-white text-gray-900 shadow-inner"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={nombreCliente}
+                      onChange={(e) => setNombreCliente(e.target.value)}
+                      placeholder="Genérico"
+                      className="flex-1 p-2 rounded-xl border-2 border-gray-300 text-sm font-semibold focus:outline-none focus:border-blue-900 bg-white text-gray-900 shadow-inner h-11"
+                    />
+
+                    {/* BOTÓN ROJO CIRCULAR: Borrar Jugadas */}
+                    <button
+                      id="btn-borrar-jugadas-circ"
+                      type="button"
+                      onClick={clearForm}
+                      disabled={loading}
+                      className="w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 active:bg-red-700 text-white shadow-md flex items-center justify-center cursor-pointer transition-transform duration-200 hover:scale-105 active:scale-95 border-2 border-white/20 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                      title="Borrar todas las jugadas"
+                    >
+                      <Trash2 className="w-4.5 h-4.5 stroke-[2.2]" />
+                    </button>
+
+                    {/* BOTÓN VERDE CIRCULAR DOMINANTE: Facturar */}
+                    <button
+                      id="btn-facturar-cliente"
+                      type="button"
+                      onClick={handleGenerarTicket}
+                      disabled={isSubmittingTicket}
+                      className="w-13 h-13 rounded-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-xl flex items-center justify-center cursor-pointer transition-transform duration-200 hover:scale-105 active:scale-95 border-2 border-white/40 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                      title="Generar e Imprimir Ticket"
+                    >
+                      {isSubmittingTicket ? (
+                        <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Printer className="w-7 h-7 stroke-[2.4]" />
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Dynamic Alarm for Granular Risk Control */}
                 {isLimitBlocked && limitCheckResult && (
-                  <div id="monto-max-alerta" className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-2 text-xs text-red-950 font-sans font-bold shadow-xs animate-pulse">
+                  <div id="monto-max-alerta" className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-2 text-xs text-red-950 font-sans font-bold shadow-xs animate-pulse mt-2">
                     <AlertCircle className="w-4.5 h-4.5 text-[#EF4444] shrink-0 mt-0.5" />
                     <span>
                       NÚMERO BLOQUEADO: Límite de C$ {limitCheckResult.limitMontoCs.toLocaleString("es-ES")} alcanzado. Vendido hoy: C$ {limitCheckResult.totalPrevSalesCs.toLocaleString("es-ES")} | En carrito: C$ {(limitCheckResult.cartMatchingSum || 0).toLocaleString("es-ES")} | Disponible: C$ {(limitCheckResult.disponibleCs ?? 0).toLocaleString("es-ES")}.
                     </span>
                   </div>
                 )}
-
-                {/* Action Buttons — Clean Control Bar */}
-                <div className="flex flex-row gap-3 w-full">
-                  {/* BORRAR — Stitch Red */}
-                  <button
-                    type="button"
-                    onClick={clearForm}
-                    disabled={loading}
-                    className="w-full h-14 rounded-xl bg-red-500 hover:bg-red-600 active:bg-red-700 text-white font-display font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Trash2 className="w-5 h-5 stroke-[2.5]" />
-                    <span>Borrar Jugadas</span>
-                  </button>
-                </div>
               </>
             )}
 
@@ -3067,24 +3111,7 @@ export default function VendedorInterface({
         )}
       </AnimatePresence>
 
-      {/* Botón Flotante de Impresión (FAB) — Solo visible en Nivel 3 (Facturación) */}
-      {activeTab === "venta" && ventaStep === 3 && (
-        <button
-          id="fab-imprimir-btn"
-          type="button"
-          onClick={handleGenerarTicket}
-          disabled={isSubmittingTicket}
-          style={{ bottom: `${fabBottomPx}px` }}
-          className="fixed right-6 z-40 w-14 h-14 rounded-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-2xl flex items-center justify-center cursor-pointer transition-[bottom,transform] duration-200 hover:scale-105 active:scale-95 border-2 border-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Generar e Imprimir Ticket"
-        >
-          {isSubmittingTicket ? (
-            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          ) : (
-            <Printer className="w-7 h-7 stroke-[2.2]" />
-          )}
-        </button>
-      )}
+
 
       {/* Ticket Viewer Modal */}
       {activeTicket && (
@@ -3095,24 +3122,58 @@ export default function VendedorInterface({
           userRole={user.rol}
           serverTime={serverTime}
           onlyView={isVisualizing}
-          onPrint={printerRef.current && printerStatus === "connected" ? () => {
-            const printData = ticketDataFromVenta(activeTicket, config);
-            printData.logo_bytes = logoBytesRef.current;
-            const buffer = buildTicketBuffer(printData);
-            printerRef.current.print(buffer).then((ok) => {
+          onPrint={!printerRef.current ? undefined : async () => {
+            const svc = printerRef.current!;
+
+            // Si ya está conectado, imprimir directamente sin demora
+            if (svc.isConnected()) {
+              const printData = ticketDataFromVenta(activeTicket, config);
+              printData.logo_bytes = logoBytesRef.current;
+              const buffer = buildTicketBuffer(printData);
+              const ok = await svc.print(buffer);
               if (ok) {
                 toast.success("Ticket impreso en Bluetooth", { position: 'top-center', duration: 2000 });
               } else {
-                toast.error("No se pudo imprimir el ticket. Verifique la impresora.", {
-                  position: 'top-center',
-                  duration: 4000
-                });
+                toast.error("No se pudo imprimir. Verifique la impresora.", { position: 'top-center', duration: 4000 });
               }
-            }).catch((err) => {
-              console.error("Bluetooth print error:", err);
-              toast.error("Error inesperado al imprimir", { position: 'top-center', duration: 4000 });
-            });
-          } : undefined}
+              return;
+            }
+
+            // No conectado: lanzar reconexión con espera activa (hasta 15s)
+            // Esto evita el error falso cuando el BT de Android tarda en inicializarse
+            if (!svc.hasSavedDevice() && !svc.getDeviceName()) {
+              toast.error("Ninguna impresora vinculada. Usa el ícono 🖨 para vincular una.", {
+                position: 'top-center', duration: 5000
+              });
+              return;
+            }
+
+            const toastId = "bt-print-connect";
+            toast.loading("Conectando impresora...", { id: toastId, position: 'top-center' });
+            try {
+              const connected = await svc.connectForPrint(15000);
+              if (connected && svc.isConnected()) {
+                toast.success("Impresora conectada", { id: toastId, position: 'top-center', duration: 1200 });
+                const printData = ticketDataFromVenta(activeTicket, config);
+                printData.logo_bytes = logoBytesRef.current;
+                const buffer = buildTicketBuffer(printData);
+                const ok = await svc.print(buffer);
+                if (ok) {
+                  toast.success("Ticket impreso en Bluetooth", { position: 'top-center', duration: 2000 });
+                } else {
+                  toast.error("No se pudo imprimir. Verifique la impresora.", { position: 'top-center', duration: 4000 });
+                }
+              } else {
+                toast.error(
+                  "No se pudo conectar la impresora. Asegúrese de que esté encendida y cerca.",
+                  { id: toastId, position: 'top-center', duration: 5000 }
+                );
+              }
+            } catch (err) {
+              console.error("BT connectForPrint error:", err);
+              toast.error("Error al conectar la impresora.", { id: toastId, position: 'top-center', duration: 4000 });
+            }
+          }}
         />
       )}
 
