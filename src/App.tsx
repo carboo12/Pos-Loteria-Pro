@@ -227,10 +227,31 @@ export default function App() {
       doc(firestore, "configuracion", "general"),
       (snap) => {
         if (snap.exists()) {
-          setConfig(snap.data() as Configuracion);
+          const data = snap.data() as Configuracion;
+          setConfig(prev => ({
+            ...data,
+            resultados: prev?.resultados || data.resultados || []
+          }));
         }
       },
       (err) => console.error("[onSnapshot configuracion] Error:", err)
+    );
+    return () => unsubscribe();
+  }, []);
+
+  // Listener 5: Resultados en tiempo real de Firestore → setConfig.resultados
+  useEffect(() => {
+    const q = query(collection(firestore, "resultados"), orderBy("timestamp", "desc"));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const resultadosList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        setConfig(prev => ({
+          ...(prev || { sorteos: [] }),
+          resultados: resultadosList as any
+        }));
+      },
+      (err) => console.error("[onSnapshot resultados] Error:", err)
     );
     return () => unsubscribe();
   }, []);

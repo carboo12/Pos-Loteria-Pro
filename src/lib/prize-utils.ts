@@ -110,6 +110,110 @@ function toLocalDateStr(dateInput: unknown): string {
 }
 
 /**
+ * Normaliza el valor de un número o fecha (ej: "08-AGO" <-> "08-Agosto" <-> "08-08")
+ * para determinar si una jugada coincide con el número ganador oficial.
+ */
+export function isMatchingWinner(jugadoStr: string, ganadorStr: string, juegoName?: string): boolean {
+  if (!jugadoStr || !ganadorStr) return false;
+  const j = jugadoStr.trim().toLowerCase();
+  const g = ganadorStr.trim().toLowerCase();
+  if (j === g) return true;
+
+  // Normalizador especial para el juego Fechas
+  const normalizeMonth = (m: string) => {
+    const lower = m.toLowerCase().trim();
+    if (/^(1|01|enero|ene)$/.test(lower)) return "01";
+    if (/^(2|02|febrero|feb)$/.test(lower)) return "02";
+    if (/^(3|03|marzo|mar)$/.test(lower)) return "03";
+    if (/^(4|04|abril|abr)$/.test(lower)) return "04";
+    if (/^(5|05|mayo|may)$/.test(lower)) return "05";
+    if (/^(6|06|junio|jun)$/.test(lower)) return "06";
+    if (/^(7|07|julio|jul)$/.test(lower)) return "07";
+    if (/^(8|08|agosto|ago)$/.test(lower)) return "08";
+    if (/^(9|09|septiembre|setiembre|sep|set)$/.test(lower)) return "09";
+    if (/^(10|octubre|oct)$/.test(lower)) return "10";
+    if (/^(11|noviembre|nov)$/.test(lower)) return "11";
+    if (/^(12|diciembre|dic)$/.test(lower)) return "12";
+    return lower;
+  };
+
+  const parseDayMonth = (str: string): { dia: string; mes: string } | null => {
+    const clean = str.trim().replace(/[/._]/g, "-");
+    const parts = clean.split("-");
+    if (parts.length < 2) return null;
+    const dia = String(parseInt(parts[0], 10) || "").padStart(2, "0");
+    const mes = normalizeMonth(parts[1]);
+    return { dia, mes };
+  };
+
+  if (juegoName === "Fechas" || j.includes("-") || g.includes("-")) {
+    const parsedJ = parseDayMonth(j);
+    const parsedG = parseDayMonth(g);
+    if (parsedJ && parsedG) {
+      return parsedJ.dia === parsedG.dia && parsedJ.mes === parsedG.mes;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Busca de forma universal e infalible el objeto resultado oficial para un ticket en la lista config.resultados.
+ */
+export function findResultadoForTicket(
+  ticket: {
+    id_sorteo?: string;
+    juego_sorteo?: string;
+    juego?: string;
+    sorteo?: string;
+    fecha_venta?: string;
+    timestamp_servidor?: string;
+    fecha_emision_date?: any;
+    [key: string]: unknown;
+  },
+  config: {
+    sorteos?: { id: string; nombre: string; juego: string }[];
+    resultados?: { id_sorteo: string; sorteo?: string; fecha: string; numero_ganador: string }[];
+  }
+): { id_sorteo: string; fecha: string; numero_ganador: string } | null {
+  if (!config || !config.resultados || config.resultados.length === 0) return null;
+
+  const { game, draw } = parseGameDraw(ticket);
+  const sorteoObj = config.sorteos?.find(
+    (s) =>
+      (ticket.id_sorteo && s.id === ticket.id_sorteo) ||
+      (s.nombre === draw && s.juego === game) ||
+      s.nombre === ticket.sorteo
+  );
+
+  const ticketDateStr = (ticket.fecha_venta || getTicketDate(ticket as any) || "").trim();
+  const ticketLocalStr = toLocalDateStr(
+    ticket.fecha_emision_date || ticket.timestamp_servidor || ticket.fecha_venta
+  );
+
+  return (
+    config.resultados.find((r: any) => {
+      const sorteoMatches =
+        (sorteoObj && r.id_sorteo === sorteoObj.id) ||
+        (ticket.id_sorteo && r.id_sorteo === ticket.id_sorteo) ||
+        r.id_sorteo === draw ||
+        r.id_sorteo === ticket.sorteo ||
+        (r.sorteo && ticket.sorteo && r.sorteo.trim().toLowerCase() === ticket.sorteo.trim().toLowerCase());
+
+      if (!sorteoMatches) return false;
+
+      const dateMatches =
+        r.fecha === ticketDateStr ||
+        r.fecha === ticketLocalStr ||
+        (ticketDateStr && r.fecha && r.fecha.slice(0, 10) === ticketDateStr.slice(0, 10)) ||
+        (ticketLocalStr && r.fecha && r.fecha.slice(0, 10) === ticketLocalStr.slice(0, 10));
+
+      return dateMatches;
+    }) || null
+  );
+}
+
+/**
  * Compute the theoretical prize a ticket would pay based on official draw results.
  * Returns 0 if the ticket is annulled, the draw hasn't happened yet, or no numbers match.
  *
@@ -142,35 +246,27 @@ export function getTicketTheoreticalPrize(
   if (ticket.estado === "anulado") return 0;
 
   const { game, draw } = parseGameDraw(ticket);
-  if (!game || !draw) return 0;
+  if (!game && !ticket.juego) return 0;
 
-  // Date in CST to match sorteo result dates
-  const tDate = toLocalDateStr(
-    (ticket as any).fecha_emision_date || ticket.timestamp_servidor || ticket.fecha_venta
-  );
-  if (!tDate) return 0;
-
-  const sObj = config.sorteos?.find((d) => (d.nombre === draw && d.juego === game) || d.id === draw);
-  const rObj = sObj
-    ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
-    : null;
-
+  const rObj = findResultadoForTicket(ticket, config);
   if (!rObj) return 0;
 
-  const winnerNum = rObj.numero_ganador.trim().toLowerCase();
-  const multiplier = calculatePrizeMultiplier(game, draw);
+  const winnerNum = rObj.numero_ganador;
+  const gameName = (ticket.juego as string) || game;
+  const drawName = (ticket.sorteo as string) || draw;
+  const multiplier = calculatePrizeMultiplier(gameName, drawName);
   let prize = 0;
 
   if (ticket.jugadas && ticket.jugadas.length > 0) {
     for (const j of ticket.jugadas) {
-      if (j.numero.trim().toLowerCase() === winnerNum) {
+      if (isMatchingWinner(j.numero, winnerNum, gameName)) {
         let p = j.monto * multiplier;
         if (ticket.moneda === "USD") p *= config.tasa_cambio || 36.5;
         prize += p;
       }
     }
   } else if (ticket.numero_jugado) {
-    if (ticket.numero_jugado.trim().toLowerCase() === winnerNum) {
+    if (isMatchingWinner(ticket.numero_jugado, winnerNum, gameName)) {
       let p = (ticket.monto_pago || 0) * multiplier;
       if (ticket.moneda === "USD") p *= config.tasa_cambio || 36.5;
       prize += p;

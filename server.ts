@@ -467,6 +467,16 @@ async function syncFromFirestore() {
         await firestoreDb.collection("configuracion").doc("general").set(db.configuracion);
       }
 
+      const resultadosSnapshot = await firestoreDb.collection("resultados").get();
+      if (!resultadosSnapshot.empty) {
+        const resList: any[] = [];
+        resultadosSnapshot.forEach((doc: any) => {
+          resList.push({ id: doc.id, ...doc.data() });
+        });
+        db.configuracion.resultados = resList;
+        console.log(`[Firestore Sync] ${resList.length} resultados oficiales cargados desde Firestore.`);
+      }
+
       // Migración automática: sorteos de El Salvador etiquetados aún como "Diaria" → juego "SALVADOR"
       const isSorteoSV = (s: any) =>
         String(s.nombre || "").includes("(SV)") ||

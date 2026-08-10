@@ -43,7 +43,7 @@ import { BluetoothPrinterService, PrinterStatus } from "../services/BluetoothPri
 import { buildTicketBuffer, ticketDataFromVenta, loadLogoBitmap } from "../services/escpos-builder";
 import { isSorteoHabilitado, getDiasHabilitadosShortLabel, isDateValidForSorteo, getNextValidDate } from "../lib/sorteo-utils";
 import { toDateSafe, toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr, getNicaraguaISOString, getNicaraguaNow } from "../lib/date-utils";
-import { calculatePrizeMultiplier, getTicketTheoreticalPrize } from "../lib/prize-utils";
+import { calculatePrizeMultiplier, getTicketTheoreticalPrize, findResultadoForTicket, isMatchingWinner } from "../lib/prize-utils";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -647,20 +647,13 @@ export default function VendedorInterface({
         }
       }
 
-      const tDate = ticket.fecha_venta || getTicketDate(ticket);
-      const sObj = config?.sorteos?.find(d => 
-        (ticket.id_sorteo && d.id === ticket.id_sorteo) || (d.nombre === draw && d.juego === game)
-      );
-      const rObj = (config.resultados || []).find((r: any) =>
-        ((sObj && r.id_sorteo === sObj.id) || (ticket.id_sorteo && r.id_sorteo === ticket.id_sorteo) || r.id_sorteo === draw) &&
-        (r.fecha === tDate || r.fecha === toDateStr(ticket.timestamp_servidor))
-      );
+      const rObj = findResultadoForTicket(ticket, config);
 
       if (!rObj) {
         setPaymentResult({
           ganador: false,
           estado: "pendiente_sorteo",
-          message: `El sorteo ${game} ${draw} del ${tDate} aún no se ha realizado o no tiene resultados oficiales cargados.`,
+          message: `El sorteo ${game} ${draw} aún no se ha realizado o no tiene resultados oficiales cargados.`,
           monto: 0
         } as any);
         return;
@@ -668,23 +661,11 @@ export default function VendedorInterface({
 
       const officialWinnerNum = rObj.numero_ganador;
       let prizeAmount = 0;
-
-      const normFechas = (str: string) => (str || "").trim().toLowerCase().replace(/\b(enero|ene)\b/g, "ene").replace(/\b(febrero|feb)\b/g, "feb").replace(/\b(marzo|mar)\b/g, "mar").replace(/\b(abril|abr)\b/g, "abr").replace(/\b(mayo|may)\b/g, "may").replace(/\b(junio|jun)\b/g, "jun").replace(/\b(julio|jul)\b/g, "jul").replace(/\b(agosto|ago)\b/g, "ago").replace(/\b(septiembre|setiembre|sep|set)\b/g, "sep").replace(/\b(octubre|oct)\b/g, "oct").replace(/\b(noviembre|nov)\b/g, "nov").replace(/\b(diciembre|dic)\b/g, "dic");
-      const isWinMatch = (jStr: string, gStr: string) => {
-        if (!jStr || !gStr) return false;
-        const j = jStr.trim().toLowerCase();
-        const g = gStr.trim().toLowerCase();
-        if (j === g) return true;
-        if (game === "Fechas" || j.includes("-") || g.includes("-")) {
-          return normFechas(j) === normFechas(g);
-        }
-        return false;
-      };
       
       // Calculate prize
       if (ticket.jugadas && ticket.jugadas.length > 0) {
         ticket.jugadas.forEach((j: any) => {
-          if (isWinMatch(j.numero, officialWinnerNum)) {
+          if (isMatchingWinner(j.numero, officialWinnerNum, game)) {
             const multiplier = calculatePrizeMultiplier(game, draw);
             let p = j.monto * multiplier;
             if (ticket.moneda === "USD") p *= (config.tasa_cambio || 36.50);
@@ -692,7 +673,7 @@ export default function VendedorInterface({
           }
         });
       } else if (ticket.numero_jugado) {
-        if (isWinMatch(ticket.numero_jugado, officialWinnerNum)) {
+        if (isMatchingWinner(ticket.numero_jugado, officialWinnerNum, game)) {
           const multiplier = calculatePrizeMultiplier(game, draw);
           let p = (ticket.monto_pago || 0) * multiplier;
           if (ticket.moneda === "USD") p *= (config.tasa_cambio || 36.50);
@@ -887,47 +868,8 @@ export default function VendedorInterface({
       return;
     }
 
-    // Helper para normalizar Fechas (08-AGO == 08-Agosto == 08-AGOSTO)
-    const normalizeFechasStr = (val: string): string => {
-      if (!val) return "";
-      let norm = val.trim().toLowerCase();
-      return norm
-        .replace(/\b(enero|ene)\b/g, "ene")
-        .replace(/\b(febrero|feb)\b/g, "feb")
-        .replace(/\b(marzo|mar)\b/g, "mar")
-        .replace(/\b(abril|abr)\b/g, "abr")
-        .replace(/\b(mayo|may)\b/g, "may")
-        .replace(/\b(junio|jun)\b/g, "jun")
-        .replace(/\b(julio|jul)\b/g, "jul")
-        .replace(/\b(agosto|ago)\b/g, "ago")
-        .replace(/\b(septiembre|setiembre|sep|set)\b/g, "sep")
-        .replace(/\b(octubre|oct)\b/g, "oct")
-        .replace(/\b(noviembre|nov)\b/g, "nov")
-        .replace(/\b(diciembre|dic)\b/g, "dic");
-    };
-
-    const isMatch = (jugadoStr: string, ganadorStr: string, juegoName?: string): boolean => {
-      if (!jugadoStr || !ganadorStr) return false;
-      const j = jugadoStr.trim().toLowerCase();
-      const g = ganadorStr.trim().toLowerCase();
-      if (j === g) return true;
-      if (juegoName === "Fechas" || j.includes("-") || g.includes("-")) {
-        return normalizeFechasStr(j) === normalizeFechasStr(g);
-      }
-      return false;
-    };
-
-    // 2. Buscar el sorteo en config para verificar si tiene resultados
-    const sorteoObj = config?.sorteos?.find(s => 
-      (ticket.id_sorteo && s.id === ticket.id_sorteo) || s.nombre === ticket.sorteo
-    );
-    const ticketDateStr = ticket.fecha_venta || getTicketDate(ticket);
-
-    // 3. Buscar resultado oficial para ese sorteo y fecha
-    const resultado = (config.resultados || []).find(r =>
-      ((sorteoObj && r.id_sorteo === sorteoObj.id) || (ticket.id_sorteo && r.id_sorteo === ticket.id_sorteo) || r.id_sorteo === ticket.sorteo) &&
-      (r.fecha === ticketDateStr || r.fecha === toDateStr(ticket.timestamp_servidor))
-    );
+    // 2. Buscar el resultado oficial del sorteo
+    const resultado = findResultadoForTicket(ticket, config);
 
     if (!resultado) {
       setPrizeResult({
@@ -939,15 +881,17 @@ export default function VendedorInterface({
       return;
     }
 
-    // 4. Cruzar cada jugada contra el número ganador
+    // 3. Cruzar cada jugada contra el número ganador
     const jugadas = ticket.jugadas || [];
     let premioTotal = 0;
     let aciertos: { numero: string; monto: number; premio: number }[] = [];
+    const gameName = (ticket.juego as string) || "";
+    const drawName = (ticket.sorteo as string) || "";
 
     if (jugadas.length === 0 && ticket.numero_jugado) {
       // Fallback para tickets antiguos sin jugadas[]
-      if (isMatch(ticket.numero_jugado, resultado.numero_ganador, ticket.juego)) {
-        const multiplier = calculatePrizeMultiplier(ticket.juego, ticket.sorteo);
+      if (isMatchingWinner(ticket.numero_jugado, resultado.numero_ganador, gameName)) {
+        const multiplier = calculatePrizeMultiplier(gameName, drawName);
         premioTotal = ticket.moneda === "C$"
           ? (ticket.monto_pago * multiplier)
           : (ticket.monto_pago * multiplier * config.tasa_cambio);
@@ -955,8 +899,8 @@ export default function VendedorInterface({
       }
     } else {
       for (const jugada of jugadas) {
-        if (isMatch(jugada.numero, resultado.numero_ganador, ticket.juego)) {
-          const multiplier = calculatePrizeMultiplier(ticket.juego, ticket.sorteo);
+        if (isMatchingWinner(jugada.numero, resultado.numero_ganador, gameName)) {
+          const multiplier = calculatePrizeMultiplier(gameName, drawName);
           let premioJugada = jugada.monto * multiplier;
           if (ticket.moneda === "USD") premioJugada *= config.tasa_cambio;
           premioTotal += premioJugada;
