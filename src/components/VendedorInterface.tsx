@@ -647,11 +647,14 @@ export default function VendedorInterface({
         }
       }
 
-      const tDate = toDateStr(ticket.fecha_emision_date);
-      const sObj = config?.sorteos?.find(d => d.nombre === draw && d.juego === game);
-      const rObj = sObj
-        ? (config.resultados || []).find((r: any) => r.id_sorteo === sObj.id && r.fecha === tDate)
-        : null;
+      const tDate = ticket.fecha_venta || getTicketDate(ticket);
+      const sObj = config?.sorteos?.find(d => 
+        (ticket.id_sorteo && d.id === ticket.id_sorteo) || (d.nombre === draw && d.juego === game)
+      );
+      const rObj = (config.resultados || []).find((r: any) =>
+        ((sObj && r.id_sorteo === sObj.id) || (ticket.id_sorteo && r.id_sorteo === ticket.id_sorteo) || r.id_sorteo === draw) &&
+        (r.fecha === tDate || r.fecha === toDateStr(ticket.timestamp_servidor))
+      );
 
       if (!rObj) {
         setPaymentResult({
@@ -665,11 +668,23 @@ export default function VendedorInterface({
 
       const officialWinnerNum = rObj.numero_ganador;
       let prizeAmount = 0;
+
+      const normFechas = (str: string) => (str || "").trim().toLowerCase().replace(/\b(enero|ene)\b/g, "ene").replace(/\b(febrero|feb)\b/g, "feb").replace(/\b(marzo|mar)\b/g, "mar").replace(/\b(abril|abr)\b/g, "abr").replace(/\b(mayo|may)\b/g, "may").replace(/\b(junio|jun)\b/g, "jun").replace(/\b(julio|jul)\b/g, "jul").replace(/\b(agosto|ago)\b/g, "ago").replace(/\b(septiembre|setiembre|sep|set)\b/g, "sep").replace(/\b(octubre|oct)\b/g, "oct").replace(/\b(noviembre|nov)\b/g, "nov").replace(/\b(diciembre|dic)\b/g, "dic");
+      const isWinMatch = (jStr: string, gStr: string) => {
+        if (!jStr || !gStr) return false;
+        const j = jStr.trim().toLowerCase();
+        const g = gStr.trim().toLowerCase();
+        if (j === g) return true;
+        if (game === "Fechas" || j.includes("-") || g.includes("-")) {
+          return normFechas(j) === normFechas(g);
+        }
+        return false;
+      };
       
       // Calculate prize
       if (ticket.jugadas && ticket.jugadas.length > 0) {
         ticket.jugadas.forEach((j: any) => {
-          if (j.numero.trim().toLowerCase() === officialWinnerNum.trim().toLowerCase()) {
+          if (isWinMatch(j.numero, officialWinnerNum)) {
             const multiplier = calculatePrizeMultiplier(game, draw);
             let p = j.monto * multiplier;
             if (ticket.moneda === "USD") p *= (config.tasa_cambio || 36.50);
@@ -677,7 +692,7 @@ export default function VendedorInterface({
           }
         });
       } else if (ticket.numero_jugado) {
-        if (ticket.numero_jugado.trim().toLowerCase() === officialWinnerNum.trim().toLowerCase()) {
+        if (isWinMatch(ticket.numero_jugado, officialWinnerNum)) {
           const multiplier = calculatePrizeMultiplier(game, draw);
           let p = (ticket.monto_pago || 0) * multiplier;
           if (ticket.moneda === "USD") p *= (config.tasa_cambio || 36.50);
@@ -872,13 +887,46 @@ export default function VendedorInterface({
       return;
     }
 
+    // Helper para normalizar Fechas (08-AGO == 08-Agosto == 08-AGOSTO)
+    const normalizeFechasStr = (val: string): string => {
+      if (!val) return "";
+      let norm = val.trim().toLowerCase();
+      return norm
+        .replace(/\b(enero|ene)\b/g, "ene")
+        .replace(/\b(febrero|feb)\b/g, "feb")
+        .replace(/\b(marzo|mar)\b/g, "mar")
+        .replace(/\b(abril|abr)\b/g, "abr")
+        .replace(/\b(mayo|may)\b/g, "may")
+        .replace(/\b(junio|jun)\b/g, "jun")
+        .replace(/\b(julio|jul)\b/g, "jul")
+        .replace(/\b(agosto|ago)\b/g, "ago")
+        .replace(/\b(septiembre|setiembre|sep|set)\b/g, "sep")
+        .replace(/\b(octubre|oct)\b/g, "oct")
+        .replace(/\b(noviembre|nov)\b/g, "nov")
+        .replace(/\b(diciembre|dic)\b/g, "dic");
+    };
+
+    const isMatch = (jugadoStr: string, ganadorStr: string, juegoName?: string): boolean => {
+      if (!jugadoStr || !ganadorStr) return false;
+      const j = jugadoStr.trim().toLowerCase();
+      const g = ganadorStr.trim().toLowerCase();
+      if (j === g) return true;
+      if (juegoName === "Fechas" || j.includes("-") || g.includes("-")) {
+        return normalizeFechasStr(j) === normalizeFechasStr(g);
+      }
+      return false;
+    };
+
     // 2. Buscar el sorteo en config para verificar si tiene resultados
-    const sorteoObj = config?.sorteos?.find(s => s.nombre === ticket.sorteo);
-    const ticketDate = toDateStr(ticket.timestamp_servidor);
+    const sorteoObj = config?.sorteos?.find(s => 
+      (ticket.id_sorteo && s.id === ticket.id_sorteo) || s.nombre === ticket.sorteo
+    );
+    const ticketDateStr = ticket.fecha_venta || getTicketDate(ticket);
 
     // 3. Buscar resultado oficial para ese sorteo y fecha
     const resultado = (config.resultados || []).find(r =>
-      r.id_sorteo === (sorteoObj?.id || '') && r.fecha === ticketDate
+      ((sorteoObj && r.id_sorteo === sorteoObj.id) || (ticket.id_sorteo && r.id_sorteo === ticket.id_sorteo) || r.id_sorteo === ticket.sorteo) &&
+      (r.fecha === ticketDateStr || r.fecha === toDateStr(ticket.timestamp_servidor))
     );
 
     if (!resultado) {
@@ -898,10 +946,7 @@ export default function VendedorInterface({
 
     if (jugadas.length === 0 && ticket.numero_jugado) {
       // Fallback para tickets antiguos sin jugadas[]
-      const ganador = resultado.numero_ganador.trim().toLowerCase();
-      const jugado = ticket.numero_jugado.trim().toLowerCase();
-
-      if (ganador === jugado) {
+      if (isMatch(ticket.numero_jugado, resultado.numero_ganador, ticket.juego)) {
         const multiplier = calculatePrizeMultiplier(ticket.juego, ticket.sorteo);
         premioTotal = ticket.moneda === "C$"
           ? (ticket.monto_pago * multiplier)
@@ -910,10 +955,7 @@ export default function VendedorInterface({
       }
     } else {
       for (const jugada of jugadas) {
-        const ganador = resultado.numero_ganador.trim().toLowerCase();
-        const jugado = jugada.numero.trim().toLowerCase();
-
-        if (jugado === ganador) {
+        if (isMatch(jugada.numero, resultado.numero_ganador, ticket.juego)) {
           const multiplier = calculatePrizeMultiplier(ticket.juego, ticket.sorteo);
           let premioJugada = jugada.monto * multiplier;
           if (ticket.moneda === "USD") premioJugada *= config.tasa_cambio;
