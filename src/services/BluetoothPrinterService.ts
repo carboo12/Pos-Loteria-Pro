@@ -264,38 +264,23 @@ export class BluetoothPrinterService {
    * El timeout por defecto es 15s — suficiente para que Android inicialice BT
    * y haga el handshake GATT, incluso en terminales lentos.
    */
-  async connectForPrint(timeoutMs = 25000): Promise<boolean> {
+  async connectForPrint(timeoutMs = 5000): Promise<boolean> {
     if (this._isMockMode) return true;
     if (this.isConnected()) return true;
     if (!navigator.bluetooth) return false;
 
-    // Si hay dispositivo guardado o en memoria, intentar reconexión silenciosa
-    if (this.hasSavedDevice() || this.device) {
-      this.reconnectSaved().catch(() => { /* ignorar — seguimos con polling */ });
-    } else {
-      console.warn("[BT] connectForPrint: No hay dispositivo guardado ni vinculado.");
-      return false;
+    // Intentar reconectar si la instancia mantiene la referencia activa
+    if (this.device?.gatt) {
+      try {
+        const ok = await this.connectInternal();
+        if (ok) return true;
+      } catch { /* continuar al picker */ }
     }
 
-    // Esperar activamente hasta que isConnected() sea true o se agote el timeout (25s)
-    const deadline = Date.now() + timeoutMs;
-    let lastRetry = Date.now();
-
-    while (Date.now() < deadline) {
-      await new Promise<void>(r => setTimeout(r, 500));
-      if (this.isConnected()) return true;
-      if (this._destroyed) return false;
-
-      // Cada 3 segundos, reintentar gatillar reconnectSaved si aún no ha conectado
-      if (Date.now() - lastRetry > 3000) {
-        lastRetry = Date.now();
-        console.log("[BT] connectForPrint: Reintentando ciclo de conexion en segundo plano...");
-        this.reconnectSaved().catch(() => {});
-      }
-    }
-
-    // Ultimo chequeo tras el timeout
-    return this.isConnected();
+    // Si la API del navegador no permite reconexión silenciosa sin interactuar,
+    // abrir de inmediato el selector con filtros abiertos (acceptAllDevices)
+    console.log("[BT] Abriendo selector Bluetooth directo para conectar...");
+    return await this.connect(true);
   }
 
   private isLocalDev(): boolean {
