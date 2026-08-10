@@ -94,6 +94,43 @@ interface TicketPreviewModalProps {
   onAnular?: (ticketId: string) => void | Promise<void>;
 }
 
+/**
+ * Fallback de compartir por IMAGEN (nunca texto plano). Se usa cuando Web
+ * Share con archivos no está disponible (p. ej. la app se abre por HTTP en
+ * red local, contexto no seguro) o cuando la compartición nativa falla.
+ *
+ * 1) Intenta abrir el PNG en una pestaña nueva: el usuario hace long-press
+ *    sobre la imagen → "Compartir imagen" → WhatsApp recibe el archivo.
+ * 2) Si el popup fue bloqueado, descarga el PNG para compartirlo desde
+ *    Descargas/Galería.
+ */
+function openTicketImage(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const revoke = () => setTimeout(() => URL.revokeObjectURL(url), 120000);
+
+  try {
+    const win = window.open(url, "_blank");
+    if (win) {
+      revoke();
+      return;
+    }
+  } catch { /* popup bloqueado — continuar con descarga */ }
+
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    revoke();
+  } catch {
+    URL.revokeObjectURL(url);
+    throw new Error("No se pudo abrir la imagen del ticket");
+  }
+}
+
 
 export default function TicketPreviewModal({ ticket, config, onClose, userRole = "vendedor", serverTime, onPrint, onlyView = false, onAnular }: TicketPreviewModalProps) {
   const [copied, setCopied] = useState(false);
@@ -311,6 +348,7 @@ ${config.formato_ticket.mensaje_pie}
 
   const handleShare = useCallback(async () => {
     setSharing(true);
+    let generatedBlob: Blob | null = null;
     try {
       const el = ticketRenderRef.current;
       if (!el) throw new Error("Elemento del ticket no encontrado");
@@ -326,27 +364,44 @@ ${config.formato_ticket.mensaje_pie}
         height: el.scrollHeight,
         width: el.offsetWidth,
       });
-      if (!blob) throw new Error("No se pudo generar la imagen");
+      if (!blob) throw new Error("No se pudo generar la imagen del ticket");
+      generatedBlob = blob;
 
-      const file = new File([blob], `ticket_${ticket.numero_ticket}.png`, { type: 'image/png' });
+      const fileName = `ticket_${ticket.numero_ticket}.png`;
+      const file = new File([blob], fileName, { type: 'image/png' });
 
+      // Ruta nativa: Web Share con archivo de imagen. En contexto seguro
+      // (https:// o localhost) el share sheet nativo de Android/iOS ofrece
+      // WhatsApp y recibe el PNG directamente.
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
           title: `Ticket #${ticket.numero_ticket}`,
+          text: `Ticket #${ticket.numero_ticket}`,
         });
-      } else {
-        const textoCodificado = encodeURIComponent(ticketText);
-        window.open(`https://api.whatsapp.com/send?text=${textoCodificado}`, '_blank');
+        return;
       }
-    } catch (error) {
-      console.error("Error al compartir imagen nativa:", error);
-      const textoCodificado = encodeURIComponent(ticketText);
-      window.open(`https://api.whatsapp.com/send?text=${textoCodificado}`, '_blank');
+
+      // Web Share de archivos no disponible (p. ej. HTTP en red local):
+      // entregar SIEMPRE la imagen, nunca texto plano.
+      openTicketImage(blob, fileName);
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        // El usuario cerró el share sheet nativo — no abrir nada más.
+        return;
+      }
+      console.error("Error al compartir la imagen del ticket:", error);
+      if (generatedBlob) {
+        try {
+          openTicketImage(generatedBlob, `ticket_${ticket.numero_ticket}.png`);
+        } catch (err) {
+          console.error("No se pudo abrir la imagen de respaldo:", err);
+        }
+      }
     } finally {
       setSharing(false);
     }
-  }, [ticket, ticketText]);
+  }, [ticket]);
 
   const fallbackCopy = () => {
     navigator.clipboard.writeText(ticketText);

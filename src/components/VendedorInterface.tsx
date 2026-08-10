@@ -290,20 +290,41 @@ export default function VendedorInterface({
   }, []);
 
   useEffect(() => {
-    const onVisible = () => {
-      if (
-        document.visibilityState === "visible" &&
-        printerRef.current &&
+    const shouldAutoReconnect = () => {
+      const s = printerRef.current;
+      return (
+        !!s &&
+        s.autoReconnectEnabled &&
+        s.hasSavedDevice() &&
         printerStatus !== "connected" &&
         printerStatus !== "connecting" &&
         printerStatus !== "printing"
-      ) {
+      );
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && shouldAutoReconnect()) {
         // Auto-reconnect using saved deviceId (no user gesture needed)
-        printerRef.current.reconnectSaved();
+        printerRef.current?.reconnectSaved();
+      }
+    };
+    const onFocus = () => {
+      if (document.visibilityState === "visible" && shouldAutoReconnect()) {
+        printerRef.current?.reconnectSaved();
+      }
+    };
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted && shouldAutoReconnect()) {
+        printerRef.current?.reconnectSaved();
       }
     };
     document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, [printerStatus]);
 
   // Ticket QR/ID Search states
@@ -1039,6 +1060,21 @@ export default function VendedorInterface({
     return config?.sorteos?.filter(s =>
       (isSorteoSV(s) ? "SALVADOR" : s.juego) === game && isSorteoHabilitado(s, now)
     ) || [];
+  };
+
+  const horaToMin = (horaStr: string): number => {
+    const [h, m] = (horaStr || "00:00").split(":").map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+
+  const getNextSorteoDisponible = (game: string, base: Sorteo | null | undefined): Sorteo | null => {
+    const baseMin = base ? horaToMin(base.hora_sorteo) : -1;
+    const candidates = getSorteosByGame(game)
+      .filter(s => !isSorteoCerrado(s))
+      .map(s => ({ s, min: horaToMin(s.hora_sorteo) }))
+      .filter(x => x.min > baseMin)
+      .sort((a, b) => a.min - b.min);
+    return candidates[0] ? candidates[0].s : null;
   };
 
   // Synchronize game selection when country changes
@@ -2607,19 +2643,35 @@ export default function VendedorInterface({
 
                             <button
                               onClick={() => {
-                                // Repeat logic
+                                const sObj = config?.sorteos?.find(s =>
+                                  (t.id_sorteo && s.id === t.id_sorteo) ||
+                                  (s.nombre === draw && s.juego === game)
+                                );
+                                const formSorteo = (selectedJuego === game && selectedSorteo)
+                                  ? config?.sorteos?.find(s => s.nombre === selectedSorteo && s.juego === game)
+                                  : undefined;
+                                const base = (formSorteo && sObj && horaToMin(formSorteo.hora_sorteo) > horaToMin(sObj.hora_sorteo))
+                                  ? formSorteo
+                                  : sObj;
+
+                                const nextSorteo = getNextSorteoDisponible(game, base);
+                                if (!nextSorteo) {
+                                  toast.error("No hay más sorteos disponibles para el día de hoy", { position: 'top-center' });
+                                  return;
+                                }
+
                                 setSelectedJuego(game);
-                                setSelectedSorteo(draw);
+                                setSelectedSorteo(nextSorteo.nombre);
                                 setMoneda(t.moneda || "C$");
                                 if (t.jugadas && t.jugadas.length > 0) {
                                   setJugadas(t.jugadas.map((j: any) => ({
                                     numero: j.numero,
                                     monto: j.monto,
-                                    premio_posible: j.premio_posible || (j.monto * calculatePrizeMultiplier(game, draw)),
+                                    premio_posible: j.premio_posible || (j.monto * calculatePrizeMultiplier(game, nextSorteo.nombre)),
                                     ...(j.dia_juego ? { dia_juego: j.dia_juego } : {})
                                   })));
                                 } else if (t.numero_jugado) {
-                                  const mult = calculatePrizeMultiplier(game, draw);
+                                  const mult = calculatePrizeMultiplier(game, nextSorteo.nombre);
                                   const amtInCs = t.moneda === "USD" ? t.monto_pago * (config.tasa_cambio || 36.50) : t.monto_pago;
                                   setJugadas([{
                                     numero: t.numero_jugado,
@@ -2628,7 +2680,7 @@ export default function VendedorInterface({
                                   }]);
                                 }
                                 setActiveTab("venta");
-                                toast.success("Jugada repetida cargada en el formulario", { position: 'top-center' });
+                                toast.success(`Jugada repetida cargada — Sorteo: ${nextSorteo.nombre}`, { position: 'top-center' });
                               }}
                               className="py-1.5 px-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[9px] font-black uppercase transition-all text-center flex items-center justify-center cursor-pointer"
                             >

@@ -6,6 +6,12 @@ type StatusCallback = (status: PrinterStatus, message?: string) => void;
 
 const STORAGE_KEY_BT_DEVICE = "bt_printer_device_id";
 const STORAGE_KEY_BT_NAME = "bt_printer_name";
+// Web Bluetooth NO expone dirección MAC por privacidad. `device.id` es el
+// identificador más estable disponible, pero puede derivar entre sesiones en
+// algunos navegadores. Guardamos un set de alias + el nombre para casar de
+// forma tolerante y lograr "vincular una vez, reconectar para siempre".
+const STORAGE_KEY_BT_ALIASES = "bt_printer_id_aliases";
+const STORAGE_KEY_BT_CONNECTED_AT = "bt_printer_connected_at";
 const HEARTBEAT_INTERVAL_MS = 8000;
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 6000, 8000];
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -26,6 +32,13 @@ export class BluetoothPrinterService {
   private _destroyed = false;
   private _wakeLock: WakeLockSentinel | null = null;
   private _silentReconnect = false;
+  // Auto-reconexión al dispositivo guardado. Se desactiva SOLO cuando el
+  // usuario elige "Solo Desconectar (Conservar)" o "Desvincular".
+  autoReconnectEnabled = true;
+  private _savedReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private _savedReconnectAttempts = 0;
+  private _savedReconnectInFlight: Promise<boolean> | null = null;
+  private _isMockMode = false;
 
   private static readonly SERVICE_UUIDS = [
     "000018f0-0000-1000-8000-00805f9b34fb",
@@ -42,10 +55,12 @@ export class BluetoothPrinterService {
   }
 
   getDeviceName(): string | null {
+    if (this._isMockMode) return "Impresora Térmica (Mock Dev)";
     return this.device?.name || localStorage.getItem(STORAGE_KEY_BT_NAME) || null;
   }
 
   isConnected(): boolean {
+    if (this._isMockMode) return true;
     return !!(this.device?.gatt?.connected && this.characteristic);
   }
 
@@ -176,32 +191,68 @@ export class BluetoothPrinterService {
   // ─── Device persistence ──────────────────────────────────────────────
 
   private _saveDeviceId() {
-    if (this.device) {
+    if (!this.device) return;
+    try {
+      localStorage.setItem(STORAGE_KEY_BT_DEVICE, this.device.id);
+      if (this.device.name) {
+        localStorage.setItem(STORAGE_KEY_BT_NAME, this.device.name);
+      }
+      // Acumular alias: tolera cambios de device.id entre sesiones
+      let aliases: string[] = [];
       try {
-        localStorage.setItem(STORAGE_KEY_BT_DEVICE, this.device.id);
-        if (this.device.name) {
-          localStorage.setItem(STORAGE_KEY_BT_NAME, this.device.name);
+        const raw = localStorage.getItem(STORAGE_KEY_BT_ALIASES);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) aliases = parsed.filter((x): x is string => typeof x === "string");
         }
-      } catch { /* localStorage full or blocked */ }
-    }
+      } catch { /* ignore */ }
+      if (!aliases.includes(this.device.id)) {
+        aliases.push(this.device.id);
+        localStorage.setItem(STORAGE_KEY_BT_ALIASES, JSON.stringify(aliases.slice(-10)));
+      }
+      localStorage.setItem(STORAGE_KEY_BT_CONNECTED_AT, String(Date.now()));
+    } catch { /* localStorage full or blocked */ }
   }
 
   private _clearSavedDevice() {
     try {
       localStorage.removeItem(STORAGE_KEY_BT_DEVICE);
       localStorage.removeItem(STORAGE_KEY_BT_NAME);
+      localStorage.removeItem(STORAGE_KEY_BT_ALIASES);
+      localStorage.removeItem(STORAGE_KEY_BT_CONNECTED_AT);
     } catch { /* ignore */ }
   }
 
-  private _getSavedDeviceId(): string | null {
+  private _getSavedDevice(): { id: string | null; name: string | null; aliases: string[] } {
+    let id: string | null = null;
+    let name: string | null = null;
+    let aliases: string[] = [];
     try {
-      return localStorage.getItem(STORAGE_KEY_BT_DEVICE);
-    } catch {
-      return null;
-    }
+      id = localStorage.getItem(STORAGE_KEY_BT_DEVICE);
+      name = localStorage.getItem(STORAGE_KEY_BT_NAME);
+      const raw = localStorage.getItem(STORAGE_KEY_BT_ALIASES);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) aliases = parsed.filter((x): x is string => typeof x === "string");
+      }
+    } catch { /* ignore */ }
+    return { id, name, aliases };
+  }
+
+  hasSavedDevice(): boolean {
+    const saved = this._getSavedDevice();
+    return !!(saved.id || saved.name);
   }
 
   // ─── Public API ──────────────────────────────────────────────────────
+
+  private isLocalDev(): boolean {
+    if (typeof window === "undefined") return false;
+    const host = window.location.hostname;
+    const isLocalHost = host === "localhost" || host === "127.0.0.1" || /^192\.168\.\d+\.\d+$/.test(host) || /^10\.\d+\.\d+\.\d+$/.test(host);
+    const isDevEnv = !!(import.meta as any).env?.DEV;
+    return isDevEnv || isLocalHost;
+  }
 
   async connect(onlyPrinters: boolean = false): Promise<boolean> {
     if (this.device && this.device.gatt?.connected) {
@@ -210,10 +261,22 @@ export class BluetoothPrinterService {
     }
 
     if (!navigator.bluetooth) {
+      if (this.isLocalDev()) {
+        console.warn("[BluetoothPrinterService] Local Dev Mode: Simulando conexión Bluetooth mock en IP local/dev.");
+        this._isMockMode = true;
+        this.setStatus("connecting", "Modo Simulación Dev: Conectando...");
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        this.setStatus("connected", "Conectado (Simulación local)");
+        return true;
+      }
       this.setStatus("error", "Web Bluetooth no soportado en este navegador");
       return false;
     }
 
+    // El usuario elige dispositivo manualmente: habilitar auto-reconexión futura
+    this._stopSavedReconnect();
+    this._silentReconnect = false;
+    this.autoReconnectEnabled = true;
     this._destroyed = false;
     this.setStatus("connecting", "Solicitando dispositivo...");
 
@@ -251,41 +314,129 @@ export class BluetoothPrinterService {
   }
 
   async reconnectSaved(): Promise<boolean> {
-    const savedId = this._getSavedDeviceId();
-    if (!savedId) return false;
+    // Si ya hay un intento en vuelo, reutilizarlo (evita duplicar loops)
+    if (this._savedReconnectInFlight) {
+      return this._savedReconnectInFlight;
+    }
 
-    if (this.device && this.device.gatt?.connected) {
+    const saved = this._getSavedDevice();
+    if (!saved.id && !saved.name) return false;
+
+    if (this.device?.gatt?.connected && this.characteristic) {
       this.setStatus("connected", "Ya conectado");
       return true;
     }
 
-    if (!navigator.bluetooth) return false;
+    if (!navigator.bluetooth) {
+      this.setStatus("error", "Web Bluetooth no soportado en este navegador");
+      return false;
+    }
+
+    // Sin getDevices() es imposible reconectar sin gesto del usuario
+    if (typeof navigator.bluetooth.getDevices !== "function") {
+      this.setStatus("disconnected", "Reconexión automática no disponible en este navegador");
+      return false;
+    }
+
+    if (!this.autoReconnectEnabled) return false;
 
     this._destroyed = false;
     this._silentReconnect = true;
-    this.setStatus("connecting", "Reconectando impresora guardada...");
+    this._savedReconnectAttempts = 0;
 
-    try {
-      if (navigator.bluetooth.getDevices) {
-        const devices = await navigator.bluetooth.getDevices();
-        const matchedDevice = devices.find(d => d.id === savedId);
-        if (matchedDevice) {
-          this.device = matchedDevice;
-          this._attachDisconnectListener();
-          const ok = await this.connectInternal();
-          if (ok) this._saveDeviceId();
+    const attempt = async (): Promise<boolean> => {
+      try {
+        const ok = await this._runSavedReconnectAttempt();
+        if (ok) {
           this._silentReconnect = false;
-          return ok;
+        } else if (!this._destroyed && this.autoReconnectEnabled) {
+          // Falla transitoria (BT aún inicializándose, dispositivo apagado...):
+          // reintentar con backoff en segundo plano.
+          this._scheduleSavedReconnect();
         }
+        return ok;
+      } finally {
+        this._savedReconnectInFlight = null;
       }
-      this._silentReconnect = false;
-      this.setStatus("disconnected");
-      return false;
+    };
+
+    this._savedReconnectInFlight = attempt();
+    return await this._savedReconnectInFlight;
+  }
+
+  // Intento único: getDevices() + match por id/alias/nombre + conexión GATT
+  private async _runSavedReconnectAttempt(): Promise<boolean> {
+    const saved = this._getSavedDevice();
+    try {
+      const devices = await navigator.bluetooth.getDevices();
+      const list = Array.isArray(devices) ? devices : [];
+
+      // 1. Match por device.id o alias conocidos (tolera id derivado)
+      const knownIds = new Set<string>([saved.id, ...saved.aliases].filter(Boolean) as string[]);
+      let match = list.find(d => d.id && knownIds.has(d.id));
+
+      // 2. Fallback: match por nombre (exacto → contiene)
+      if (!match && saved.name) {
+        const norm = saved.name.trim().toLowerCase();
+        match = list.find(d => (d.name || "").trim().toLowerCase() === norm)
+          || list.find(d => {
+              const dn = (d.name || "").trim().toLowerCase();
+              return dn.length > 0 && (dn.includes(norm) || norm.includes(dn));
+            });
+      }
+
+      if (!match) {
+        this.setStatus("disconnected", "Impresora guardada no disponible aún");
+        return false;
+      }
+
+      this.device = match;
+      this._attachDisconnectListener();
+      const ok = await this.connectInternal();
+      if (ok) {
+        this._saveDeviceId(); // refresca id/alias si cambió
+        this._stopSavedReconnect();
+      }
+      return ok;
     } catch {
-      this._silentReconnect = false;
-      this.setStatus("disconnected");
+      this.setStatus("disconnected", "Error al buscar impresora guardada");
       return false;
     }
+  }
+
+  // Lazo de reintentos con backoff para la reconexión al guardado
+  private _scheduleSavedReconnect() {
+    if (this._destroyed || !this.autoReconnectEnabled) return;
+
+    if (this._savedReconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      this._silentReconnect = false;
+      this._savedReconnectAttempts = 0;
+      this.setStatus("disconnected", "No se encontró la impresora guardada");
+      return;
+    }
+
+    const delay = RECONNECT_DELAYS_MS[Math.min(this._savedReconnectAttempts, RECONNECT_DELAYS_MS.length - 1)];
+    this._savedReconnectAttempts++;
+    this._silentReconnect = true;
+    this.setStatus("connecting", `Buscando impresora guardada (intento ${this._savedReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+
+    this._savedReconnectTimer = setTimeout(async () => {
+      this._savedReconnectTimer = null;
+      if (this._destroyed || !this.autoReconnectEnabled) return;
+      const ok = await this._runSavedReconnectAttempt();
+      if (!ok && !this._destroyed && this.autoReconnectEnabled) {
+        this._scheduleSavedReconnect();
+      }
+    }, delay);
+  }
+
+  private _stopSavedReconnect() {
+    if (this._savedReconnectTimer) {
+      clearTimeout(this._savedReconnectTimer);
+      this._savedReconnectTimer = null;
+    }
+    this._savedReconnectAttempts = 0;
+    this._savedReconnectInFlight = null;
   }
 
   private async connectInternal(): Promise<boolean> {
@@ -330,6 +481,14 @@ export class BluetoothPrinterService {
   }
 
   async print(data: Uint8Array): Promise<boolean> {
+    if (this._isMockMode) {
+      this.setStatus("printing", "Imprimiendo en modo simulación...");
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      console.log(`[BluetoothPrinterService Mock Dev] Impresión simulada con éxito (${data.length} bytes)`);
+      this.setStatus("connected", "Impresión simulada completada");
+      return true;
+    }
+
     if (!this.characteristic || !this.device?.gatt?.connected) {
       if (this.connectionLost && this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         this.setStatus("connecting", "Reconectando antes de imprimir...");
@@ -340,6 +499,14 @@ export class BluetoothPrinterService {
             this.setStatus("error", "No se pudo reconectar para imprimir");
             return false;
           }
+        }
+      } else if (this.autoReconnectEnabled && this.hasSavedDevice()) {
+        // Reconexión silenciosa desde el dispositivo guardado (sin gesto de usuario)
+        this.setStatus("connecting", "Reconectando impresora guardada...");
+        const ok = await this.reconnectSaved();
+        if (!ok) {
+          this.setStatus("error", "No se pudo reconectar para imprimir");
+          return false;
         }
       } else {
         this.setStatus("error", "Impresora no conectada");
@@ -374,6 +541,11 @@ export class BluetoothPrinterService {
     this._destroyed = true;
     this._stopHeartbeat();
     this._releaseWakeLock();
+    this._stopSavedReconnect();
+    this._silentReconnect = false;
+    // "Solo Desconectar (Conservar)": NO borrar la persistencia para que la
+    // próxima apertura de la app reconecte automáticamente.
+    this.autoReconnectEnabled = false;
 
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
@@ -391,7 +563,6 @@ export class BluetoothPrinterService {
     this.characteristic = null;
     this.reconnectAttempts = 0;
     this.connectionLost = false;
-    this._clearSavedDevice();
     this.setStatus("disconnected", "Desconectado");
   }
 
@@ -399,6 +570,9 @@ export class BluetoothPrinterService {
     this._destroyed = true;
     this._stopHeartbeat();
     this._releaseWakeLock();
+    this._stopSavedReconnect();
+    this._silentReconnect = false;
+    this.autoReconnectEnabled = false;
 
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
@@ -434,6 +608,8 @@ export class BluetoothPrinterService {
     this._destroyed = true;
     this._stopHeartbeat();
     this._releaseWakeLock();
+    this._stopSavedReconnect();
+    this._silentReconnect = false;
 
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
