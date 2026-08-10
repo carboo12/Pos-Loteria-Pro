@@ -13,8 +13,13 @@ const STORAGE_KEY_BT_NAME = "bt_printer_name";
 const STORAGE_KEY_BT_ALIASES = "bt_printer_id_aliases";
 const STORAGE_KEY_BT_CONNECTED_AT = "bt_printer_connected_at";
 const HEARTBEAT_INTERVAL_MS = 8000;
+// Delays para reconexión de sesión activa (pérdida de señal)
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 6000, 8000];
 const MAX_RECONNECT_ATTEMPTS = 10;
+// Delays para reconexión al arranque (dispositivo guardado en localStorage)
+// Más agresivo al inicio (BT puede tardar en inicializarse), luego más espaciado
+const SAVED_RECONNECT_DELAYS_MS = [800, 1500, 3000, 5000, 8000, 12000, 15000, 20000, 25000, 30000];
+const MAX_SAVED_RECONNECT_ATTEMPTS = 15;
 
 // ESC/POS NOP — non-printing command used as heartbeat
 const ESCPOS_NOP = new Uint8Array([0x1B, 0x40]);
@@ -284,15 +289,66 @@ export class BluetoothPrinterService {
       const options: RequestDeviceOptions = onlyPrinters
         ? {
             filters: [
+              // Genéricos
               { namePrefix: "Printer" },
               { namePrefix: "printer" },
+              { namePrefix: "PRINTER" },
               { namePrefix: "Impresora" },
               { namePrefix: "impresora" },
+              { namePrefix: "BT Printer" },
+              { namePrefix: "Bluetooth Printer" },
+              // Series numéricas populares
               { namePrefix: "PT" },
-              { namePrefix: "MTP" },
               { namePrefix: "POS" },
+              { namePrefix: "pos" },
+              // MTP / MPT (Milestone, iDPRT, etc.)
+              { namePrefix: "MTP" },
+              { namePrefix: "MPT" },
+              { namePrefix: "MTP-II" },
+              // XP / XPrinter
+              { namePrefix: "XP" },
+              { namePrefix: "XPrinter" },
+              // RP (Rongta, SEWOO, etc.)
+              { namePrefix: "RP" },
+              { namePrefix: "RG" },
+              // GP (GoDEX, POS)
               { namePrefix: "GP" },
-              { namePrefix: "RT" }
+              { namePrefix: "GR" },
+              // RT / R series
+              { namePrefix: "RT" },
+              // Zjiang / ZJ
+              { namePrefix: "Zjiang" },
+              { namePrefix: "ZJ" },
+              { namePrefix: "zj" },
+              // Gainscha
+              { namePrefix: "Gainscha" },
+              { namePrefix: "GS" },
+              // Epson (TM-series BT)
+              { namePrefix: "Epson" },
+              { namePrefix: "TM-" },
+              // Bixolon
+              { namePrefix: "Bixolon" },
+              { namePrefix: "SPP" },
+              // Star Micronics
+              { namePrefix: "Star" },
+              { namePrefix: "TSP" },
+              { namePrefix: "mPOP" },
+              // iDPRT
+              { namePrefix: "iDPRT" },
+              { namePrefix: "iD" },
+              // Citizen
+              { namePrefix: "CT-" },
+              { namePrefix: "CMP" },
+              // Sewoo
+              { namePrefix: "LK" },
+              { namePrefix: "SLK" },
+              // Hoin / HOIN
+              { namePrefix: "HOP" },
+              { namePrefix: "HOIN" },
+              // Códigos de serie comunes sin marca
+              { namePrefix: "BTP" },
+              { namePrefix: "IMP" },
+              { namePrefix: "TP" }
             ],
             optionalServices: BluetoothPrinterService.SERVICE_UUIDS
           }
@@ -404,21 +460,25 @@ export class BluetoothPrinterService {
     }
   }
 
-  // Lazo de reintentos con backoff para la reconexión al guardado
+  // Lazo de reintentos con backoff para la reconexión al guardado (arranque)
+  // Usa delays y límites propios (más tolerante que la reconexión por pérdida de señal)
   private _scheduleSavedReconnect() {
     if (this._destroyed || !this.autoReconnectEnabled) return;
 
-    if (this._savedReconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    if (this._savedReconnectAttempts >= MAX_SAVED_RECONNECT_ATTEMPTS) {
       this._silentReconnect = false;
       this._savedReconnectAttempts = 0;
-      this.setStatus("disconnected", "No se encontró la impresora guardada");
+      // No emitir error — simplemente quedarse en disconnected; el usuario puede
+      // pulsar manualmente el botón de conectar en cualquier momento.
+      this.setStatus("disconnected", "");
       return;
     }
 
-    const delay = RECONNECT_DELAYS_MS[Math.min(this._savedReconnectAttempts, RECONNECT_DELAYS_MS.length - 1)];
+    const delay = SAVED_RECONNECT_DELAYS_MS[Math.min(this._savedReconnectAttempts, SAVED_RECONNECT_DELAYS_MS.length - 1)];
     this._savedReconnectAttempts++;
+    // No tocar el status para que la UI no parpadee durante la reconexión silenciosa
+    // Solo marcar silentReconnect = true (visible en isSilentReconnecting())
     this._silentReconnect = true;
-    this.setStatus("connecting", `Buscando impresora guardada (intento ${this._savedReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
 
     this._savedReconnectTimer = setTimeout(async () => {
       this._savedReconnectTimer = null;
@@ -441,15 +501,21 @@ export class BluetoothPrinterService {
 
   private async connectInternal(): Promise<boolean> {
     if (!this.device?.gatt) {
-      this.setStatus("error", "Dispositivo sin GATT");
+      if (!this._silentReconnect) this.setStatus("error", "Dispositivo sin GATT");
       return false;
     }
 
-    this.setStatus("connecting", "Conectando GATT...");
+    // Durante reconexión silenciosa en segundo plano, no cambiar el status de la UI
+    // para evitar parpadeos. El usuario verá "connected" cuando se logre la conexión.
+    if (!this._silentReconnect) {
+      this.setStatus("connecting", "Conectando GATT...");
+    }
 
     try {
       this.server = await this.device.gatt.connect();
-      this.setStatus("connecting", "Descubriendo servicios...");
+      if (!this._silentReconnect) {
+        this.setStatus("connecting", "Descubriendo servicios...");
+      }
 
       for (const uuid of BluetoothPrinterService.SERVICE_UUIDS) {
         try {
@@ -463,6 +529,7 @@ export class BluetoothPrinterService {
               this.connectionLost = false;
               this._startHeartbeat();
               this._acquireWakeLock();
+              // Siempre emitir "connected" — tanto en silencioso como en manual
               this.setStatus("connected", `Conectado: ${this.device?.name || "PT-210"}`);
               return true;
             }
@@ -472,10 +539,14 @@ export class BluetoothPrinterService {
         }
       }
 
-      this.setStatus("error", "No se encontró característica de escritura");
+      if (!this._silentReconnect) {
+        this.setStatus("error", "No se encontró característica de escritura");
+      }
       return false;
     } catch (err: any) {
-      this.setStatus("error", err.message || "Error en conexión GATT");
+      if (!this._silentReconnect) {
+        this.setStatus("error", err.message || "Error en conexión GATT");
+      }
       return false;
     }
   }

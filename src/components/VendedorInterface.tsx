@@ -273,11 +273,17 @@ export default function VendedorInterface({
     };
   }, []);
 
-  // Auto-reconexión silenciosa al montar: si hay impresora guardada, reconectar
+  // Auto-reconexión silenciosa al montar: si hay impresora guardada, reconectar.
+  // Delay de 1.5s para que el stack BT del SO termine de inicializarse antes de
+  // llamar a getDevices() — evita que devuelva lista vacía en el primer intento.
   useEffect(() => {
-    if (printerRef.current && printerStatus === "disconnected") {
-      printerRef.current.reconnectSaved();
-    }
+    if (!printerRef.current?.hasSavedDevice()) return;
+    const t = setTimeout(() => {
+      if (printerRef.current && !printerRef.current.isConnected()) {
+        printerRef.current.reconnectSaved();
+      }
+    }, 1500);
+    return () => clearTimeout(t);
   }, []);
 
   // Logo bytes for ESC/POS printing (loaded once)
