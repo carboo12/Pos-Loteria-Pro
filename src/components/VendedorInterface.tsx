@@ -1966,7 +1966,7 @@ export default function VendedorInterface({
                           Preparación
                         </span>
                       </div>
-                      <span className="text-[10px] font-mono font-black text-blue-900">
+                      <span className="text-xl md:text-2xl font-bold font-mono text-emerald-700">
                         Total: {moneda} {totalTicketMonto.toFixed(2)}
                       </span>
                     </div>
