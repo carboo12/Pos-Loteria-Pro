@@ -2019,6 +2019,21 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     return res.status(400).json({ error: "Faltan datos obligatorios para registrar la venta." });
   }
 
+  // 0. LÍMITE GENERAL: techo por número individual (jugada) en C$ para TODOS los vendedores.
+  const MAX_MONTO_POR_NUMERO_CS = 500;
+  const tasaCambio = db.configuracion.tasa_cambio || 36.5;
+  const jugadasBody = Array.isArray(jugadas) && jugadas.length > 0 ? jugadas : [{ numero: numero_jugado, monto: Number(monto_pago) }];
+  for (const j of jugadasBody) {
+    const montoJugadaCs = moneda === "C$"
+      ? Number(j.monto) || 0
+      : (Number(j.monto) || 0) * tasaCambio;
+    if (montoJugadaCs > MAX_MONTO_POR_NUMERO_CS) {
+      return res.status(400).json({
+        error: `VENTA RECHAZADA (LÍMITE GENERAL): No se puede apostar más de C$ ${MAX_MONTO_POR_NUMERO_CS} por número. El número "${j.numero}" excede el techo (${moneda} ${Number(j.monto)}).`
+      });
+    }
+  }
+
   // 1. Verify seller is active & online
   const user = db.usuarios.find((u: any) => u.id === id_vendedor);
   if (!user) {

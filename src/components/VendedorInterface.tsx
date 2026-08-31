@@ -37,6 +37,7 @@ import ResumenFacturacionCard from "./ResumenFacturacionCard";
 import FacturacionVendedorCard from "./FacturacionVendedorCard";
 import LiveClock from "./LiveClock";
 import { useFacturacion } from "../hooks/useFacturacion";
+import { MAX_MONTO_POR_NUMERO_CS } from "../lib/prize-utils";
 import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy, limit } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
 import { BluetoothPrinterService, PrinterStatus } from "../services/BluetoothPrinterService";
@@ -449,6 +450,10 @@ export default function VendedorInterface({
 
     const multiplier = calculatePrizeMultiplier(selectedJuego, selectedSorteo);
     const montoInCs = moneda === "USD" ? numericAmount * (config.tasa_cambio || 36.50) : numericAmount;
+    if (montoInCs > MAX_MONTO_POR_NUMERO_CS) {
+      setErrorMessage(`LÍMITE GENERAL: No se puede apostar más de C$ ${MAX_MONTO_POR_NUMERO_CS} por número. Monto ingresado: ${moneda} ${numericAmount.toFixed(2)}.`);
+      return;
+    }
     const premioPosibleCs = montoInCs * multiplier;
     // dia_juego: la fecha del sorteo para el que se apuesta (ej: "16-Julio" en juego Fechas).
     // IMPORTANTE: esto NO es la fecha de venta del ticket — se guarda en jugada.dia_juego, no en ticket.fecha_venta.
@@ -464,6 +469,10 @@ export default function VendedorInterface({
       const existing = updated[existingIndex];
       const newMonto = existing.monto + numericAmount;
       const newMontoInCs = moneda === "USD" ? newMonto * (config.tasa_cambio || 36.50) : newMonto;
+      if (newMontoInCs > MAX_MONTO_POR_NUMERO_CS) {
+        setErrorMessage(`LÍMITE GENERAL: El número "${numeroJugado}" sumaría C$ ${newMontoInCs.toFixed(2)} en este boleto. El máximo por número es C$ ${MAX_MONTO_POR_NUMERO_CS}.`);
+        return;
+      }
       updated[existingIndex] = {
         ...existing,
         monto: newMonto,

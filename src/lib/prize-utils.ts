@@ -6,6 +6,13 @@
 
 import { getTicketDate } from "./date-utils";
 
+/**
+ * Techo general de venta: máximo monto apostable por un número individual
+ * (jugada) expresado en Córdobas (C$). Se aplica a TODOS los vendedores,
+ * en todos los juegos y todos los sorteos. Es un techo rígido.
+ */
+export const MAX_MONTO_POR_NUMERO_CS = 500;
+
 /** Game/draw display names (used for matching sorteo config). */
 export interface ParsedGameDraw {
   game: string;
