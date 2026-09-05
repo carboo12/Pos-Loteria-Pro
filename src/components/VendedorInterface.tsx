@@ -26,7 +26,8 @@ import {
   Printer,
   Loader2,
   Unlink,
-  Menu
+  Menu,
+  BarChart3
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Html5QrcodeScanner } from "html5-qrcode";
@@ -35,6 +36,7 @@ import TicketPreviewModal from "./TicketPreviewModal";
 import { QrScannerModal } from "./QrScannerModal";
 import ResumenFacturacionCard from "./ResumenFacturacionCard";
 import FacturacionVendedorCard from "./FacturacionVendedorCard";
+import ReporteSorteoView from "./ReporteSorteoView";
 import LiveClock from "./LiveClock";
 import { useFacturacion } from "../hooks/useFacturacion";
 import { MAX_MONTO_POR_NUMERO_CS } from "../lib/prize-utils";
@@ -131,7 +133,7 @@ export default function VendedorInterface({
   serverTime
 }: VendedorInterfaceProps) {
   // Navigation tabs & Sidebar Drawer state
-  const [activeTab, setActiveTab] = useState<"venta" | "reportes" | "pagos">("venta");
+  const [activeTab, setActiveTab] = useState<"venta" | "reportes" | "pagos" | "desglose">("venta");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Dynamic viewport listener for mobile keyboard detection on FAB
@@ -2741,6 +2743,12 @@ export default function VendedorInterface({
             </div>
           );
         })()}
+        {/* TAB 2.5: DESGLOSE POR SORTEO (REPORTE DETALLADO POR NÚMERO) */}
+        {activeTab === "desglose" && (
+          <div className="space-y-4 animate-fade-in">
+            <ReporteSorteoView userId={user.id} config={config} />
+          </div>
+        )}
         {/* TAB 3: PAGOS (QR SCANNERS) */}
         {activeTab === "pagos" && (
           <div className="space-y-4 animate-fade-in">
@@ -3075,6 +3083,24 @@ export default function VendedorInterface({
                 >
                   <History className="w-5 h-5" />
                   <span>Reportes</span>
+                </button>
+
+                <button
+                  id="nav-desglose"
+                  onClick={() => {
+                    setActiveTab("desglose");
+                    setErrorMessage(null);
+                    setSuccessMessage(null);
+                    setIsSidebarOpen(false);
+                  }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all font-display text-xs font-black uppercase tracking-wider cursor-pointer ${
+                    activeTab === "desglose"
+                      ? "bg-blue-600 text-white shadow-md border border-blue-400"
+                      : "text-blue-200 hover:bg-blue-800/60 hover:text-white"
+                  }`}
+                >
+                  <BarChart3 className="w-5 h-5" />
+                  <span>Por Sorteo</span>
                 </button>
 
                 <button

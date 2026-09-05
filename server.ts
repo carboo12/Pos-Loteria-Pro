@@ -2598,6 +2598,129 @@ app.post("/api/ventas/:id/pagar", requireAdmin, async (req, res) => {
   }
 });
 
+// Reporte de ventas por sorteo y fecha — desglose por número (Vendedor)
+app.get("/api/vendedor/reporte-sorteo", checkAuth(), async (req, res) => {
+  const vendedorId = (req.query.vendedorId as string) || "";
+  const fecha = (req.query.fecha as string) || "";
+  const juego = (req.query.juego as string) || "";
+  const sorteo = (req.query.sorteo as string) || "";
+  const idSorteo = (req.query.idSorteo as string) || "";
+
+  if (!vendedorId || !fecha || (!juego.trim() && !sorteo.trim() && !idSorteo)) {
+    return res.status(400).json({ error: "vendedorId, fecha y al menos uno de (juego, sorteo, idSorteo) son requeridos." });
+  }
+
+  // Anti-fraude: un vendedor SOLO puede consultar sus propios reportes.
+  const sessionUser = (req as any).user;
+  if (sessionUser && sessionUser.rol === "vendedor" && sessionUser.id !== vendedorId) {
+    return res.status(403).json({ error: "No puede consultar reportes de otro vendedor." });
+  }
+
+  const tasaCambio = db.configuracion.tasa_cambio || 36.5;
+  const cleanJuego = juego.trim().toUpperCase();
+  const sorteoTarget = sorteo.trim();
+  const juegoSorteoTarget = `${juego.trim()} ${sorteoTarget}`;
+
+  // Filtra por juego/sorteo apoyándose primero en id_sorteo (más robusto),
+  // y con fallback por nombre (sorteo, juego_sorteo) para tickets legacy.
+  const matchesJuegoSorteo = (t: any): boolean => {
+    if (idSorteo && t.id_sorteo && String(t.id_sorteo) === idSorteo) return true;
+    if (!cleanJuego && !sorteoTarget) return false;
+    const tJuego = String(t.id_juego || t.juego || "").toUpperCase();
+    const tSorteo = String(t.sorteo || "");
+    const tJuegoSorteo = String(t.juego_sorteo || "");
+    const juegoOk = !cleanJuego || tJuego === cleanJuego || tJuego === juego.trim().toUpperCase();
+    const sorteoOk = !sorteoTarget || tSorteo === sorteoTarget || tJuegoSorteo === juegoSorteoTarget;
+    return juegoOk && sorteoOk;
+  };
+
+  let tickets: any[] = [];
+
+  // Fuente primaria: Firestore (single-field query para evitar composite index;
+  // el filtro fino por vendedor/juego/sorteo se hace en memoria).
+  if (initFirebaseAdmin()) {
+    try {
+      const firestoreDb = getFirestoreInstance();
+      const snap = await firestoreDb.collection("tickets").where("fecha_venta", "==", fecha).get();
+      snap.forEach((doc: any) => {
+        tickets.push({ id: doc.id, ...doc.data() });
+      });
+    } catch (err: any) {
+      console.error("[Reporte Sorteo] Error consultando Firestore:", err);
+    }
+  }
+
+  // Fallback: si Firestore no está disponible o vino vacío, usar caché en memoria.
+  if (tickets.length === 0) {
+    tickets = db.ventas.filter(
+      (v: any) => v.fecha_venta === fecha || (v.timestamp_servidor || "").startsWith(fecha)
+    );
+  }
+
+  const filtered = tickets.filter((t: any) => {
+    if (t.id_vendedor !== vendedorId) return false;
+    if (t.anulado || t.estado === "anulado") return false;
+    return matchesJuegoSorteo(t);
+  });
+
+  const detalleMap = new Map<string, { montoTotalCs: number; cantidadJugadas: number; boletos: Set<string> }>();
+  let totalVendidoCs = 0;
+  let totalBoletos = 0;
+
+  for (const t of filtered) {
+    let ticketMontoCs = 0;
+    const jugadasTicket = Array.isArray(t.jugadas) && t.jugadas.length > 0
+      ? t.jugadas
+      : [{ numero: t.numero_jugado, monto: t.monto_pago }];
+
+    for (const j of jugadasTicket) {
+      const numero = String(j.numero == null ? "" : j.numero).trim();
+      const montoCs = (t.moneda === "USD"
+        ? (Number(j.monto) || 0) * tasaCambio
+        : Number(j.monto) || 0);
+      ticketMontoCs += montoCs;
+
+      if (numero) {
+        const entry = detalleMap.get(numero) || { montoTotalCs: 0, cantidadJugadas: 0, boletos: new Set<string>() };
+        entry.montoTotalCs += montoCs;
+        entry.cantidadJugadas += 1;
+        entry.boletos.add(t.id_ticket || t.id);
+        detalleMap.set(numero, entry);
+      }
+    }
+
+    if (ticketMontoCs > 0) {
+      totalVendidoCs += ticketMontoCs;
+      totalBoletos += 1;
+    }
+  }
+
+  const detalles = Array.from(detalleMap.entries())
+    .map(([numero, e]) => ({
+      numero,
+      monto_total_cs: Math.round(e.montoTotalCs * 100) / 100,
+      cantidad_jugadas: e.cantidadJugadas,
+      cantidad_boletos: e.boletos.size,
+    }))
+    .sort((a, b) => b.monto_total_cs - a.monto_total_cs || a.numero.localeCompare(b.numero, "es", { numeric: true }));
+
+  const totalJugadas = detalles.reduce((acc, d) => acc + d.cantidad_jugadas, 0);
+
+  process.stdout.write(`[Reporte Sorteo] vendedor=${vendedorId} fecha=${fecha} juego=${juego} sorteo=${sorteo} idSorteo=${idSorteo} → ${detalles.length} números | boletos=${totalBoletos} | total=C$ ${Math.round(totalVendidoCs * 100) / 100}\n`);
+
+  res.json({
+    vendedorId,
+    fecha,
+    juego: cleanJuego,
+    sorteo: sorteoTarget,
+    idSorteo: idSorteo || null,
+    total_vendido_cs: Math.round(totalVendidoCs * 100) / 100,
+    total_boletos: totalBoletos,
+    total_jugadas: totalJugadas,
+    detalles,
+  });
+});
+
 // Cash Closure (Cierre de Caja)
 app.get("/api/cierres", (req, res) => {
   res.json(db.cierres_caja);
