@@ -5,7 +5,6 @@ import {
   History, 
   Wifi, 
   WifiOff, 
-  DollarSign, 
   FileText, 
   RotateCcw, 
   Trash2, 
@@ -202,7 +201,7 @@ export default function VendedorInterface({
   const [numeroJugado, setNumeroJugado] = useState("");
   const [montoPago, setMontoPago] = useState("");
   const [activeField, setActiveField] = useState<'numero' | 'monto'>('numero');
-  const [moneda, setMoneda] = useState<"C$" | "USD">("C$");
+  const moneda = "C$" as const;
   const [nombreCliente, setNombreCliente] = useState("Genérico");
   const [fechaVenta, setFechaVenta] = useState<{ dia: string; mes: string; anio: number }>(() => {
     const nicNow = getNicaraguaNow();
@@ -451,7 +450,7 @@ export default function VendedorInterface({
     }
 
     const multiplier = calculatePrizeMultiplier(selectedJuego, selectedSorteo);
-    const montoInCs = moneda === "USD" ? numericAmount * (config.tasa_cambio || 36.50) : numericAmount;
+    const montoInCs = numericAmount;
     if (montoInCs > MAX_MONTO_POR_NUMERO_CS) {
       setErrorMessage(`LÍMITE GENERAL: No se puede apostar más de C$ ${MAX_MONTO_POR_NUMERO_CS} por número. Monto ingresado: ${moneda} ${numericAmount.toFixed(2)}.`);
       return;
@@ -470,7 +469,7 @@ export default function VendedorInterface({
       const updated = [...jugadas];
       const existing = updated[existingIndex];
       const newMonto = existing.monto + numericAmount;
-      const newMontoInCs = moneda === "USD" ? newMonto * (config.tasa_cambio || 36.50) : newMonto;
+      const newMontoInCs = newMonto;
       if (newMontoInCs > MAX_MONTO_POR_NUMERO_CS) {
         setErrorMessage(`LÍMITE GENERAL: El número "${numeroJugado}" sumaría C$ ${newMontoInCs.toFixed(2)} en este boleto. El máximo por número es C$ ${MAX_MONTO_POR_NUMERO_CS}.`);
         return;
@@ -1457,7 +1456,7 @@ export default function VendedorInterface({
 
     // 5. Compute totals from draft cart
     const totalMontoCs = jugadas.reduce((sum, j) => {
-      return sum + (moneda === "USD" ? j.monto * (config.tasa_cambio || 36.50) : j.monto);
+      return sum + j.monto;
     }, 0);
     const totalPremioCs = jugadas.reduce((sum, j) => sum + j.premio_posible, 0);
 
@@ -2149,31 +2148,8 @@ export default function VendedorInterface({
                     <div className="flex justify-between items-center mb-1">
                       <label className="block text-[10px] font-display font-black text-gray-700 uppercase tracking-wider">MONTO</label>
                       
-                      {/* Currency Toggle */}
-                      <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-150">
-                        <button
-                          id="curr-toggle-cs"
-                          onClick={() => setMoneda("C$")}
-                          className={`px-1.5 py-0.5 rounded text-[8px] font-black transition-all cursor-pointer ${
-                            moneda === "C$" 
-                              ? "bg-blue-900 text-white font-bold shadow-xs" 
-                              : "text-gray-600"
-                          }`}
-                        >
-                          C$
-                        </button>
-                        <button
-                          id="curr-toggle-usd"
-                          onClick={() => setMoneda("USD")}
-                          className={`px-1.5 py-0.5 rounded text-[8px] font-black transition-all cursor-pointer ${
-                            moneda === "USD" 
-                              ? "bg-blue-900 text-white font-bold shadow-xs" 
-                              : "text-gray-600"
-                          }`}
-                        >
-                          USD
-                        </button>
-                      </div>
+                      {/* Moneda fija: C$ (Córdobas) */}
+                      <span className="text-[9px] font-black text-blue-900 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-lg">C$</span>
                     </div>
 
                     <div className="relative">
@@ -2709,7 +2685,7 @@ export default function VendedorInterface({
 
                                 setSelectedJuego(game);
                                 setSelectedSorteo(nextSorteo.nombre);
-                                setMoneda(t.moneda || "C$");
+                                // moneda siempre C$
                                 if (t.jugadas && t.jugadas.length > 0) {
                                   setJugadas(t.jugadas.map((j: any) => ({
                                     numero: j.numero,
