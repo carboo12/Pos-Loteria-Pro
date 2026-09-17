@@ -40,8 +40,9 @@ if (!firebaseAdmin) {
 const app = express();
 const activePaymentLocks = new Set<string>();
 
-// ─── SESIONES SEGURAS (crypto + TTL) ──────────────────────────────────
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
+// ─── SESIONES SEGURAS (crypto) ────────────────────────────────────────
+// Sesión permanente: sin TTL ni cierre por inactividad. Se mantiene
+// abierta en cualquier dispositivo hasta logout explícito del usuario.
 const sessions = new Map<string, { user: any; createdAt: number }>();
 
 function generateSessionToken(): string {
@@ -56,27 +57,12 @@ function createSession(user: any): string {
 
 function validateSession(token: string): any | null {
   const session = sessions.get(token);
-  if (!session) return null;
-  if (Date.now() - session.createdAt > SESSION_TTL_MS) {
-    sessions.delete(token);
-    return null;
-  }
-  return session.user;
+  return session ? session.user : null;
 }
 
 function destroySession(token: string): void {
   sessions.delete(token);
 }
-
-// Limpieza periódica de sesiones expiradas (cada 30 min)
-setInterval(() => {
-  const now = Date.now();
-  for (const [token, session] of sessions.entries()) {
-    if (now - session.createdAt > SESSION_TTL_MS) {
-      sessions.delete(token);
-    }
-  }
-}, 30 * 60 * 1000);
 
 // ─── MIDDLEWARE checkAuth (con soporte de roles) ───────────────────────
 function checkAuth(allowedRoles?: string[]) {

@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCrSMQ8jNJ7QOaET1GsmoDHXPpPOVqaThY",
@@ -16,6 +16,13 @@ const FIRESTORE_DB_ID = "ai-studio-puntodeventadelo-99bc134f-793f-40a0-acdb-49f6
 const app = initializeApp(firebaseConfig);
 export const firestore = getFirestore(app, FIRESTORE_DB_ID);
 export const auth = getAuth(app);
+
+// Persistencia LOCAL: las credenciales/sesión de Firebase Auth sobreviven
+// reinicios del navegador sin expirar de forma inesperada (PC y móviles).
+setPersistence(auth, browserLocalPersistence).catch((e) =>
+  console.error("[Auth] No se pudo configurar persistencia LOCAL:", e)
+);
+
 export default app;
 
 // Production-ready: diagnostic utilities removed.

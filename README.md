@@ -150,7 +150,7 @@ punto-de-venta-de-lotería/
 ```
 
 ## Seguridad
-
+***************************
 ### Autenticación
 ### Autenticación e Identidad (Blueprint)
 - Estrategia Híbrida: Soporte dual para autenticación Legacy (texto plano) y Hashes de seguridad con **Bcrypt** para los perfiles modernos de Administrador/Supervisor.
