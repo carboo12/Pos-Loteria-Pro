@@ -40,28 +40,120 @@ if (!firebaseAdmin) {
 const app = express();
 const activePaymentLocks = new Set<string>();
 
-// ─── SESIONES SEGURAS (crypto) ────────────────────────────────────────
-// Sesión permanente: sin TTL ni cierre por inactividad. Se mantiene
-// abierta en cualquier dispositivo hasta logout explícito del usuario.
-const sessions = new Map<string, { user: any; createdAt: number }>();
+// ─── SESIONES PERMANENTES (token stateless firmado) ───────────────────
+// Sin Map en memoria y SIN TTL. El token transporta el id del usuario
+// firmado con HMAC-SHA256, así la sesión sobrevive al escalado a cero de
+// App Hosting (minInstances: 0), a los cold starts y al balanceo entre
+// instancias. Permanece abierta indefinidamente, sin importar si la app
+// pasa a segundo plano o el navegador se minimiza, hasta el logout
+// explícito del usuario.
+//
+// La revocación por token (logout) es best-effort en memoria; la revocación
+// real por usuario se hace con `sesion_ver` (ver createSession/validateSession).
 
-function generateSessionToken(): string {
-  return "sess_" + crypto.randomBytes(32).toString("hex");
+const SESSION_TOKEN_VERSION = 1;
+const SESSION_TOKEN_PREFIX = "sess_";
+let _sessionSecret: string | null = null;
+
+// Clave estable entre instancias: SESSION_SECRET si está definido; si no, se
+// deriva de FIREBASE_CONFIG_JSON (idéntico en todas las instancias de App
+// Hosting). El último recurso aleatorio solo sirve en dev local (1 instancia).
+function getSessionSecret(): string {
+  if (_sessionSecret) return _sessionSecret;
+
+  const fromEnv = (process.env.SESSION_SECRET || "").trim();
+  if (fromEnv.length >= 32) {
+    _sessionSecret = fromEnv;
+  } else {
+    const cfg = process.env.FIREBASE_CONFIG_JSON || "";
+    if (cfg) {
+      _sessionSecret = crypto
+        .createHash("sha256")
+        .update(`loto-pos/session/v${SESSION_TOKEN_VERSION}|${cfg}`)
+        .digest("hex");
+      console.warn("[Auth] SESSION_SECRET no definido; clave derivada de FIREBASE_CONFIG_JSON.");
+    } else {
+      _sessionSecret = crypto.randomBytes(32).toString("hex");
+      console.warn(
+        "[Auth] SESSION_SECRET no definido — clave efímera de proceso. Las sesiones NO sobrevivirán a un reinicio (solo aceptable en desarrollo local)."
+      );
+    }
+  }
+  return _sessionSecret;
 }
 
+function b64url(input: string | Buffer): string {
+  const buf = typeof input === "string" ? Buffer.from(input, "utf8") : input;
+  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function signPayload(payload: string): string {
+  return b64url(crypto.createHmac("sha256", getSessionSecret()).update(payload).digest());
+}
+
+// `cv` = versión de credenciales. Si el usuario cambia su contraseña se
+// incrementa en el documento, y todo token emitido con el valor anterior
+// deja de validar. Es lo que permite revocar sin poder enumerar tokens.
 function createSession(user: any): string {
-  const token = generateSessionToken();
-  sessions.set(token, { user, createdAt: Date.now() });
-  return token;
+  const payload = b64url(
+    JSON.stringify({
+      v: SESSION_TOKEN_VERSION,
+      uid: user.id,
+      cv: Number(user.sesion_ver) || 0,
+      iat: Date.now(),
+    })
+  );
+  return `${SESSION_TOKEN_PREFIX}${payload}.${signPayload(payload)}`;
 }
 
-function validateSession(token: string): any | null {
-  const session = sessions.get(token);
-  return session ? session.user : null;
-}
+// Lista de revocación best-effort en memoria (se pierde al reiniciar la
+// instancia). Acotada y con caducidad para no crecer sin límite.
+const REVOKED_TTL_MS = 24 * 60 * 60 * 1000;
+const REVOKED_MAX = 5000;
+const revokedSessions = new Map<string, number>();
 
 function destroySession(token: string): void {
-  sessions.delete(token);
+  if (typeof token !== "string" || !token) return;
+  revokedSessions.set(token, Date.now());
+  if (revokedSessions.size <= REVOKED_MAX) return;
+
+  const cutoff = Date.now() - REVOKED_TTL_MS;
+  for (const [t, ts] of revokedSessions) {
+    if (ts < cutoff) revokedSessions.delete(t);
+  }
+  while (revokedSessions.size > REVOKED_MAX) {
+    const oldest = revokedSessions.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    revokedSessions.delete(oldest);
+  }
+}
+
+function validateSession(token: string): { id: string; cv: number } | null {
+  if (typeof token !== "string" || !token) return null;
+  if (revokedSessions.has(token)) return null;
+  if (!token.startsWith(SESSION_TOKEN_PREFIX)) return null;
+
+  // La firma cubre el payload SIN el prefijo, igual que en createSession.
+  const parts = token.slice(SESSION_TOKEN_PREFIX.length).split(".");
+  if (parts.length !== 2) return null;
+  const [payload, signature] = parts;
+  if (!payload || !signature) return null;
+
+  // timingSafeEqual exige buffers del mismo tamaño.
+  const expected = Buffer.from(signPayload(payload));
+  const provided = Buffer.from(signature);
+  if (expected.length !== provided.length) return null;
+  if (!crypto.timingSafeEqual(expected, provided)) return null;
+
+  try {
+    // Node acepta el alfabeto base64url (- y _) en el decodificador base64.
+    const data = JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
+    if (data?.v !== SESSION_TOKEN_VERSION) return null;
+    if (typeof data?.uid !== "string" || !data.uid) return null;
+    return { id: data.uid, cv: Number(data.cv) || 0 };
+  } catch {
+    return null;
+  }
 }
 
 // ─── MIDDLEWARE checkAuth (con soporte de roles) ───────────────────────
@@ -77,7 +169,7 @@ function checkAuth(allowedRoles?: string[]) {
       const token = authHeader.split(" ")[1];
       const sessionUser = validateSession(token);
 
-      console.log(`[Auth] Token "${token.substring(0, 16)}..." → ${routeLabel} | Sesiones activas: ${sessions.size} | Resultado: ${sessionUser ? "VALID (" + sessionUser.rol + ")" : "INVALID"}`);
+      console.log(`[Auth] Token "${token.substring(0, 16)}..." → ${routeLabel} | Resultado: ${sessionUser ? `VALID (id=${sessionUser.id})` : "INVALID"}`);
 
       if (!sessionUser) {
         return res.status(401).json({ error: "Sesión inválida o expirada. Por favor inicie sesión nuevamente." });
@@ -108,6 +200,13 @@ function checkAuth(allowedRoles?: string[]) {
         return res.status(403).json({ error: "Cuenta desactivada. Sesión cerrada." });
       }
 
+      // Revocación por cambio de contraseña: el token se emitió con una
+      // versión de credenciales anterior, así que ya no es válido.
+      if ((Number(freshUser.sesion_ver) || 0) !== sessionUser.cv) {
+        destroySession(token);
+        return res.status(401).json({ error: "Credenciales actualizadas. Por favor inicie sesión nuevamente." });
+      }
+
       // Verificación de roles
       if (allowedRoles && allowedRoles.length > 0) {
         const userRole = freshUser.rol;
@@ -120,8 +219,11 @@ function checkAuth(allowedRoles?: string[]) {
       (req as any).user = { ...freshUser, password: undefined };
       return next();
     } catch (err) {
+      // 500 y NO 401: un fallo transitorio (Firestore lento, cold start) no
+      // debe cerrar la sesión del usuario. El interceptor del frontend solo
+      // cierra sesión ante 401/403, así que un 500 deja la sesión intacta.
       console.error("[Auth] Error verificando sesión:", err);
-      return res.status(401).json({ error: "Invalid token." });
+      return res.status(500).json({ error: "Error temporal verificando la sesión." });
     }
   };
 }
@@ -299,6 +401,9 @@ interface ServerUsuario {
   vendedoresAsignados: any[];
   password?: string;
   configuracion?: ServerConfiguracion;
+  // Versión de credenciales de la sesión. Se incrementa al cambiar la
+  // contraseña para invalidar los tokens emitidos con el valor anterior.
+  sesion_ver?: number;
 }
 
 interface ServerDB {
@@ -986,18 +1091,16 @@ app.post("/api/auth/change-password", checkAuth(), async (req, res) => {
       return res.status(401).json({ error: "La contraseña actual es incorrecta." });
     }
 
+    // Invalida TODAS las sesiones del usuario. Con tokens stateless no se
+    // pueden enumerar para revocar una por una, así que se incrementa
+    // `sesion_ver`: todo token emitido con el valor anterior deja de validar.
+    // Se reemite un token nuevo para que la sesión actual pueda continuar.
+    user.sesion_ver = (Number(user.sesion_ver) || 0) + 1;
     user.password = bcrypt.hashSync(newPassword, 10);
     saveToDB();
 
-    // Invalidate all existing sessions for this user except the current one
-    const currentToken = req.headers.authorization?.split(" ")[1];
-    for (const [token, session] of sessions.entries()) {
-      if (session.user.id === userId && token !== currentToken) {
-        destroySession(token);
-      }
-    }
-
-    res.json({ success: true, message: "Contraseña actualizada correctamente." });
+    const refreshedToken = createSession(user);
+    res.json({ success: true, message: "Contraseña actualizada correctamente.", localToken: refreshedToken });
   } catch (err) {
     console.error("[Auth ChangePassword] Error:", err);
     res.status(500).json({ error: "Error interno al cambiar contraseña." });
