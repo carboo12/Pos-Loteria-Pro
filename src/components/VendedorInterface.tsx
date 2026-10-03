@@ -1657,7 +1657,11 @@ export default function VendedorInterface({
   };
 
   return (
-    <div id="vendedor-container" className="flex flex-col bg-[#F3F4F6] w-full h-full">
+    <div
+      id="vendedor-container"
+      className="flex flex-col w-full h-full text-gray-900"
+      style={{ backgroundColor: "#F5C4A1" }}
+    >
       
       {/* Indicador silencioso de reconexión Bluetooth */}
       {printerStatus === "connecting" && printerRef.current?.isSilentReconnecting() && (
@@ -1751,8 +1755,13 @@ export default function VendedorInterface({
       </div>
 
       {/* Main Area / Scrollable Screens */}
-      <div className="flex-1 p-4 overflow-y-auto">
+      <div className="flex-1 p-4 overflow-y-auto relative z-0">
         
+        {/* Marca de Agua (Logo Fijo) */}
+        <div className="fixed inset-0 flex items-center justify-center pointer-events-none -z-10 mt-16 select-none">
+          <img src="/logo.png" alt="Fondo" className="w-[110%] max-w-[580px] object-contain" draggable={false} />
+        </div>
+
         {/* Error and Success banners */}
         {errorMessage && (
           <div className="mb-4 p-3 bg-red-100 border-l-4 border-[#EF4444] rounded-lg text-red-900 font-sans text-xs flex items-start space-x-2 shadow-sm">
@@ -1773,51 +1782,44 @@ export default function VendedorInterface({
           <div className="space-y-2.5 animate-fade-in pb-4">
             
             {/* Top Navigation Bar / Breadcrumb for Cascading Levels */}
-            <div className="bg-white rounded-2xl p-3 shadow-sm border border-gray-200 flex justify-between items-center">
-              <div className="flex items-center space-x-2">
-                {ventaStep > 1 && (
-                  <button
-                    onClick={() => {
-                      setErrorMessage(null);
-                      setSuccessMessage(null);
-                      if (ventaStep === 3) setVentaStep(2);
-                      else if (ventaStep === 2) {
-                        setSelectedJuego("");
-                        setVentaStep(1);
-                      }
-                    }}
-                    className="p-1.5 rounded-xl bg-blue-50 text-[#1E3A8A] hover:bg-blue-100 transition-colors cursor-pointer flex items-center justify-center"
-                    title="Regresar"
-                  >
-                    <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
-                  </button>
-                )}
-                <div>
-                  <span className="text-[10px] font-black uppercase text-gray-400 block tracking-wider">
-                    {ventaStep === 1 ? "Nivel 1 de 3" : ventaStep === 2 ? "Nivel 2 de 3" : "Nivel 3 de 3"}
+            {ventaStep > 1 && (
+              <div className="flex items-center space-x-3 mb-4 px-2">
+                <button
+                  onClick={() => {
+                    setErrorMessage(null);
+                    setSuccessMessage(null);
+                    if (ventaStep === 3) setVentaStep(2);
+                    else if (ventaStep === 2) {
+                      setSelectedJuego("");
+                      setVentaStep(1);
+                    }
+                  }}
+                  className="p-1.5 rounded-full bg-white text-[#1E3A8A] hover:bg-gray-50 shadow-sm border border-gray-200 transition-colors cursor-pointer flex items-center justify-center"
+                  title="Regresar"
+                >
+                  <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
+                </button>
+                <div className="flex items-center space-x-2 text-xs font-display font-black text-gray-800 uppercase tracking-wider">
+                  <span className="text-[#1E3A8A]">
+                    {selectedJuego}
                   </span>
-                  <div className="flex items-center space-x-1 text-xs font-display font-black text-gray-800">
-                    <span className={ventaStep === 1 ? "text-[#1E3A8A] font-extrabold" : "text-gray-600"}>
-                      {selectedJuego || "Juegos"}
-                    </span>
-                    {ventaStep >= 2 && (
-                      <>
-                        <span className="text-gray-400">&gt;</span>
-                        <span className={ventaStep === 2 ? "text-[#1E3A8A] font-extrabold text-ellipsis overflow-hidden max-w-[130px] whitespace-nowrap" : "text-gray-600"}>
-                          {selectedSorteo ? selectedSorteo.replace(/\s*\(NI\)|\s*\(HN\)|\s*\(SV\)|\s*\(LP\)|\s*\(CR\)/g, "") : "Sorteo"}
-                        </span>
-                      </>
-                    )}
-                    {ventaStep === 3 && (
-                      <>
-                        <span className="text-gray-400">&gt;</span>
-                        <span className="text-[#1E3A8A] font-extrabold">Facturación</span>
-                      </>
-                    )}
-                  </div>
+                  {ventaStep >= 2 && selectedSorteo && (
+                    <>
+                      <span className="text-gray-400">/</span>
+                      <span className="text-[#1E3A8A] text-ellipsis overflow-hidden max-w-[130px] whitespace-nowrap">
+                        {selectedSorteo.replace(/\s*\(NI\)|\s*\(HN\)|\s*\(SV\)|\s*\(LP\)|\s*\(CR\)/g, "")}
+                      </span>
+                    </>
+                  )}
+                  {ventaStep === 3 && (
+                    <>
+                      <span className="text-gray-400">/</span>
+                      <span className="text-[#1E3A8A]">Facturación</span>
+                    </>
+                  )}
                 </div>
               </div>
-            </div>
+            )}
 
             {/* NIVEL 1: SELECCIÓN DE JUEGO (DASHBOARD PRINCIPAL DE TARJETAS AZULES - TODOS LOS JUEGOS) */}
             {ventaStep === 1 && (() => {
@@ -1830,12 +1832,12 @@ export default function VendedorInterface({
 
               return (
                 <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <h2 className="text-xs font-display font-black text-gray-700 uppercase tracking-wider">
-                      Seleccione un Juego ({gamesToDisplay.length} Juegos Disponibles)
+                  <div className="flex justify-center items-center mb-2 mt-4">
+                    <h2 className="text-[11px] font-display font-black text-gray-400 uppercase tracking-widest">
+                      Seleccione un Juego
                     </h2>
                   </div>
-                  <div className="grid grid-cols-2 gap-5 sm:gap-6 p-1">
+                  <div className="grid grid-cols-2 gap-6 p-2">
                     {gamesToDisplay.map((juego) => {
                       const isSabadito = juego === "Sabadito";
                       const isWeekend = [0, 6].includes(getNicaraguaNow().getDay());
@@ -1856,13 +1858,31 @@ export default function VendedorInterface({
                             setErrorMessage(null);
                             setSuccessMessage(null);
                           }}
-                          className={`min-h-[150px] sm:min-h-[170px] rounded-3xl shadow-xl border-2 font-display font-black text-lg sm:text-2xl tracking-wider flex flex-col items-center justify-center text-center p-4 sm:p-6 transition-all duration-200 active:scale-95 cursor-pointer my-1 ${
+                          style={disabled
+                            ? {
+                                borderRadius: "9999px",
+                                background: "rgba(226, 230, 235, 0.4)",
+                                backdropFilter: "blur(12px)",
+                                WebkitBackdropFilter: "blur(12px)",
+                                border: "1px solid rgba(255, 255, 255, 0.4)",
+                                boxShadow: "-4px -4px 10px rgba(255,255,255,0.7), 4px 4px 10px rgba(0,0,0,0.05)",
+                              }
+                            : {
+                                borderRadius: "9999px",
+                                background: "rgba(30, 58, 138, 0.25)",
+                                backdropFilter: "blur(10px)",
+                                WebkitBackdropFilter: "blur(10px)",
+                                border: "1px solid rgba(255, 255, 255, 0.5)",
+                                boxShadow: "-6px -6px 16px rgba(255,255,255,0.9), 8px 8px 20px rgba(0,0,0,0.3), inset 2px 2px 6px rgba(255,255,255,0.4), inset -2px -2px 6px rgba(0,0,0,0.15)",
+                              }
+                          }
+                          className={`min-h-[120px] sm:min-h-[140px] w-full font-display font-black text-lg sm:text-xl tracking-wide flex flex-col items-center justify-center text-center px-4 py-5 transition-all duration-150 cursor-pointer select-none relative overflow-hidden ${
                             disabled
-                              ? "bg-gray-200 text-gray-400 border-gray-300 opacity-60 cursor-not-allowed shadow-none"
-                              : "bg-[#1E3A8A] hover:bg-blue-800 active:bg-blue-950 text-white border-blue-900 shadow-blue-950/30 hover:shadow-2xl"
+                              ? "text-gray-500 opacity-60 cursor-not-allowed"
+                              : "text-white active:scale-[0.97] active:brightness-95 hover:bg-[rgba(30,58,138,0.75)]"
                           }`}
                         >
-                          <span className="uppercase font-extrabold leading-tight drop-shadow-sm">{juego}</span>
+                          <span className="uppercase font-extrabold leading-snug tracking-wider">{juego}</span>
                         </button>
                       );
                     })}
