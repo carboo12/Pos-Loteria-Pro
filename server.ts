@@ -2194,7 +2194,53 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     return `${hour}:${min} ${ampm}`;
   };
 
-  const applicableLimits = limits.filter((l: any) => {
+  // ── ÁMBITO DEL TECHO: POR SORTEO ACTIVO Y POR CICLO ACTUAL ──────────
+  // El conteo de un techo SOLO considera las ventas de ESTE sorteo (por ID)
+  // emitidas durante el ciclo en curso (fecha local de hoy). Al cerrarse el
+  // sorteo y entrar el siguiente (otro ID u otro día), el cupo vuelve a estar
+  // completo: nunca se arrastran bloqueos de sorteos ya cerrados.
+  const todayStr = getLocalDateString();
+
+  // Resuelve la configuración de un sorteo a partir de su ID o de su nombre+juego
+  const findSorteoCfg = (rawId: any, nombre: any, jg: any): any => {
+    const sorteosCfg = db.configuracion.sorteos || [];
+    if (rawId !== undefined && rawId !== null && String(rawId) !== "") {
+      const byId = sorteosCfg.find((s: any) => String(s.id) === String(rawId));
+      if (byId) return byId;
+    }
+    if (nombre) {
+      const byNombreJuego = sorteosCfg.find((s: any) => s.nombre === nombre && (!jg || s.juego === jg));
+      if (byNombreJuego) return byNombreJuego;
+      const byNombre = sorteosCfg.find((s: any) => s.nombre === nombre);
+      if (byNombre) return byNombre;
+    }
+    return null;
+  };
+
+  const activeSorteoCfg = findSorteoCfg(selectedSorteo.id, selectedSorteo.nombre, selectedSorteo.juego) || selectedSorteo;
+  const activeSorteoKey = String(activeSorteoCfg.id || `${juego}|${sorteo}`);
+
+  // ¿Este ticket pertenece al sorteo activo Y a su ciclo (día) en curso?
+  const isInActiveSorteoCycle = (v: any): boolean => {
+    // 1. Mismo sorteo (instancia activa) — nunca suma ventas de otro sorteo
+    const saleCfg = findSorteoCfg(v.id_sorteo, v.sorteo, v.juego);
+    const sameSorteo = saleCfg && saleCfg.id
+      ? String(saleCfg.id) === activeSorteoKey
+      : Boolean(v.sorteo && v.sorteo === sorteo && v.juego && String(v.juego).toLowerCase() === String(juego).toLowerCase());
+    if (!sameSorteo) return false;
+
+    // 2. Ciclo actual (hoy): al cerrar el sorteo, el conteo se reinicia
+    const saleFecha = (typeof v.timestamp_servidor === "string" && v.timestamp_servidor)
+      ? v.timestamp_servidor.substring(0, 10)
+      : (typeof v.fecha_venta === "string" ? v.fecha_venta : "");
+    return saleFecha === todayStr;
+  };
+
+  // Monto de un ticket/jugada convertido a C$
+  const toCs = (monto: any, monedaActual: string): number =>
+    monedaActual === "C$" ? Number(monto) || 0 : (Number(monto) || 0) * db.configuracion.tasa_cambio;
+
+  const matchLimitRule = (l: any, numeroDeJugada: string): boolean => {
     // 1. Match Game
     const limitJuego = l.juego || "";
     const gameMatch = !limitJuego || limitJuego === "TODOS" || limitJuego.toLowerCase() === juego.toLowerCase();
@@ -2202,7 +2248,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
 
     // 2. Match Number (normalizado con padStart)
     const limitNum = l.numero ?? l.numero_jugado ?? "TODOS";
-    const numMatch = limitNum === "TODOS" || String(limitNum).padStart(2, "0") === String(numero_jugado).padStart(2, "0");
+    const numMatch = limitNum === "TODOS" || String(limitNum).padStart(2, "0") === String(numeroDeJugada).padStart(2, "0");
     if (!numMatch) return false;
 
     // 3. Match Seller
@@ -2238,19 +2284,42 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     }
 
     return true;
-  });
+  };
 
-  for (const applicableLimit of applicableLimits) {
+  // Se evalúa cada número distinto del ticket contra su propio techo
+  const numerosDelTicket = Array.from(new Set(jugadasBody.map((j: any) => String(j.numero))));
+  const techosGlobalesAgregados = new Set<any>();
+  const paresLimiteNumero: { limit: any; numeroDelTicket: string; montoDelNumeroCs: number }[] = [];
+
+  for (const numeroDelTicket of numerosDelTicket) {
+    const montoDelNumeroCs = jugadasBody
+      .filter((j: any) => String(j.numero) === numeroDelTicket)
+      .reduce((s: number, j: any) => s + toCs(j.monto, moneda), 0);
+
+    for (const l of limits.filter((l: any) => matchLimitRule(l, numeroDelTicket))) {
+      const esTechoGlobal = (l.numero ?? l.numero_jugado ?? "TODOS") === "TODOS";
+      if (esTechoGlobal) {
+        if (techosGlobalesAgregados.has(l)) continue;
+        techosGlobalesAgregados.add(l);
+      }
+      paresLimiteNumero.push({ limit: l, numeroDelTicket, montoDelNumeroCs });
+    }
+  }
+
+  for (const { limit: applicableLimit, numeroDelTicket, montoDelNumeroCs } of paresLimiteNumero) {
     const limitMontoCs = Number(applicableLimit.max_monto ?? applicableLimit.montoMaximo ?? applicableLimit.techo_dinero);
-    const todayStr = getLocalDateString(now);
+    const limitNumRegla = applicableLimit.numero ?? applicableLimit.numero_jugado ?? "TODOS";
 
-    // Sum previous active sales of this number matching this limit today
+    // Sum previous active sales of this number — SOLO del sorteo activo y de su ciclo actual
     const matchingSales = db.ventas.filter((v: any) => {
       if (v.anulado) return false;
 
+      // ÁMBITO POR SORTEO: nunca suma ventas de otro sorteo ni de ciclos ya cerrados
+      if (!isInActiveSorteoCycle(v)) return false;
+
       // Match criteria of the limit
       const limitJuego = applicableLimit.juego || "";
-      if (limitJuego && limitJuego !== "TODOS" && v.juego.toLowerCase() !== limitJuego.toLowerCase()) return false;
+      if (limitJuego && limitJuego !== "TODOS" && String(v.juego || "").toLowerCase() !== limitJuego.toLowerCase()) return false;
 
       const limitNum = applicableLimit.numero ?? applicableLimit.numero_jugado ?? "TODOS";
       if (limitNum !== "TODOS") {
@@ -2260,24 +2329,10 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
         if (!matchesLegacy && !matchesJugadas) return false;
       }
 
-      const limitSorteoName = applicableLimit.sorteo || "";
-      if (limitSorteoName && limitSorteoName !== "TODOS" &&
-        !v.sorteo.toLowerCase().includes(limitSorteoName.toLowerCase()) &&
-        !limitSorteoName.toLowerCase().includes(v.sorteo.toLowerCase())) return false;
-
+      // Match Seller — techo individual: solo consume el vendedor asignado
       const limitSellerId = applicableLimit.id_vendedor || applicableLimit.vendedorId || "";
       if (limitSellerId && limitSellerId !== "TODOS" && v.id_vendedor !== limitSellerId) return false;
 
-      const limitHora = (applicableLimit.hora || applicableLimit.hora_limite || "").trim().toUpperCase();
-      if (limitHora && limitHora !== "TODOS" && limitHora !== "CUALQUIERA") {
-        const vSorteoObj = db.configuracion.sorteos.find((s: any) => s.nombre === v.sorteo && s.juego === v.juego);
-        if (vSorteoObj) {
-          const vHora = formatHourToAmPm(vSorteoObj.hora_sorteo).toUpperCase();
-          if (vHora !== limitHora) return false;
-        }
-      }
-
-      if (!v.timestamp_servidor.startsWith(todayStr)) return false;
       return true;
     });
 
@@ -2309,7 +2364,10 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
       }
     }, 0);
 
-    const requestedMontoCs = moneda === "C$" ? Number(monto_pago) : Number(monto_pago) * db.configuracion.tasa_cambio;
+    // Monto solicitado SOLO del número evaluado (nunca el total del ticket multi-jugada)
+    const requestedMontoCs = limitNumRegla === "TODOS"
+      ? toCs(monto_pago, moneda)
+      : montoDelNumeroCs;
 
     if (totalPrevSalesCs + requestedMontoCs > limitMontoCs) {
       const availableCs = Math.max(0, limitMontoCs - totalPrevSalesCs);
@@ -2321,7 +2379,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
         ? "GLOBAL" : "INDIVIDUAL (Vendedor)";
 
       return res.status(400).json({
-        error: `VENTA RECHAZADA (LÍMITE ${limitTypeMsg}): El número "${numero_jugado}" en "${juego}" para el sorteo "${sorteo}" tiene un techo de venta asignado de C$ ${limitMontoCs.toFixed(2)}. Ya vendido hoy: C$ ${totalPrevSalesCs.toFixed(2)}. Cupo restante: ${availableMsg}.`
+        error: `VENTA RECHAZADA (LÍMITE ${limitTypeMsg}): El número "${numeroDelTicket}" en "${juego}" para el sorteo "${sorteo}" tiene un techo de venta asignado de C$ ${limitMontoCs.toFixed(2)}. Vendido en este sorteo (hoy): C$ ${totalPrevSalesCs.toFixed(2)}. Cupo restante: ${availableMsg}.`
       });
     }
   }

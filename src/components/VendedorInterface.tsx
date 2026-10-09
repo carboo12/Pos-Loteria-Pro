@@ -1260,12 +1260,51 @@ export default function VendedorInterface({
     const limitMontoCs = Number(matchedLimit.max_monto ?? matchedLimit.montoMaximo ?? matchedLimit.techo_dinero);
     const todayStr = getTodayString();
 
+    // ── ÁMBITO DEL TECHO: POR SORTEO ACTIVO Y POR CICLO ACTUAL ──────────
+    // Solo suman las ventas de ESTE sorteo (por ID) emitidas hoy. Al cerrarse
+    // el sorteo, el conteo se reinicia y el número vuelve con techo completo.
+    const sorteosCfg = config?.sorteos || [];
+    const findSorteoCfg = (rawId: any, nombre: any, jg: any) => {
+      if (rawId !== undefined && rawId !== null && String(rawId) !== "") {
+        const byId = sorteosCfg.find((s: any) => String(s.id) === String(rawId));
+        if (byId) return byId;
+      }
+      if (nombre) {
+        const byNombreJuego = sorteosCfg.find((s: any) => s.nombre === nombre && (!jg || s.juego === jg));
+        if (byNombreJuego) return byNombreJuego;
+        const byNombre = sorteosCfg.find((s: any) => s.nombre === nombre);
+        if (byNombre) return byNombre;
+      }
+      return null;
+    };
+
+    const activeCfg = findSorteoCfg(undefined, selectedSorteo, selectedJuego) || activeSorteoObj;
+    const activeSorteoKey = String(activeCfg?.id || `${selectedJuego}|${selectedSorteo}`);
+
+    const isInActiveSorteoCycle = (v: any): boolean => {
+      // 1. Mismo sorteo (instancia activa)
+      const saleCfg = findSorteoCfg(v.id_sorteo, v.sorteo, v.juego);
+      const sameSorteo = saleCfg && saleCfg.id
+        ? String(saleCfg.id) === activeSorteoKey
+        : Boolean(v.sorteo && v.sorteo === selectedSorteo && v.juego && String(v.juego).toLowerCase() === String(selectedJuego).toLowerCase());
+      if (!sameSorteo) return false;
+
+      // 2. Ciclo actual (hoy): al cerrar el sorteo, el conteo vuelve a 0
+      const saleFecha = (typeof v.timestamp_servidor === "string" && v.timestamp_servidor)
+        ? v.timestamp_servidor.substring(0, 10)
+        : (typeof v.fecha_venta === "string" ? v.fecha_venta : "");
+      return saleFecha === todayStr;
+    };
+
     const matchingSales = sales.filter((v: any) => {
       if (v.anulado) return false;
 
+      // ÁMBITO POR SORTEO: nunca suma ventas de otro sorteo ni de ciclos ya cerrados
+      if (!isInActiveSorteoCycle(v)) return false;
+
       // Match game
       const limitJuego = matchedLimit.juego || "";
-      if (limitJuego && limitJuego !== "TODOS" && v.juego.toLowerCase() !== limitJuego.toLowerCase()) return false;
+      if (limitJuego && limitJuego !== "TODOS" && String(v.juego || "").toLowerCase() !== limitJuego.toLowerCase()) return false;
 
       // Match number (normalizado)
       const limitNum = matchedLimit.numero ?? matchedLimit.numero_jugado ?? "TODOS";
@@ -1276,28 +1315,9 @@ export default function VendedorInterface({
         if (!matchesLegacy && !matchesJugadas) return false;
       }
 
-      // Match Sorteo
-      const limitSorteoName = matchedLimit.sorteo || "";
-      if (limitSorteoName && limitSorteoName !== "TODOS" && 
-          !v.sorteo.toLowerCase().includes(limitSorteoName.toLowerCase()) &&
-          !limitSorteoName.toLowerCase().includes(v.sorteo.toLowerCase())) return false;
-
-      // Match Seller
+      // Match Seller — techo individual: solo consume el vendedor asignado
       const limitSellerId = matchedLimit.id_vendedor || matchedLimit.vendedorId || "";
       if (limitSellerId && limitSellerId !== "TODOS" && v.id_vendedor !== limitSellerId) return false;
-
-      // Match Hour
-      const limitHora = (matchedLimit.hora || matchedLimit.hora_limite || "").trim().toUpperCase();
-      if (limitHora && limitHora !== "TODOS" && limitHora !== "CUALQUIERA") {
-        const vSorteoObj = config?.sorteos?.find((s: any) => s.nombre === v.sorteo && s.juego === v.juego);
-        if (vSorteoObj) {
-          const vHora = formatHourToAmPm(vSorteoObj.hora_sorteo).toUpperCase();
-          if (vHora !== limitHora) return false;
-        }
-      }
-
-      // Today only
-      if (!v.timestamp_servidor.startsWith(todayStr)) return false;
 
       return true;
     });
@@ -1331,7 +1351,7 @@ export default function VendedorInterface({
     // Accumulated cart total for this number matching the limit criteria
     const limitNum = matchedLimit.numero ?? matchedLimit.numero_jugado ?? "TODOS";
     const cartMatchingSum = jugadas
-      .filter(j => limitNum === "TODOS" || j.numero === limitNum)
+      .filter(j => limitNum === "TODOS" || String(j.numero).padStart(2, "0") === String(limitNum).padStart(2, "0"))
       .reduce((sum, j) => sum + (moneda === "C$" ? j.monto : j.monto * (config?.tasa_cambio || 36)), 0);
 
     const numericAmount = Number(montoPago) || 0;
