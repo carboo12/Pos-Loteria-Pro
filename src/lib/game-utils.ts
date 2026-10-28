@@ -5,6 +5,8 @@
  */
 
 export const JUEGA4_GAME_NAME = "Juega 4";
+export const JUEGA4_GAME_KEY = "juega4";
+export const JUEGA4_DIGITS = 4;
 
 function cleanGameName(juego?: string): string {
   return String(juego || "")
@@ -25,12 +27,22 @@ export function isJuega4(juego?: string): boolean {
 }
 
 /**
+ * Devuelve el nombre canónico usado en Firestore para un juego.
+ * Permite que el admin escriba "juega4", "JUEGA4" o "Juega 4" y que
+ * todos se persistan con el identificador consistente "Juega 4".
+ */
+export function canonicalGameName(juego?: string): string {
+  const trimmed = String(juego ?? "").trim();
+  return isJuega4(trimmed) ? JUEGA4_GAME_NAME : trimmed;
+}
+
+/**
  * Cantidad de dígitos esperada por juego para la entrada del POS.
  * Los juegos no contemplados mantienen el comportamiento histórico (2 dígitos).
  */
 export function getMaxDigitsForGame(juego?: string): number {
   const clean = cleanGameName(juego);
-  if (isJuega4(clean)) return 4;
+  if (isJuega4(clean)) return JUEGA4_DIGITS;
   if (clean === "PREMIA2") return 4;
   if (clean === "JUGÁ 3" || clean === "JUGA 3" || clean === "3 MONAZOS" || clean === "PEGA 3") return 3;
   if (clean === "SÚPER PREMIO" || clean === "SUPER PREMIO") return 12;
@@ -45,7 +57,7 @@ export function getMaxDigitsForGame(juego?: string): number {
 export function normalizeNumeroForGame(numero: string | number, juego?: string): string {
   // Solo Juega 4 cambia la longitud de normalización. El resto conserva
   // exactamente el padStart(2) histórico para no alterar juegos existentes.
-  const digits = isJuega4(juego) ? 4 : 2;
+  const digits = isJuega4(juego) ? JUEGA4_DIGITS : 2;
   return String(numero ?? "").padStart(digits, "0");
 }
 

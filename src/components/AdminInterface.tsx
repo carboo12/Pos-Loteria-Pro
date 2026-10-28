@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
 import { toDateStr, getTicketDate, getLocalTodayStr, getNicaraguaISOString, parseISOTimeParts, getNicaraguaNow } from "../lib/date-utils";
+import { isJuega4, canonicalGameName } from "../lib/game-utils";
 
 import { useFacturacion } from "../hooks/useFacturacion";
 import { getVendedorReporteAcumulado } from "../lib/finance-engine";
@@ -139,6 +140,17 @@ const getCountryFromSorteo = (nombre: string): string => {
   if (n.includes("costa rica") || n.includes("tica")) return "Costa Rica";
   return "Nicaragua";
 };
+
+const PAISES_GAMES: Record<string, string[]> = {
+  Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Juega 4", "Terminación 2", "Sabadito"],
+  Honduras: ["La Diaria", "Premia2", "Pega 3", "Súper Premio", "Juega 4"],
+  "El Salvador": ["SALVADOR", "Juega 4"],
+  "La Primera": ["La Primera", "Juega 4"],
+  "Costa Rica": ["3 Monazos", "Tica", "Juega 4"],
+};
+
+const CATALOGO_JUEGOS = Array.from(new Set(Object.values(PAISES_GAMES).flat()));
+
 
 interface AdminInterfaceProps {
   user: Usuario;
@@ -742,13 +754,6 @@ export default function AdminInterface({
   }, []);
 
   useEffect(() => {
-    const PAISES_GAMES: Record<string, string[]> = {
-      Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Juega 4", "Terminación 2", "Sabadito"],
-      Honduras: ["La Diaria", "Premia2", "Pega 3", "Súper Premio", "Juega 4"],
-      "El Salvador": ["SALVADOR", "Juega 4"],
-      "La Primera": ["La Primera", "Juega 4"],
-      "Costa Rica": ["3 Monazos", "Tica", "Juega 4"]
-    };
     const games = PAISES_GAMES[newSorteoPais] || [];
     if (games.length > 0 && !games.includes(newSorteoJuego)) {
       setNewSorteoJuego(games[0]);
@@ -1376,12 +1381,12 @@ export default function AdminInterface({
   // Edit draw schedule
   const handleEditSorteoClick = (sorteo: Sorteo) => {
     setSorteoEditando(sorteo);
-    // Extract the name without game prefix and suffix
-    const parts = sorteo.nombre.split(" ");
-    const gamePrefix = parts[0];
-    parts.shift(); // remove game
-    let remaining = parts.join(" ");
-    remaining = remaining.replace(/ \((NI|HN|SV|LP|CR)\)$/, "");
+    // Extract the name without game prefix and suffix (supports multi-word games like "Juega 4")
+    let remaining = sorteo.nombre;
+    if (remaining.startsWith(sorteo.juego)) {
+      remaining = remaining.slice(sorteo.juego.length);
+    }
+    remaining = remaining.replace(/ \((NI|HN|SV|LP|CR)\)$/, "").trim();
     setNewSorteoNombre(remaining);
     setNewSorteoJuego(sorteo.juego);
     setNewSorteoPais(getCountryFromSorteo(sorteo.nombre));
@@ -1424,6 +1429,12 @@ export default function AdminInterface({
       return;
     }
 
+    const juegoCanonico = canonicalGameName(newSorteoJuego);
+    if (!juegoCanonico) {
+      setAlertText("Seleccione o escriba un juego válido.");
+      return;
+    }
+
     const convert12To24 = (hour: string, min: string, ampm: string): string => {
       let h = parseInt(hour, 10);
       if (ampm === "PM" && h < 12) h += 12;
@@ -1448,8 +1459,8 @@ export default function AdminInterface({
         if (s.id === sorteoEditando.id) {
           return {
             ...s,
-            juego: newSorteoJuego,
-            nombre: `${newSorteoJuego} ${newSorteoNombre} ${suffix}`,
+            juego: juegoCanonico,
+            nombre: `${juegoCanonico} ${newSorteoNombre} ${suffix}`,
             hora_sorteo: horaSorteo24,
             hora_cierre: horaCierre24,
             dias_habilitados: newSorteoDias.length > 0 ? newSorteoDias : undefined
@@ -1461,7 +1472,8 @@ export default function AdminInterface({
       const success = await onUpdateConfig({ sorteos: updatedSorteos });
       setSubmitting(false);
       if (success) {
-        setSuccessText(`Sorteo "${newSorteoJuego} ${newSorteoNombre}" actualizado con éxito.`);
+        setNewSorteoJuego(juegoCanonico);
+        setSuccessText(`Sorteo "${juegoCanonico} ${newSorteoNombre}" actualizado con éxito.`);
         cancelEditSorteo();
       } else {
         setAlertText("Error al actualizar el sorteo.");
@@ -1470,8 +1482,8 @@ export default function AdminInterface({
       // CREATE new
       const newSorteoObj: Sorteo = {
         id: "sort_" + Math.random().toString(36).substring(2, 9),
-        juego: newSorteoJuego,
-        nombre: `${newSorteoJuego} ${newSorteoNombre} ${suffix}`,
+        juego: juegoCanonico,
+        nombre: `${juegoCanonico} ${newSorteoNombre} ${suffix}`,
         hora_sorteo: horaSorteo24,
         hora_cierre: horaCierre24,
         ...(newSorteoDias.length > 0 ? { dias_habilitados: newSorteoDias } : {})
@@ -1484,6 +1496,7 @@ export default function AdminInterface({
       setSubmitting(false);
 
       if (success) {
+        setNewSorteoJuego(juegoCanonico);
         setSuccessText(`Sorteo "${newSorteoObj.nombre}" agregado con éxito.`);
         setNewSorteoNombre("");
         setNewSorteoHourDraw("11");
@@ -1662,7 +1675,7 @@ export default function AdminInterface({
         setAlertText(`${matchedJuego} requiere exactamente un número de 3 dígitos (000-999).`);
         return;
       }
-    } else if (matchedJuego === "Juega 4") {
+    } else if (isJuega4(matchedJuego)) {
       if (!/^\d{4}$/.test(winningNum)) {
         setAlertText("Juega 4 requiere exactamente un número de 4 dígitos (0000-9999).");
         return;
@@ -2860,7 +2873,7 @@ export default function AdminInterface({
                       className="w-full px-2 py-2 min-h-[44px] bg-white border border-gray-300 rounded-lg text-xs font-bold text-gray-900 focus:outline-none"
                     />
                     <datalist id="existing-games-list">
-                      {Array.from(new Set(config.sorteos.map(s => s.juego))).map(game => (
+                      {Array.from(new Set([...CATALOGO_JUEGOS, ...config.sorteos.map(s => s.juego)])).map(game => (
                         <option key={game} value={game} />
                       ))}
                     </datalist>
@@ -3402,7 +3415,7 @@ export default function AdminInterface({
 
                         // Determine placeholder and help texts
                         let placeholder = "ej: 45";
-                        if (matchedJuego === "Juega 4") {
+                        if (isJuega4(matchedJuego)) {
                           placeholder = "ej: 4588 (4 digitos)";
                         } else if (matchedJuego === "Premia2") {
                           placeholder = "ej: 4588 (4 digitos)";

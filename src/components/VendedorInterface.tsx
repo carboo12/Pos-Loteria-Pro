@@ -1849,7 +1849,16 @@ export default function VendedorInterface({
               
               // Fallback por si la configuración todavía no ha cargado los sorteos desde Firestore
               const defaultFallbackGames = ["Diaria", "SALVADOR", "HONDURAS", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito", "Pega 3", "3 Monazos", "Tica", "La Primera"];
-              const gamesToDisplay = allGamesFromConfig.length > 0 ? allGamesFromConfig : defaultFallbackGames;
+              const baseGames = allGamesFromConfig.length > 0 ? allGamesFromConfig : defaultFallbackGames;
+
+              // "Juega 4" sólo se muestra si el admin creó al menos un sorteo activo para ese juego.
+              const nowNic = getNicaraguaNow();
+              const hasActiveJuega4Sorteo = (config?.sorteos || []).some(
+                (s) => isJuega4(s.juego) && isSorteoHabilitado(s, nowNic)
+              );
+              const gamesToDisplay = baseGames.filter(
+                (juego) => !isJuega4(juego) || hasActiveJuega4Sorteo
+              );
 
               return (
                 <div className="space-y-3">
