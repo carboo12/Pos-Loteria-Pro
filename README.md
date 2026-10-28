@@ -24,9 +24,10 @@
 - **Motor de Ventas Multi-número**: Sistema de carrito (Jugadas) para agrupar múltiples números y sorteos en un solo ticket.
 - **Módulo de Supervisor Móvil**: Cobros y liquidaciones de ruta adaptados con interfaz neumórfica responsiva para operaciones en la calle.
 - **Gestión de usuarios**: Roles de Administrador, Supervisor y Vendedor con seguridad híbrida Bcrypt.
-- **Catálogo de juegos**: Diaria, Fechas, Jugá 3, Premia2, Terminación 2, La Diaria, Pega 3, Súper Premio
+- **Catálogo de juegos**: Diaria, Fechas, Jugá 3, Premia2, Terminación 2, La Diaria, Pega 3, Súper Premio y **Juega 4**
+- **Juega 4 bajo demanda**: Juego de 4 dígitos (`0000`–`9999`) con premio `4000x`, validación y techos por sorteo ya integrados. Permanece **oculto en el POS hasta que el administrador cree formalmente sus sorteos** desde el panel de control.
 - **Validación anti-fraude**: Bloqueo automático de ventas antes de la hora de cierre; anulación bloqueada después de la hora de sorteo
-- **Límites por número**: Techos de dinero configurables por juego, sorteo y vendedor
+- **Límites por número**: Techos de dinero configurables por juego, sorteo y vendedor (incluye normalización de 4 dígitos para Juega 4)
 - **Sincronización en tiempo real**: Firestore `onSnapshot` con `docChanges()` para updates incrementales
 - **Cierre de caja**: Gestión de denominaciones en C$ y USD con cálculo de descuadre
 - **Notificaciones**: SSE (Server-Sent Events) y Firebase Cloud Messaging
@@ -130,6 +131,7 @@ punto-de-venta-de-lotería/
 │   ├── index.css                 # Estilos globales Tailwind
 │   ├── lib/
 │   │   ├── firebase.ts           # Inicialización Firebase (Auth + Firestore)
+│   │   ├── game-utils.ts         # Reconocimiento de juegos y normalización de Juega 4
 │   │   ├── prize-utils.ts        # Lógica centralizada de premios
 │   │   ├── date-utils.ts         # Normalización de fechas
 │   │   └── finance-engine.ts     # Motor financiero
@@ -174,6 +176,17 @@ punto-de-venta-de-lotería/
 - **Administrador**: Control total, gestión de usuarios, configuración, reportes
 - **Supervisor**: Gestión de equipo, cierres, cobros
 - **Vendedor**: Venta de números, historial, cierre de caja
+
+## Juega 4 (preparado, activación por administrador)
+
+`Juega 4` es un juego de 4 dígitos (`0000`–`9999`) que reutiliza la misma dinámica de venta, cierres y control de techos individuales por sorteo que los juegos existentes.
+
+- **Activación**: no aparece en el POS por defecto. El administrador debe crear uno o más sorteos con `juego = "Juega 4"` desde el panel de administración. Al existir en Firestore, el POS lo muestra automáticamente.
+- **Entrada**: teclado numérico, longitud exacta de 4 dígitos, solo números y auto-avance al monto.
+- **Premios**: multiplicador `4000x` centralizado en `src/lib/prize-utils.ts` y `server.ts`.
+- **Techos**: los límites por número, sorteo, hora y vendedor normalizan a 4 dígitos (por ejemplo, `5` equivale a `0005`) sin alterar la lógica de los juegos existentes.
+- **Backend**: validación, almacenamiento en `jugadas[]`, resultados ganadores, escrutinio y pago reconocen la categoría de 4 dígitos.
+- **Datos**: los tickets guardan `juego/id_juego = "Juega 4"` y números como strings de 4 dígitos, por lo que las consultas existentes por fecha, sorteo o vendedor funcionan sin cambios adicionales.
 
 ## Impresión Térmica y Conectividad Bluetooth
 

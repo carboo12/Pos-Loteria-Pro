@@ -46,6 +46,7 @@ import { buildTicketBuffer, ticketDataFromVenta, loadLogoBitmap } from "../servi
 import { isSorteoHabilitado, getDiasHabilitadosShortLabel, isDateValidForSorteo, getNextValidDate } from "../lib/sorteo-utils";
 import { toDateSafe, toDateStr, getTicketDate, getTicketAmount, getLocalTodayStr, getNicaraguaISOString, getNicaraguaNow } from "../lib/date-utils";
 import { calculatePrizeMultiplier, getTicketTheoreticalPrize, findResultadoForTicket, isMatchingWinner } from "../lib/prize-utils";
+import { isJuega4, getMaxDigitsForGame, normalizeNumeroForGame } from "../lib/game-utils";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -392,13 +393,7 @@ export default function VendedorInterface({
 
 
 
-  const getMaxLen = (juego: string): number => {
-    if (juego === "Premia2") return 4;
-    if (juego === "Jugá 3" || juego === "3 Monazos") return 3;
-    if (juego === "Pega 3") return 3;
-    if (juego === "Súper Premio") return 12;
-    return 2;
-  };
+  const getMaxLen = (juego: string): number => getMaxDigitsForGame(juego);
 
   const addJugadaAlCarrito = (montoOverride?: string | any) => {
     setErrorMessage(null);
@@ -406,6 +401,10 @@ export default function VendedorInterface({
 
     if (!numeroJugado) {
       setErrorMessage("Ingrese un número válido para jugar.");
+      return;
+    }
+    if (isJuega4(selectedJuego) && !/^\d{4}$/.test(numeroJugado)) {
+      setErrorMessage(`El juego ${selectedJuego} requiere exactamente 4 dígitos (0000-9999).`);
       return;
     }
     const realOverride = typeof montoOverride === "string" ? montoOverride : undefined;
@@ -623,7 +622,10 @@ export default function VendedorInterface({
       if (!game || !draw) {
         // Legacy fallback: parse from juego_sorteo string
         const js = ticket.juego_sorteo || "";
-        if (js.startsWith("La Diaria")) {
+        if (js.startsWith("Juega 4")) {
+          game = "Juega 4";
+          draw = js.substring("Juega 4".length).trim();
+        } else if (js.startsWith("La Diaria")) {
           game = "La Diaria";
           draw = js.substring("La Diaria".length).trim();
         } else if (js.startsWith("Premia2")) {
@@ -757,7 +759,10 @@ export default function VendedorInterface({
     let draw = ticket.id_sorteo || "";
     if (!game || !draw) {
       const js = ticket.juego_sorteo || "";
-      if (js.startsWith("La Diaria")) {
+      if (js.startsWith("Juega 4")) {
+        game = "Juega 4";
+        draw = js.substring("Juega 4".length).trim();
+      } else if (js.startsWith("La Diaria")) {
         game = "La Diaria";
         draw = js.substring("La Diaria".length).trim();
       } else if (js.startsWith("Premia2")) {
@@ -997,11 +1002,11 @@ export default function VendedorInterface({
 
   // Mappings of games by country
   const PAISES_GAMES = {
-    Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"],
-    Honduras: ["La Diaria", "Premia2", "Pega 3"],
-    "El Salvador": ["SALVADOR"],
-    "La Primera": ["La Primera"],
-    "Costa Rica": ["3 Monazos", "Tica"]
+    Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Juega 4", "Terminación 2", "Sabadito"],
+    Honduras: ["La Diaria", "Premia2", "Pega 3", "Juega 4"],
+    "El Salvador": ["SALVADOR", "Juega 4"],
+    "La Primera": ["La Primera", "Juega 4"],
+    "Costa Rica": ["3 Monazos", "Tica", "Juega 4"]
   };
 
   // Helper to format 24h string to standard AM/PM format
@@ -1226,7 +1231,7 @@ export default function VendedorInterface({
 
       // 2. Match Number (normalizado con padStart para evitar "03" !== "3")
       const limitNum = l.numero ?? l.numero_jugado ?? "TODOS";
-      const numMatch = limitNum === "TODOS" || String(limitNum).padStart(2, "0") === String(numeroJugado).padStart(2, "0");
+      const numMatch = limitNum === "TODOS" || normalizeNumeroForGame(limitNum, selectedJuego) === normalizeNumeroForGame(numeroJugado, selectedJuego);
       if (!numMatch) return false;
 
       // 3. Match Seller
@@ -1309,9 +1314,9 @@ export default function VendedorInterface({
       // Match number (normalizado)
       const limitNum = matchedLimit.numero ?? matchedLimit.numero_jugado ?? "TODOS";
       if (limitNum !== "TODOS") {
-        const padLimitNum = String(limitNum).padStart(2, "0");
-        const matchesLegacy = String(v.numero_jugado).padStart(2, "0") === padLimitNum;
-        const matchesJugadas = v.jugadas && v.jugadas.some((j: any) => String(j.numero).padStart(2, "0") === padLimitNum);
+        const padLimitNum = normalizeNumeroForGame(limitNum, selectedJuego);
+        const matchesLegacy = normalizeNumeroForGame(v.numero_jugado, selectedJuego) === padLimitNum;
+        const matchesJugadas = v.jugadas && v.jugadas.some((j: any) => normalizeNumeroForGame(j.numero, selectedJuego) === padLimitNum);
         if (!matchesLegacy && !matchesJugadas) return false;
       }
 
@@ -1326,10 +1331,10 @@ export default function VendedorInterface({
     const totalPrevSalesCs = matchingSales.reduce((sum: number, v: any) => {
       const limitNum = matchedLimit.numero ?? matchedLimit.numero_jugado ?? "TODOS";
       if (limitNum !== "TODOS") {
-        const padLimitNum = String(limitNum).padStart(2, "0");
+        const padLimitNum = normalizeNumeroForGame(limitNum, selectedJuego);
         if (v.jugadas && v.jugadas.length > 0) {
           const matchedJugadas = v.jugadas.filter((j: any) =>
-            String(j.numero).padStart(2, "0") === padLimitNum
+            normalizeNumeroForGame(j.numero, selectedJuego) === padLimitNum
           );
           const amtInCs = matchedJugadas.reduce((s: number, j: any) => {
             const monto = Number(j.monto) || 0;
@@ -1351,7 +1356,7 @@ export default function VendedorInterface({
     // Accumulated cart total for this number matching the limit criteria
     const limitNum = matchedLimit.numero ?? matchedLimit.numero_jugado ?? "TODOS";
     const cartMatchingSum = jugadas
-      .filter(j => limitNum === "TODOS" || String(j.numero).padStart(2, "0") === String(limitNum).padStart(2, "0"))
+      .filter(j => limitNum === "TODOS" || normalizeNumeroForGame(j.numero, selectedJuego) === normalizeNumeroForGame(limitNum, selectedJuego))
       .reduce((sum, j) => sum + (moneda === "C$" ? j.monto : j.monto * (config?.tasa_cambio || 36)), 0);
 
     const numericAmount = Number(montoPago) || 0;
@@ -1390,11 +1395,7 @@ export default function VendedorInterface({
 
     if (activeField === "numero") {
       // Determine maximum digits based on the game
-      let maxDigits = 2;
-      if (selectedJuego === "Premia2") maxDigits = 4;
-      else if (selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos") maxDigits = 3;
-      else if (selectedJuego === "Pega 3") maxDigits = 3;
-      else if (selectedJuego === "Súper Premio") maxDigits = 12;
+      const maxDigits = getMaxDigitsForGame(selectedJuego);
 
       if (val === "BORRAR") {
         setNumeroJugado("");
@@ -2047,12 +2048,7 @@ export default function VendedorInterface({
                       autoComplete="off"
                       inputMode="numeric"
                       pattern="[0-9]*"
-                      maxLength={
-                        selectedJuego === "Premia2" ? 4 :
-                        selectedJuego === "Jugá 3" || selectedJuego === "3 Monazos" ? 3 :
-                        selectedJuego === "Pega 3" ? 3 :
-                        selectedJuego === "Súper Premio" ? 12 : 2
-                      }
+                      maxLength={getMaxDigitsForGame(selectedJuego)}
                       value={numeroJugado}
                       readOnly={selectedJuego === "Fechas"}
                       tabIndex={selectedJuego === "Fechas" ? -1 : 0}
@@ -2073,7 +2069,7 @@ export default function VendedorInterface({
                         }
                       }}
                       onFocus={() => setActiveField("numero")}
-                      placeholder={selectedJuego === "Fechas" ? "DD-MM" : "00"}
+                      placeholder={selectedJuego === "Fechas" ? "DD-MM" : isJuega4(selectedJuego) ? "0000" : "00"}
                       className={`w-full h-12 px-2 rounded-xl border-2 font-mono text-lg font-black text-center shadow-inner transition-colors focus:outline-none ${
                         isLimitBlocked
                           ? "border-[#EF4444] text-[#EF4444] bg-red-50 focus:border-red-600"
@@ -2493,7 +2489,10 @@ export default function VendedorInterface({
                       let game = "";
                       let draw = "";
                       const js = t.juego_sorteo || "";
-                      if (js.startsWith("La Diaria")) {
+                      if (js.startsWith("Juega 4")) {
+                        game = "Juega 4";
+                        draw = js.substring("Juega 4".length).trim();
+                      } else if (js.startsWith("La Diaria")) {
                         game = "La Diaria";
                         draw = js.substring("La Diaria".length).trim();
                       } else if (js.startsWith("Premia2")) {

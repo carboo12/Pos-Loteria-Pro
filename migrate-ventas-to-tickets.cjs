@@ -48,7 +48,7 @@ async function migrate() {
   console.log("");
 
   if (ventasCount === 0) {
-    console.log("No hay documentos en "ventas". Nada que migrar.");
+    console.log('No hay documentos en "ventas". Nada que migrar.');
     process.exit(0);
   }
 

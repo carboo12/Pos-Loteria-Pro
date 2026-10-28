@@ -369,6 +369,9 @@ const sanitizeText = (text: string): string => {
 export function ticketDataFromVenta(venta: Venta, config: Configuracion): TicketPrintData {
   const multiplier = (() => {
     const cleanJuego = venta.juego.trim();
+    if (cleanJuego === "Juega 4") {
+      return 4000;
+    }
     if (cleanJuego === "Premia2" && venta.sorteo.includes("(NI)")) {
       return 4000;
     }

@@ -232,6 +232,36 @@ const requireAdmin = checkAuth(["administrador"]);
 
 
 
+function isJuega4Game(juego: string): boolean {
+  const clean = String(juego || "")
+    .replace(/\s*\([^)]*\)/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+  return (
+    clean === "JUEGA 4" ||
+    clean === "JUEGA4" ||
+    clean.startsWith("JUEGA 4 ") ||
+    clean.startsWith("JUEGA4 ")
+  );
+}
+
+/**
+ * Normaliza un número para techos/comparaciones. Solo Juega 4 cambia la
+ * longitud (4 dígitos); el resto conserva el padStart(2) histórico.
+ */
+function normalizeNumeroForGame(numero: any, juego: string): string {
+  const digits = isJuega4Game(juego) ? 4 : 2;
+  return String(numero ?? "").padStart(digits, "0");
+}
+
+function numbersMatchForGame(a: any, b: any, juego: string): boolean {
+  if (isJuega4Game(juego)) {
+    return normalizeNumeroForGame(a, juego) === normalizeNumeroForGame(b, juego);
+  }
+  return String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+}
+
 function calculatePrizeMultiplier(juego: string, sorteo: string = ""): number {
   if (!juego) return 80;
   const cleanJuego = juego
@@ -241,6 +271,8 @@ function calculatePrizeMultiplier(juego: string, sorteo: string = ""): number {
   const cleanJuegoUpper = cleanJuego.toUpperCase();
 
   const multipliers: Record<string, number> = {
+    "JUEGA 4": 4000,
+    "JUEGA4": 4000,
     "JUGÁ 3": 610,
     "JUGA 3": 610,
     "PEGA 3": 600,
@@ -262,6 +294,7 @@ function calculatePrizeMultiplier(juego: string, sorteo: string = ""): number {
     return multipliers[cleanJuegoUpper];
   }
 
+  if (cleanJuegoUpper.includes("JUEGA 4") || cleanJuegoUpper.includes("JUEGA4")) return 4000;
   if (cleanJuegoUpper.includes("JUGA 3") || cleanJuegoUpper.includes("JUGÁ 3")) return 610;
   if (cleanJuegoUpper.includes("PEGA 3")) return 600;
   if (cleanJuegoUpper.includes("PREMIA")) return 4000;
@@ -1486,7 +1519,7 @@ async function escrutarTickets(id_sorteo: string, sorteoName: string, fecha: str
       // Multi-jugada support
       if (ticket.jugadas && ticket.jugadas.length > 0) {
         for (const jugada of ticket.jugadas) {
-          if (String(jugada.numero).trim().toLowerCase() === String(numero_ganador).trim().toLowerCase()) {
+          if (numbersMatchForGame(jugada.numero, numero_ganador, juego)) {
             const montoInCs = ticket.moneda === "USD"
               ? jugada.monto * (db.configuracion.tasa_cambio || 36.5)
               : jugada.monto;
@@ -1494,7 +1527,7 @@ async function escrutarTickets(id_sorteo: string, sorteoName: string, fecha: str
           }
         }
       } else if (ticket.numero_jugado) {
-        if (String(ticket.numero_jugado).trim().toLowerCase() === String(numero_ganador).trim().toLowerCase()) {
+        if (numbersMatchForGame(ticket.numero_jugado, numero_ganador, juego)) {
           const montoInCs = ticket.moneda === "USD"
             ? (ticket.monto_pago || 0) * (db.configuracion.tasa_cambio || 36.5)
             : (ticket.monto_pago || 0);
@@ -1533,7 +1566,7 @@ async function escrutarTickets(id_sorteo: string, sorteoName: string, fecha: str
       let prize = 0;
       if (venta.jugadas && venta.jugadas.length > 0) {
         for (const j of venta.jugadas) {
-          if (String(j.numero).trim().toLowerCase() === String(numero_ganador).trim().toLowerCase()) {
+          if (numbersMatchForGame(j.numero, numero_ganador, juego)) {
             const montoInCs = venta.moneda === "USD"
               ? j.monto * (db.configuracion.tasa_cambio || 36.5)
               : j.monto;
@@ -1541,7 +1574,7 @@ async function escrutarTickets(id_sorteo: string, sorteoName: string, fecha: str
           }
         }
       } else if (venta.numero_jugado) {
-        if (String(venta.numero_jugado).trim().toLowerCase() === String(numero_ganador).trim().toLowerCase()) {
+        if (numbersMatchForGame(venta.numero_jugado, numero_ganador, juego)) {
           const montoInCs = venta.moneda === "USD"
             ? venta.monto_pago * (db.configuracion.tasa_cambio || 36.5)
             : venta.monto_pago;
@@ -1592,6 +1625,16 @@ app.post("/api/resultados", requireAdmin, async (req, res) => {
     return res.status(400).json({ error: "Sorteo, Fecha y Número ganador son requeridos." });
   }
 
+  // Juega 4: validar y normalizar el número ganador a 4 dígitos (0000-9999).
+  const sorteoCfgResultado = db.configuracion.sorteos.find((s: any) => s.id === id_sorteo);
+  let resultadoGanador = numero_ganador;
+  if (sorteoCfgResultado && isJuega4Game(sorteoCfgResultado.juego)) {
+    if (!/^\d{1,4}$/.test(String(numero_ganador))) {
+      return res.status(400).json({ error: `El juego ${sorteoCfgResultado.juego} requiere un número ganador de 4 dígitos (0000-9999).` });
+    }
+    resultadoGanador = normalizeNumeroForGame(numero_ganador, sorteoCfgResultado.juego);
+  }
+
   db.configuracion.resultados = db.configuracion.resultados || [];
   const exists = db.configuracion.resultados.some((r: any) => r.id_sorteo === id_sorteo && r.fecha === fecha);
   if (exists) {
@@ -1604,7 +1647,7 @@ app.post("/api/resultados", requireAdmin, async (req, res) => {
     sorteo: sorteo || "",
     pais: pais || "",
     fecha, // YYYY-MM-DD
-    numero_ganador,
+    numero_ganador: resultadoGanador,
     timestamp: getNicaraguaISOString()
   };
 
@@ -1622,7 +1665,7 @@ app.post("/api/resultados", requireAdmin, async (req, res) => {
 
   // Auto-trigger escrutinio after saving the result
   try {
-    await escrutarTickets(id_sorteo, newResult.sorteo, fecha, numero_ganador);
+    await escrutarTickets(id_sorteo, newResult.sorteo, fecha, resultadoGanador);
   } catch (err) {
     console.error("[Escrutinio] Error post-resultado:", err);
   }
@@ -1635,6 +1678,16 @@ app.put("/api/resultados/:id", requireAdmin, async (req, res) => {
   const { id_sorteo, fecha, numero_ganador, sorteo, pais } = req.body;
   if (!id_sorteo || !fecha || !numero_ganador) {
     return res.status(400).json({ error: "Sorteo, Fecha y Número ganador son requeridos." });
+  }
+
+  // Juega 4: validar y normalizar el número ganador a 4 dígitos (0000-9999).
+  const sorteoCfgResultado = db.configuracion.sorteos.find((s: any) => s.id === id_sorteo);
+  let resultadoGanador = numero_ganador;
+  if (sorteoCfgResultado && isJuega4Game(sorteoCfgResultado.juego)) {
+    if (!/^\d{1,4}$/.test(String(numero_ganador))) {
+      return res.status(400).json({ error: `El juego ${sorteoCfgResultado.juego} requiere un número ganador de 4 dígitos (0000-9999).` });
+    }
+    resultadoGanador = normalizeNumeroForGame(numero_ganador, sorteoCfgResultado.juego);
   }
 
   db.configuracion.resultados = db.configuracion.resultados || [];
@@ -1652,7 +1705,7 @@ app.put("/api/resultados/:id", requireAdmin, async (req, res) => {
   db.configuracion.resultados[idx].sorteo = sorteo || "";
   db.configuracion.resultados[idx].pais = pais || "";
   db.configuracion.resultados[idx].fecha = fecha;
-  db.configuracion.resultados[idx].numero_ganador = numero_ganador;
+  db.configuracion.resultados[idx].numero_ganador = resultadoGanador;
 
   saveToDB();
 
@@ -2111,7 +2164,29 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
   // 0. LÍMITE GENERAL: techo por número individual (jugada) en C$ para TODOS los vendedores.
   const MAX_MONTO_POR_NUMERO_CS = 500;
   const tasaCambio = db.configuracion.tasa_cambio || 36.5;
-  const jugadasBody = Array.isArray(jugadas) && jugadas.length > 0 ? jugadas : [{ numero: numero_jugado, monto: Number(monto_pago) }];
+  const rawJugadasBody = Array.isArray(jugadas) && jugadas.length > 0 ? jugadas : [{ numero: numero_jugado, monto: Number(monto_pago) }];
+
+  // Validación y normalización de entrada para Juega 4 (0000-9999).
+  // No altera la validación de los juegos existentes.
+  if (isJuega4Game(juego)) {
+    for (const j of rawJugadasBody) {
+      const rawNumero = String(j.numero ?? "");
+      if (!/^\d{1,4}$/.test(rawNumero)) {
+        return res.status(400).json({
+          error: `VENTA RECHAZADA: El juego ${juego} requiere números de 4 dígitos (0000-9999). Valor recibido: "${rawNumero}".`
+        });
+      }
+    }
+  }
+
+  const jugadasBody = rawJugadasBody.map((j: any) => ({
+    ...j,
+    numero: isJuega4Game(juego) ? normalizeNumeroForGame(j.numero, juego) : j.numero
+  }));
+  const normalizedNumeroJugado = isJuega4Game(juego)
+    ? normalizeNumeroForGame(numero_jugado, juego)
+    : numero_jugado;
+
   for (const j of jugadasBody) {
     const montoJugadaCs = moneda === "C$"
       ? Number(j.monto) || 0
@@ -2248,7 +2323,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
 
     // 2. Match Number (normalizado con padStart)
     const limitNum = l.numero ?? l.numero_jugado ?? "TODOS";
-    const numMatch = limitNum === "TODOS" || String(limitNum).padStart(2, "0") === String(numeroDeJugada).padStart(2, "0");
+    const numMatch = limitNum === "TODOS" || normalizeNumeroForGame(limitNum, juego) === normalizeNumeroForGame(numeroDeJugada, juego);
     if (!numMatch) return false;
 
     // 3. Match Seller
@@ -2323,9 +2398,9 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
 
       const limitNum = applicableLimit.numero ?? applicableLimit.numero_jugado ?? "TODOS";
       if (limitNum !== "TODOS") {
-        const padLimitNum = String(limitNum).padStart(2, "0");
-        const matchesLegacy = String(v.numero_jugado).padStart(2, "0") === padLimitNum;
-        const matchesJugadas = v.jugadas && v.jugadas.some((j: any) => String(j.numero).padStart(2, "0") === padLimitNum);
+        const padLimitNum = normalizeNumeroForGame(limitNum, juego);
+        const matchesLegacy = normalizeNumeroForGame(v.numero_jugado, juego) === padLimitNum;
+        const matchesJugadas = v.jugadas && v.jugadas.some((j: any) => normalizeNumeroForGame(j.numero, juego) === padLimitNum);
         if (!matchesLegacy && !matchesJugadas) return false;
       }
 
@@ -2340,10 +2415,10 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     const totalPrevSalesCs = matchingSales.reduce((sum: number, v: any) => {
       const limitNum = applicableLimit.numero ?? applicableLimit.numero_jugado ?? "TODOS";
       if (limitNum !== "TODOS") {
-        const padLimitNum = String(limitNum).padStart(2, "0");
+        const padLimitNum = normalizeNumeroForGame(limitNum, juego);
         if (v.jugadas && v.jugadas.length > 0) {
           const matchedJugadas = v.jugadas.filter((j: any) =>
-            String(j.numero).padStart(2, "0") === padLimitNum
+            normalizeNumeroForGame(j.numero, juego) === padLimitNum
           );
           const amtInCs = matchedJugadas.reduce((s: number, j: any) => {
             const monto = Number(j.monto) || 0;
@@ -2412,17 +2487,15 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
       // Atomically increment the counter
       transaction.update(configRef, { contador_global_tickets: newCounter });
 
-      const signature = generateDigitalSignature(numero_ticket, serverTimeStr, juego, numero_jugado, monto_pago, moneda);
+      const signature = generateDigitalSignature(numero_ticket, serverTimeStr, juego, normalizedNumeroJugado, monto_pago, moneda);
 
       // Normalize jugadas: preserve dia_juego if present, but NEVER let a jugada's date
-      // pollute the ticket root's fecha_venta.
-      const jugadasNormalized = Array.isArray(jugadas)
-        ? jugadas.map((j: any) => ({
-            numero: j.numero,
-            monto: Number(j.monto),
-            ...(j.dia_juego ? { dia_juego: j.dia_juego } : {})
-          }))
-        : [{ numero: numero_jugado, monto: Number(monto_pago) }];
+      // pollute the ticket root's fecha_venta. Juega 4 queda guardado con 4 dígitos.
+      const jugadasNormalized = jugadasBody.map((j: any) => ({
+        numero: j.numero,
+        monto: Number(j.monto),
+        ...(j.dia_juego ? { dia_juego: j.dia_juego } : {})
+      }));
 
       // AUDIT: verify fecha_venta is today before writing to Firestore
       process.stdout.write(`[AUDIT Firestore] ticket ${numero_ticket} (doc ${ticketDocId}): fecha_venta_servidor=${fecha_venta_servidor} | jugadas=${JSON.stringify(jugadasNormalized)}\n`);
@@ -2448,7 +2521,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
         // ── Legacy compat aliases (frontend Venta type expects these) ──
         timestamp_servidor: serverTimeStr,
         numero_ticket,
-        numero_jugado: numero_jugado,
+        numero_jugado: normalizedNumeroJugado,
         monto_pago: Number(monto_pago),
         moneda,
         juego,
@@ -2471,6 +2544,12 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     });
   }
 
+  const jugadasNormalizedFallback = jugadasBody.map((j: any) => ({
+    numero: j.numero,
+    monto: Number(j.monto),
+    ...(j.dia_juego ? { dia_juego: j.dia_juego } : {})
+  }));
+
   const newSale = newSaleData || {
     id: ticketDocId,
     id_ticket: numero_ticket,
@@ -2480,17 +2559,17 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     juego,
     sorteo,
     id_sorteo: selectedSorteo?.id || id_sorteo || "",
-    numero_jugado,
+    numero_jugado: normalizedNumeroJugado,
     monto_pago: Number(monto_pago),
     moneda,
     id_vendedor,
     nombre_vendedor: (user.nombre || '').toUpperCase().trim(),
     nombre_cliente: nombre_cliente || "Genérico",
     premio_posible_cs: Number(premio_posible_cs) || 0,
-    firma_digital: generateDigitalSignature(numero_ticket, serverTimeStr, juego, numero_jugado, monto_pago, moneda),
+    firma_digital: generateDigitalSignature(numero_ticket, serverTimeStr, juego, normalizedNumeroJugado, monto_pago, moneda),
     anulado: false,
     estado: "pendiente",
-    ...(Array.isArray(jugadas) && jugadas.length > 0 ? { jugadas: jugadas.map((j: any) => ({ numero: j.numero, monto: Number(j.monto), ...(j.dia_juego ? { dia_juego: j.dia_juego } : {}) })) } : {})
+    ...(Array.isArray(jugadas) && jugadas.length > 0 ? { jugadas: jugadasNormalizedFallback } : {})
   };
 
   db.ventas.push(newSale);
@@ -2498,7 +2577,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
 
   // NOTIFICATION TRIGGER: Send live real-time and FCM alerts
   const notifTitle = "Nuevo Ticket Generado";
-  const notifBody = `Vendedor: ${user.nombre} • Juego: ${juego} • Núm: ${numero_jugado} • Pago: ${moneda} ${monto_pago}`;
+  const notifBody = `Vendedor: ${user.nombre} • Juego: ${juego} • Núm: ${normalizedNumeroJugado} • Pago: ${moneda} ${monto_pago}`;
   const notifPayload = {
     id: `notif_${Math.random().toString(36).substring(2, 9)}`,
     title: notifTitle,
@@ -2507,7 +2586,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     monto: `${moneda} ${monto_pago}`,
     juego,
     sorteo,
-    numero_jugado,
+    numero_jugado: normalizedNumeroJugado,
     ticketNum: numero_ticket,
     timestamp: serverTimeStr
   };
@@ -2675,7 +2754,7 @@ app.post("/api/ventas/:id/pagar", requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "Aún no hay resultados registrados para este sorteo." });
     }
 
-    if (String(resultado.numero_ganador) === String(sale.numero_jugado)) {
+    if (numbersMatchForGame(resultado.numero_ganador, sale.numero_jugado, sale.juego)) {
       // Calcular el premio real del lado del servidor
       const multiplicador = calculatePrizeMultiplier(sale.juego, sale.sorteo);
       const montoInCs = sale.moneda === "USD" ? sale.monto_pago * (db.configuracion.tasa_cambio || 36.5) : sale.monto_pago;

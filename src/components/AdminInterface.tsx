@@ -743,11 +743,11 @@ export default function AdminInterface({
 
   useEffect(() => {
     const PAISES_GAMES: Record<string, string[]> = {
-      Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"],
-      Honduras: ["La Diaria", "Premia2", "Pega 3", "Súper Premio"],
-      "El Salvador": ["SALVADOR"],
-      "La Primera": ["La Primera"],
-      "Costa Rica": ["3 Monazos", "Tica"]
+      Nicaragua: ["Diaria", "Fechas", "Jugá 3", "Premia2", "Juega 4", "Terminación 2", "Sabadito"],
+      Honduras: ["La Diaria", "Premia2", "Pega 3", "Súper Premio", "Juega 4"],
+      "El Salvador": ["SALVADOR", "Juega 4"],
+      "La Primera": ["La Primera", "Juega 4"],
+      "Costa Rica": ["3 Monazos", "Tica", "Juega 4"]
     };
     const games = PAISES_GAMES[newSorteoPais] || [];
     if (games.length > 0 && !games.includes(newSorteoJuego)) {
@@ -1088,7 +1088,7 @@ export default function AdminInterface({
       // Sales by Game
       printCenter("VENTAS POR TIPO DE JUEGO", 9, true);
       y += 1;
-      ["Diaria", "La Diaria", "Premia2", "Jugá 3", "Fechas", "Pega 3", "Súper Premio", "3 Monazos", "Tica", "Terminación 2", "Sabadito", "La Primera"].forEach((juego) => {
+      ["Diaria", "La Diaria", "Premia2", "Jugá 3", "Juega 4", "Fechas", "Pega 3", "Súper Premio", "3 Monazos", "Tica", "Terminación 2", "Sabadito", "La Primera"].forEach((juego) => {
         const stats = gameStats[juego] || { cs: 0, usd: 0, count: 0 };
         if (stats.count === 0) return; // skip games with no sales
         const totalGameCs = stats.cs + (stats.usd * config.tasa_cambio);
@@ -1660,6 +1660,11 @@ export default function AdminInterface({
     } else if (matchedJuego === "Jugá 3" || matchedJuego === "3 Monazos") {
       if (!/^\d{3}$/.test(winningNum)) {
         setAlertText(`${matchedJuego} requiere exactamente un número de 3 dígitos (000-999).`);
+        return;
+      }
+    } else if (matchedJuego === "Juega 4") {
+      if (!/^\d{4}$/.test(winningNum)) {
+        setAlertText("Juega 4 requiere exactamente un número de 4 dígitos (0000-9999).");
         return;
       }
     } else if (matchedJuego === "Premia2") {
@@ -3397,7 +3402,9 @@ export default function AdminInterface({
 
                         // Determine placeholder and help texts
                         let placeholder = "ej: 45";
-                        if (matchedJuego === "Premia2") {
+                        if (matchedJuego === "Juega 4") {
+                          placeholder = "ej: 4588 (4 digitos)";
+                        } else if (matchedJuego === "Premia2") {
                           placeholder = "ej: 4588 (4 digitos)";
                         } else if (matchedJuego === "Pega 3") {
                           placeholder = "ej: 123456 (6 digitos)";
@@ -3543,12 +3550,12 @@ export default function AdminInterface({
                         }}
                         className="w-full px-3 py-2 min-h-[44px] bg-white border border-gray-300 rounded-xl text-xs font-bold text-gray-900 focus:outline-none"
                       >
-                        {((selectedPaisLimite === "Nicaragua" ? ["TODOS", "Diaria", "Fechas", "Jugá 3", "Premia2", "Terminación 2", "Sabadito"] :
-                          selectedPaisLimite === "Honduras" ? ["TODOS", "La Diaria", "Premia2", "Pega 3", "Súper Premio"] :
-                            selectedPaisLimite === "El Salvador" ? ["TODOS", "Diaria"] :
-                              selectedPaisLimite === "La Primera" ? ["TODOS", "La Primera"] :
-                                selectedPaisLimite === "Costa Rica" ? ["TODOS", "3 Monazos", "Tica"] :
-                                  ["TODOS", "Diaria", "La Diaria", "Jugá 3", "3 Monazos", "Premia2", "Pega 3", "Súper Premio", "La Primera", "Tica", "Fechas", "Terminación 2", "Sabadito"])).map(j => (
+                        {((selectedPaisLimite === "Nicaragua" ? ["TODOS", "Diaria", "Fechas", "Jugá 3", "Premia2", "Juega 4", "Terminación 2", "Sabadito"] :
+                          selectedPaisLimite === "Honduras" ? ["TODOS", "La Diaria", "Premia2", "Pega 3", "Súper Premio", "Juega 4"] :
+                            selectedPaisLimite === "El Salvador" ? ["TODOS", "Diaria", "Juega 4"] :
+                              selectedPaisLimite === "La Primera" ? ["TODOS", "La Primera", "Juega 4"] :
+                                selectedPaisLimite === "Costa Rica" ? ["TODOS", "3 Monazos", "Tica", "Juega 4"] :
+                                  ["TODOS", "Diaria", "La Diaria", "Jugá 3", "3 Monazos", "Premia2", "Juega 4", "Pega 3", "Súper Premio", "La Primera", "Tica", "Fechas", "Terminación 2", "Sabadito"])).map(j => (
                                     <option key={j} value={j}>{j}</option>
                                   ))}
                       </select>
@@ -3599,7 +3606,8 @@ export default function AdminInterface({
                       <div className="flex justify-between items-center mb-1">
                         <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider">Número Restringido</label>
                         <span className="text-[9px] text-[#EF4444] font-bold font-mono">
-                          {selectedJuegoLimite === "Premia2" ? "4 dig." :
+                          {selectedJuegoLimite === "Juega 4" ? "4 dig." :
+                            selectedJuegoLimite === "Premia2" ? "4 dig." :
                             selectedJuegoLimite === "Jugá 3" || selectedJuegoLimite === "3 Monazos" ? "3 dig." :
                               selectedJuegoLimite === "Pega 3" ? "6 dig." :
                                 selectedJuegoLimite === "Súper Premio" ? "12 dig." : "2 dig."}

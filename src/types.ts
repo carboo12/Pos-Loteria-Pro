@@ -14,7 +14,7 @@ export interface Usuario {
 
 // Una jugada individual dentro de un ticket multi-número
 export interface Jugada {
-  numero: string;          // El número apostado
+  numero: string;          // El número apostado (2, 3, 4 o 12 dígitos según el juego; "Juega 4" = 0000-9999)
   monto: number;           // Monto apostado en la moneda del ticket
   premio_posible: number;  // Premio posible en C$ (ya convertido)
   dia_juego?: string;  // YYYY-MM-DD — fecha del sorteo para el que se apuesta (ej: "2026-05-07" en juego Fechas). NO es fecha_venta.
@@ -90,7 +90,7 @@ export interface Venta {
   numero_ticket: string; // e.g. "000001" — same as id_ticket for new tickets
   timestamp_servidor: string; // ISO String
   fecha_venta?: string; // YYYY-MM-DD — fecha del sorteo
-  juego: string; // "Diaria", "Premia2", etc.
+  juego: string; // "Diaria", "Premia2", "Juega 4", etc.
   sorteo: string; // Name of the draw
   numero_jugado: string; // Primera jugada (backward compat) o resumen
   monto_pago: number;    // Monto total del ticket
