@@ -271,8 +271,8 @@ function calculatePrizeMultiplier(juego: string, sorteo: string = ""): number {
   const cleanJuegoUpper = cleanJuego.toUpperCase();
 
   const multipliers: Record<string, number> = {
-    "JUEGA 4": 4000,
-    "JUEGA4": 4000,
+    "JUEGA 4": 6000,
+    "JUEGA4": 6000,
     "JUGÁ 3": 610,
     "JUGA 3": 610,
     "PEGA 3": 600,
@@ -294,7 +294,7 @@ function calculatePrizeMultiplier(juego: string, sorteo: string = ""): number {
     return multipliers[cleanJuegoUpper];
   }
 
-  if (cleanJuegoUpper.includes("JUEGA 4") || cleanJuegoUpper.includes("JUEGA4")) return 4000;
+  if (cleanJuegoUpper.includes("JUEGA 4") || cleanJuegoUpper.includes("JUEGA4")) return 6000;
   if (cleanJuegoUpper.includes("JUGA 3") || cleanJuegoUpper.includes("JUGÁ 3")) return 610;
   if (cleanJuegoUpper.includes("PEGA 3")) return 600;
   if (cleanJuegoUpper.includes("PREMIA")) return 4000;
@@ -2171,9 +2171,9 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
   if (isJuega4Game(juego)) {
     for (const j of rawJugadasBody) {
       const rawNumero = String(j.numero ?? "");
-      if (!/^\d{1,4}$/.test(rawNumero)) {
+      if (!/^\d{4}$/.test(rawNumero)) {
         return res.status(400).json({
-          error: `VENTA RECHAZADA: El juego ${juego} requiere números de 4 dígitos (0000-9999). Valor recibido: "${rawNumero}".`
+          error: `VENTA RECHAZADA: El juego ${juego} requiere exactamente 4 dígitos (0000-9999). Valor recibido: "${rawNumero}".`
         });
       }
     }

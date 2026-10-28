@@ -144,7 +144,7 @@ Consulta Firestore directamente para rangos de fecha (histórico completo):
 - **Fuente única**: `src/lib/prize-utils.ts` → `calculatePrizeMultiplier()`, `getTicketTheoreticalPrize(ticket, config)`, `parseGameDraw()`
 - Guard en `getTicketTheoreticalPrize`: `if (!config || !config.sorteos) return 0;`
 - `server.ts` tiene su propia copia de `calculatePrizeMultiplier` (runtime separado — no importa desde src/)
-- Multiplicadores: Diaria=80, Jugá3=610, Pega3=600, Premia2=4000, Fechas=210, 3Monazos=650
+- Multiplicadores: Diaria=80, Jugá3=610, Pega3=600, Premia2=4000, Fechas=210, 3Monazos=650, Juega4=6000
 
 ## Date Utils (src/lib/date-utils.ts)
 - `toDateSafe()`, `toDateStr()`, `getTicketDate()`, `getTicketAmount()`

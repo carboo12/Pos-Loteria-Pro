@@ -25,7 +25,7 @@
 - **Módulo de Supervisor Móvil**: Cobros y liquidaciones de ruta adaptados con interfaz neumórfica responsiva para operaciones en la calle.
 - **Gestión de usuarios**: Roles de Administrador, Supervisor y Vendedor con seguridad híbrida Bcrypt.
 - **Catálogo de juegos**: Diaria, Fechas, Jugá 3, Premia2, Terminación 2, La Diaria, Pega 3, Súper Premio y **Juega 4**
-- **Juega 4 bajo demanda**: Juego de 4 dígitos (`0000`–`9999`) con premio `4000x`, validación y techos por sorteo ya integrados. Permanece **oculto en el POS hasta que el administrador cree formalmente sus sorteos** desde el panel de control.
+- **Juega 4 bajo demanda**: Juego de 4 dígitos (`0000`–`9999`) con premio `6000x`, validación y techos por sorteo ya integrados. Permanece **oculto en el POS hasta que el administrador cree formalmente sus sorteos** desde el panel de control.
 - **Validación anti-fraude**: Bloqueo automático de ventas antes de la hora de cierre; anulación bloqueada después de la hora de sorteo
 - **Límites por número**: Techos de dinero configurables por juego, sorteo y vendedor (incluye normalización de 4 dígitos para Juega 4)
 - **Sincronización en tiempo real**: Firestore `onSnapshot` con `docChanges()` para updates incrementales
@@ -183,7 +183,7 @@ punto-de-venta-de-lotería/
 
 - **Activación**: no aparece en el POS por defecto. El administrador debe crear uno o más sorteos con `juego = "Juega 4"` desde el panel de administración. Al existir en Firestore, el POS lo muestra automáticamente.
 - **Entrada**: teclado numérico, longitud exacta de 4 dígitos, solo números y auto-avance al monto.
-- **Premios**: multiplicador `4000x` centralizado en `src/lib/prize-utils.ts` y `server.ts`.
+- **Premios**: multiplicador `6000x` centralizado en `src/lib/prize-utils.ts` y `server.ts`.
 - **Techos**: los límites por número, sorteo, hora y vendedor normalizan a 4 dígitos (por ejemplo, `5` equivale a `0005`) sin alterar la lógica de los juegos existentes.
 - **Backend**: validación, almacenamiento en `jugadas[]`, resultados ganadores, escrutinio y pago reconocen la categoría de 4 dígitos.
 - **Datos**: los tickets guardan `juego/id_juego = "Juega 4"` y números como strings de 4 dígitos, por lo que las consultas existentes por fecha, sorteo o vendedor funcionan sin cambios adicionales.

@@ -393,18 +393,24 @@ export default function VendedorInterface({
 
 
 
-  const getMaxLen = (juego: string): number => getMaxDigitsForGame(juego);
+  const getMaxLen = (juego: string): number => isJuega4(juego) ? 4 : getMaxDigitsForGame(juego);
+
+  // Validación estricta por juego: Juega 4 exige exactamente 4 dígitos (0000-9999).
+  const isNumeroValido = (juego: string, numero: string): boolean => {
+    if (isJuega4(juego)) return /^\d{4}$/.test(numero);
+    return numero.length > 0;
+  };
 
   const addJugadaAlCarrito = (montoOverride?: string | any) => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (!numeroJugado) {
-      setErrorMessage("Ingrese un número válido para jugar.");
-      return;
-    }
-    if (isJuega4(selectedJuego) && !/^\d{4}$/.test(numeroJugado)) {
-      setErrorMessage(`El juego ${selectedJuego} requiere exactamente 4 dígitos (0000-9999).`);
+    if (!isNumeroValido(selectedJuego, numeroJugado)) {
+      if (isJuega4(selectedJuego)) {
+        setErrorMessage(`El juego ${selectedJuego} requiere exactamente 4 dígitos (0000-9999).`);
+      } else {
+        setErrorMessage("Ingrese un número válido para jugar.");
+      }
       return;
     }
     const realOverride = typeof montoOverride === "string" ? montoOverride : undefined;
@@ -1395,7 +1401,7 @@ export default function VendedorInterface({
 
     if (activeField === "numero") {
       // Determine maximum digits based on the game
-      const maxDigits = getMaxDigitsForGame(selectedJuego);
+      const maxDigits = getMaxLen(selectedJuego);
 
       if (val === "BORRAR") {
         setNumeroJugado("");
@@ -2057,7 +2063,7 @@ export default function VendedorInterface({
                       autoComplete="off"
                       inputMode="numeric"
                       pattern="[0-9]*"
-                      maxLength={getMaxDigitsForGame(selectedJuego)}
+                      maxLength={getMaxLen(selectedJuego)}
                       value={numeroJugado}
                       readOnly={selectedJuego === "Fechas"}
                       tabIndex={selectedJuego === "Fechas" ? -1 : 0}

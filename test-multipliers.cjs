@@ -14,6 +14,7 @@ function calculatePrizeMultiplier(juego, sorteo) {
   if (cleanJuego === "Súper Premio (HN)") throw new Error("Sorteo eliminado de la plataforma");
 
   const multipliers = {
+    "Juega 4": 6000,
     "Jugá 3": 610,
     "Pega 3": 600,
     "Premia2": 4000,
@@ -40,6 +41,7 @@ const casos = [
   ["Jugá 3",         "Jugá 3 9:00 PM (NI)",      610,  "Jugá 3 Nicaragua (2do turno)"],
   ["Premia2",        "Premia2 (NI)",              4000, "Premia2 Nicaragua"],
   ["Premia2",        "Premia2 (HN)",              4000, "Premia2 Honduras"],
+  ["Juega 4",        "Juega 4 9:00 PM (NI)",      6000, "Juega 4 Nicaragua"],
   ["Fechas",         "Fechas (NI)",               210,  "Fechas Nicaragua"],
   ["Diaria",         "Diaria (NI)",               80,   "Diaria Nicaragua"],
 

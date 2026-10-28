@@ -48,6 +48,7 @@ function calculatePrizeMultiplier(juego, sorteo) {
   const cleanJuego = (juego || "").trim();
 
   // Sorteo Nicaragua
+  if (cleanJuego === "Juega 4" || cleanJuego === "Juega4") return 6000;
   if (cleanJuego === "Premia2" && (sorteo || "").includes("(NI)")) return 4000;
   if (cleanJuego === "Jugá 3") return 610;
 

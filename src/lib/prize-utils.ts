@@ -58,8 +58,8 @@ export function calculatePrizeMultiplier(juego: string, sorteo: string = ""): nu
   const cleanJuegoUpper = cleanJuego.toUpperCase();
 
   const multipliers: Record<string, number> = {
-    "JUEGA 4": 4000,
-    "JUEGA4": 4000,
+    "JUEGA 4": 6000,
+    "JUEGA4": 6000,
     "JUGÁ 3": 610,
     "JUGA 3": 610,
     "PEGA 3": 600,
@@ -83,7 +83,7 @@ export function calculatePrizeMultiplier(juego: string, sorteo: string = ""): nu
   }
 
   // Coincidencia parcial si contiene palabras clave específicas
-  if (cleanJuegoUpper.includes("JUEGA 4") || cleanJuegoUpper.includes("JUEGA4")) return 4000;
+  if (cleanJuegoUpper.includes("JUEGA 4") || cleanJuegoUpper.includes("JUEGA4")) return 6000;
   if (cleanJuegoUpper.includes("JUGA 3") || cleanJuegoUpper.includes("JUGÁ 3")) return 610;
   if (cleanJuegoUpper.includes("PEGA 3")) return 600;
   if (cleanJuegoUpper.includes("PREMIA")) return 4000;
