@@ -37,7 +37,9 @@ npx tsc server.ts --noEmit --esModuleInterop --resolveJsonModule --moduleResolut
 
 ## Arquitectura de Datos
 - **Firestore 100%**, sin fallback a archivos locales.
-- `saveToDB()` escribe SOLO `configuracion` y `usuarios`. Tickets y cierres se escriben atómicamente por endpoint.
+- `saveToDB(options)` escribe SOLO lo indicado: `users`, `cierres`, `fcm`, `configFields` (campos quirúrgicos de `configuracion/general`), `resumenes`, `cobrosAdmin`, `pagosComision`. Tickets se escriben atómicamente por endpoint.
+- **Guard anti-pérdida**: `configuracion/general` NO se escribe hasta haber sido leída de Firestore (`configLoadedFromFirestore`). Si no se puede leer, la mutación responde 503 y no se guarda, evitando sobrescribir sorteos con defaults.
+- `ensureConfigFresh(ms)` relee config en endpoints de lectura/venta; `ensureConfigForMutation(res)` relee antes de mutar arreglos de config.
 - Colecciones Firestore: `usuarios`, `configuracion`, `tickets`, `cierres_caja`, `resumenes_diarios`, `cobros_admin`, `pagos_comision`
 - `configuracion/general` contiene: sorteos, tasa_cambio, cobros, ingresos, resultados, pagos_comision
 - `configuracion/fcm` contiene: tokens FCM para push notifications
@@ -116,6 +118,7 @@ env:
 - Config inicial `{ sorteos: [], tasa_cambio: 36.50, ... }` (nunca null) para evitar crash en render
 - `config?.sorteos?.find/filter` (optional chaining en todo VendedorInterface)
 - `simulatedSupervisorId` permite al admin ver la vista de cualquier supervisor
+- **Cierre de caja**: `POST /api/cierres` suma solo tickets de la fecha (Firestore + legacy por `timestamp_servidor`), excluye anulados/cancelados y limita al vendedor a cerrar su propia caja. `VendedorInterface` usa un listener dedicado de los tickets de HOY del vendedor (sin el límite global de 500) para que el total mostrado coincida con el registrado.
 
 ## Finance Engine (src/lib/finance-engine.ts)
 **Fuente única de verdad para cálculos financieros**. Importar SIEMPRE desde aquí.

@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { createRequire } from "node:module";
 import dotenv from "dotenv";
@@ -39,6 +39,10 @@ if (!firebaseAdmin) {
 
 const app = express();
 const activePaymentLocks = new Set<string>();
+
+// Identificador de instancia para rastrear en logs qué proceso escribe/lee.
+// App Hosting puede tener varias instancias simultáneas (maxInstances: 2).
+const INSTANCE_ID = `${process.env.K_SERVICE || "local"}-${process.pid}-${crypto.randomBytes(3).toString("hex")}`;
 
 // ─── SESIONES PERMANENTES (token stateless firmado) ───────────────────
 // Sin Map en memoria y SIN TTL. El token transporta el id del usuario
@@ -352,6 +356,56 @@ function getLocalDateString(date = new Date()): string {
   return fmt.format(date); // "2026-07-14"
 }
 
+/**
+ * Extrae la fecha YYYY-MM-DD de un ticket usando la MISMA prioridad que el
+ * frontend: fecha_venta (servidor) > timestamp_servidor > fecha_emision.
+ * Evita que un ticket se cuente en el día equivocado al cerrar caja.
+ */
+function getTicketDateStr(ticket: any): string {
+  // Misma prioridad que el frontend: fecha_venta > timestamp_servidor > fecha_emision.
+  const candidates = [
+    ticket?.fecha_venta,
+    ticket?.timestamp_servidor,
+    ticket?.fecha_emision,
+    ticket?.timestamp
+  ];
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+    if (typeof raw === "string") {
+      const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+      const dmy = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+      const parsed = new Date(raw);
+      if (!isNaN(parsed.getTime())) return getLocalDateString(parsed);
+      continue;
+    }
+    if (typeof raw.toDate === "function") {
+      try { return getLocalDateString(raw.toDate()); } catch { continue; }
+    }
+    if (typeof raw.seconds === "number") {
+      return getLocalDateString(new Date(raw.seconds * 1000));
+    }
+  }
+  return "";
+}
+
+/** Monto del ticket en su propia moneda (nunca mezcla C$/USD). */
+function getTicketAmountForClosure(ticket: any): number {
+  const raw = ticket?.total_apostado ?? ticket?.monto_pago;
+  const num = typeof raw === "number" ? raw : parseFloat(String(raw));
+  if (Number.isFinite(num)) return num;
+  if (Array.isArray(ticket?.jugadas)) {
+    return ticket.jugadas.reduce((sum: number, j: any) => sum + (Number(j?.monto) || 0), 0);
+  }
+  return 0;
+}
+
+function roundMoney(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
 // ─── Nicaragua Timezone Helpers (UTC-6) ───────────────────────────────
 // All lottery operations use Nicaragua local time (America/Managua, UTC-6).
 // Uses Intl.DateTimeFormat for robust timezone extraction — no manual offset math.
@@ -535,38 +589,191 @@ db.cobros_admin = db.cobros_admin || [];
 db.pagos_comision = db.pagos_comision || [];
 db.fcm_tokens = db.fcm_tokens || [];
 
-async function saveToDB() {
-  const isReady = initFirebaseAdmin();
-  if (isReady) {
-    try {
-      const firestoreDb = getFirestoreInstance();
-      // Save configuracion/general excluding contador_global_tickets so bulk saves (cierres, admin updates)
-      // NEVER overwrite or rewind the atomic global counter in Firestore.
-      const { contador_global_tickets, ...configWithoutCounter } = db.configuracion;
-      await firestoreDb.collection("configuracion").doc("general").set(configWithoutCounter, { merge: true });
-      await firestoreDb.collection("configuracion").doc("fcm").set({ tokens: db.fcm_tokens || [] });
+// ─── CONFIG PERSISTENCE GUARD ───────────────────────────────────────
+// `configLoadedFromFirestore` evita el bug crítico de pérdida de sorteos:
+// si Firestore tarda/falla al arrancar, `db.configuracion` queda con los
+// valores por defecto. Antes, el primer saveToDB (token FCM, cobro, cierre,
+// etc.) escribía esa configuración por defecto y borraba los sorteos que el
+// administrador había creado. Ahora la configuración SOLO se escribe después
+// de haber sido leída desde Firestore, y solo los campos modificados.
+let configLoadedFromFirestore = false;
+let configLoadedAt = 0;
 
-      for (const u of db.usuarios) {
-        const { id, ...userData } = u;
-        if (userData.rol === "administrador") {
-          userData.configuracion = db.configuracion;
-        }
-        await firestoreDb.collection("usuarios").doc(id).set(userData);
-      }
+type ConfigField = Exclude<keyof ServerConfiguracion, "contador_global_tickets">;
 
-      // NOTE: tickets (db.ventas) are NO longer bulk-written here.
-      // Each endpoint (POST /api/ventas, POST /api/ventas/:id/pagar, etc.)
-      // writes directly to Firestore "tickets" collection atomically.
-      // This prevents deleted tickets from being re-inserted by residual
-      // in-memory state during unrelated saves (config, users, closures).
+interface SaveOptions {
+  users?: boolean | any[];
+  cierres?: boolean | any[];
+  fcm?: boolean;
+  configFields?: ConfigField[];
+  resumenes?: boolean | any[];
+  cobrosAdmin?: boolean | any[];
+  pagosComision?: boolean | any[];
+}
 
-      for (const c of db.cierres_caja) {
-        const { id, ...closureData } = c;
-        await firestoreDb.collection("cierres_caja").doc(id).set(closureData);
-      }
-    } catch (err) {
-      console.error("[Firestore Sync] Error al sincronizar base de datos con Firestore:", err);
+/**
+ * `true` = reescribir todo el arreglo (solo migraciones/backfill).
+ * Array = escribir únicamente esos documentos (evita revertir cambios de
+ * otra instancia en documentos que este proceso no tocó).
+ */
+function docsToSave(value: boolean | any[] | undefined, all: any[]): any[] {
+  if (value === true) return all;
+  if (Array.isArray(value)) return value;
+  return [];
+}
+
+function logConfig(level: "LOAD" | "SAVE" | "SEED" | "ABORT" | "ERROR", message: string) {
+  process.stdout.write(`[Config][${level}] instance=${INSTANCE_ID} ${message}\n`);
+}
+
+async function loadConfigFromFirestore(seedIfMissing = false): Promise<boolean> {
+  if (!initFirebaseAdmin()) return false;
+  try {
+    const firestoreDb = getFirestoreInstance();
+    const configRef = firestoreDb.collection("configuracion").doc("general");
+    const configSnap = await configRef.get();
+
+    if (configSnap.exists) {
+      db.configuracion = { ...db.configuracion, ...(configSnap.data() || {}) } as ServerConfiguracion;
+      configLoadedFromFirestore = true;
+      configLoadedAt = Date.now();
+      const sorteos = db.configuracion.sorteos || [];
+      logConfig("LOAD", `sorteos=${sorteos.length} ids=${sorteos.map((s: any) => s?.id).filter(Boolean).join(",")}`);
+      return true;
     }
+
+    if (seedIfMissing) {
+      const { contador_global_tickets, ...seed } = db.configuracion;
+      await configRef.set(seed, { merge: true });
+      configLoadedFromFirestore = true;
+      configLoadedAt = Date.now();
+      logConfig("SEED", `documento general inexistente: sembrados ${(seed.sorteos || []).length} sorteos por defecto.`);
+      return true;
+    }
+
+    logConfig("LOAD", "documento general NO existe; no se escribe nada.");
+    return false;
+  } catch (err: any) {
+    logConfig("ERROR", `leyendo configuración: ${err?.message || err}`);
+    return false;
+  }
+}
+
+/**
+ * Mantiene la instancia alineada con Firestore cuando hay varias instancias.
+ * Sin esto, una instancia con caché vieja rechazaría ventas de un sorteo
+ * recién creado (o aceptaría uno eliminado). TTL corto y lectura de 1 doc.
+ */
+async function ensureConfigFresh(maxAgeMs = 15000): Promise<boolean> {
+  if (configLoadedFromFirestore && Date.now() - configLoadedAt < maxAgeMs) return true;
+  return loadConfigFromFirestore(false);
+}
+
+/**
+ * Antes de mutar un arreglo de configuración (sorteos, límites, resultados,
+ * cobros, ingresos) se relee Firestore. Si no se puede leer, se rechaza la
+ * escritura para no reemplazar el arreglo real con el estado local por defecto.
+ */
+async function ensureConfigForMutation(res: express.Response): Promise<boolean> {
+  const ok = await loadConfigFromFirestore(false);
+  if (!ok) {
+    logConfig("ABORT", "mutación rechazada: no se pudo leer configuración desde Firestore.");
+    res.status(503).json({
+      error: "No se pudo leer la configuración actual desde la base de datos. El cambio no se guardó para evitar sobrescribir datos."
+    });
+    return false;
+  }
+  return true;
+}
+
+async function saveToDB(options: SaveOptions = {}) {
+  const isReady = initFirebaseAdmin();
+  if (!isReady) {
+    process.stdout.write(`[DB][SAVE][SKIP] instance=${INSTANCE_ID} Firebase Admin no disponible. options=${JSON.stringify(options)}\n`);
+    return;
+  }
+
+  try {
+    const firestoreDb = getFirestoreInstance();
+
+    // ── Configuración: escritura quirúrgica de campos ─────────────────
+    if (options.configFields && options.configFields.length > 0) {
+      if (!configLoadedFromFirestore) {
+        await loadConfigFromFirestore(false);
+      }
+
+      if (!configLoadedFromFirestore) {
+        logConfig(
+          "ABORT",
+          `se evita sobrescribir configuración con valores locales/default. fields=${options.configFields.join(",")}`
+        );
+      } else {
+        const patch: Record<string, any> = {};
+        for (const field of options.configFields) {
+          patch[field] = (db.configuracion as any)[field];
+        }
+        await firestoreDb.collection("configuracion").doc("general").set(patch, { merge: true });
+        logConfig(
+          "SAVE",
+          `fields=${Object.keys(patch).join(",")} sorteos=${(db.configuracion.sorteos || []).length}`
+        );
+      }
+    }
+
+    if (options.fcm) {
+      await firestoreDb.collection("configuracion").doc("fcm").set({ tokens: db.fcm_tokens || [] });
+    }
+
+    const usersToSave = docsToSave(options.users, db.usuarios);
+    if (usersToSave.length > 0) {
+      for (const u of usersToSave) {
+        const { id, ...userData } = u;
+        await firestoreDb.collection("usuarios").doc(id).set(userData, { merge: true });
+      }
+      process.stdout.write(`[DB][SAVE] instance=${INSTANCE_ID} usuarios=${usersToSave.length}\n`);
+    }
+
+    // NOTE: tickets (db.ventas) are NO longer bulk-written here.
+    // Each endpoint (POST /api/ventas, POST /api/ventas/:id/pagar, etc.)
+    // writes directly to Firestore "tickets" collection atomically.
+
+    const cierresToSave = docsToSave(options.cierres, db.cierres_caja);
+    if (cierresToSave.length > 0) {
+      for (const c of cierresToSave) {
+        const { id, ...closureData } = c;
+        await firestoreDb.collection("cierres_caja").doc(id).set(closureData, { merge: true });
+      }
+      process.stdout.write(`[DB][SAVE] instance=${INSTANCE_ID} cierres=${cierresToSave.length}\n`);
+    }
+
+    const resumenesToSave = docsToSave(options.resumenes, db.resumenes_diarios);
+    if (resumenesToSave.length > 0) {
+      for (const r of resumenesToSave) {
+        const { id, ...resumenData } = r;
+        await firestoreDb.collection("resumenes_diarios").doc(id).set(resumenData, { merge: true });
+      }
+      process.stdout.write(`[DB][SAVE] instance=${INSTANCE_ID} resumenes=${resumenesToSave.length}\n`);
+    }
+
+    const cobrosToSave = docsToSave(options.cobrosAdmin, db.cobros_admin);
+    if (cobrosToSave.length > 0) {
+      for (const c of cobrosToSave) {
+        const { id, ...cobroData } = c;
+        await firestoreDb.collection("cobros_admin").doc(id).set(cobroData, { merge: true });
+      }
+      process.stdout.write(`[DB][SAVE] instance=${INSTANCE_ID} cobros_admin=${cobrosToSave.length}\n`);
+    }
+
+    const pagosToSave = docsToSave(options.pagosComision, db.pagos_comision);
+    if (pagosToSave.length > 0) {
+      for (const p of pagosToSave) {
+        const { id, ...pagoData } = p;
+        await firestoreDb.collection("pagos_comision").doc(id).set(pagoData, { merge: true });
+      }
+      process.stdout.write(`[DB][SAVE] instance=${INSTANCE_ID} pagos_comision=${pagosToSave.length}\n`);
+    }
+  } catch (err) {
+    console.error("[Firestore Sync] Error al sincronizar base de datos con Firestore:", err);
   }
 }
 
@@ -584,11 +791,19 @@ async function syncFromFirestore() {
     const fetchPromise = (async () => {
       const configDoc = await firestoreDb.collection("configuracion").doc("general").get();
       if (configDoc.exists) {
-        db.configuracion = configDoc.data() as ServerConfiguracion;
+        db.configuracion = { ...db.configuracion, ...(configDoc.data() || {}) } as ServerConfiguracion;
+        configLoadedFromFirestore = true;
+        configLoadedAt = Date.now();
+        const sorteosLeidos = db.configuracion.sorteos || [];
+        logConfig("LOAD", `sorteos=${sorteosLeidos.length} ids=${sorteosLeidos.map((s: any) => s?.id).filter(Boolean).join(",")}`);
         console.log("[Firestore Sync] Configuración cargada desde Firestore.");
       } else {
         console.log("[Firestore Sync] Guardando configuración predeterminada en Firestore...");
-        await firestoreDb.collection("configuracion").doc("general").set(db.configuracion);
+        const { contador_global_tickets, ...seedConfig } = db.configuracion;
+        await firestoreDb.collection("configuracion").doc("general").set(seedConfig);
+        configLoadedFromFirestore = true;
+        configLoadedAt = Date.now();
+        logConfig("SEED", `documento general inexistente: sembrados ${(seedConfig.sorteos || []).length} sorteos por defecto.`);
       }
 
       const resultadosSnapshot = await firestoreDb.collection("resultados").get();
@@ -613,7 +828,13 @@ async function syncFromFirestore() {
             ? { ...s, juego: "SALVADOR", nombre: s.nombre.replace(/^Diaria\b/i, "SALVADOR") }
             : s
         );
-        await firestoreDb.collection("configuracion").doc("general").set(db.configuracion);
+        // Escritura quirúrgica: solo sorteos. Nunca el documento completo, para
+        // no pisar cambios concurrentes de otra instancia en otros campos.
+        await firestoreDb.collection("configuracion").doc("general").set(
+          { sorteos: db.configuracion.sorteos },
+          { merge: true }
+        );
+        logConfig("SAVE", `fields=sorteos motivo=migracion_sv sorteos=${(db.configuracion.sorteos || []).length}`);
         console.log(`[Firestore Sync] ${sorteosSV.length} sorteos de El Salvador migrados a juego "SALVADOR".`);
       }
 
@@ -821,7 +1042,7 @@ app.get("/api/notifications/subscribe", (req, res) => {
 });
 
 // NOTIFICATIONS: Register FCM registration token (Web Push / Mobile device)
-app.post("/api/notifications/register-token", (req, res) => {
+app.post("/api/notifications/register-token", async (req, res) => {
   const { token } = req.body;
   if (!token) {
     return res.status(400).json({ error: "Token es requerido." });
@@ -830,7 +1051,19 @@ app.post("/api/notifications/register-token", (req, res) => {
   // Avoid duplicates
   if (!db.fcm_tokens.includes(token)) {
     db.fcm_tokens.push(token);
-    saveToDB();
+
+    // arrayUnion evita borrar tokens registrados por otra instancia aunque
+    // esta instancia tenga una copia incompleta en memoria.
+    if (initFirebaseAdmin()) {
+      try {
+        await getFirestoreInstance().collection("configuracion").doc("fcm").set(
+          { tokens: FieldValue.arrayUnion(token) },
+          { merge: true }
+        );
+      } catch (err) {
+        console.error("[FCM Token] Error guardando token en Firestore:", err);
+      }
+    }
     console.log(`[FCM Token] Nuevo token registrado: ${token.substring(0, 10)}...`);
   }
 
@@ -1084,7 +1317,7 @@ app.post("/api/auth/register", requireAdmin, async (req, res) => {
       });
     }
 
-    saveToDB();
+    saveToDB({ users: [newUser] });
     const { password: _, ...safeUser } = newUser;
     res.status(201).json({ success: true, user: safeUser });
   } catch (err) {
@@ -1130,7 +1363,7 @@ app.post("/api/auth/change-password", checkAuth(), async (req, res) => {
     // Se reemite un token nuevo para que la sesión actual pueda continuar.
     user.sesion_ver = (Number(user.sesion_ver) || 0) + 1;
     user.password = bcrypt.hashSync(newPassword, 10);
-    saveToDB();
+    saveToDB({ users: [user] });
 
     const refreshedToken = createSession(user);
     res.json({ success: true, message: "Contraseña actualizada correctamente.", localToken: refreshedToken });
@@ -1184,7 +1417,7 @@ app.post("/api/setup-admin", async (req, res) => {
       requiereCambioPassword: true
     };
     db.usuarios.push(userInDb);
-    saveToDB();
+    saveToDB({ users: [userInDb] });
   }
 
   const { password: _, ...safeUser } = userInDb;
@@ -1255,7 +1488,7 @@ app.post("/api/usuarios", requireAdmin, (req, res) => {
     });
   }
 
-  saveToDB();
+  saveToDB({ users: [newUser] });
   res.status(201).json(newUser);
 });
 
@@ -1320,7 +1553,7 @@ app.put("/api/usuarios/:id", requireAdmin, (req, res) => {
     }
   });
 
-  saveToDB();
+  saveToDB({ users: true });
   res.json(user);
 });
 
@@ -1350,7 +1583,7 @@ app.delete("/api/usuarios/:id", requireAdmin, (req, res) => {
     });
   }
 
-  saveToDB();
+  saveToDB({ users: true });
   if (initFirebaseAdmin()) {
     getFirestoreInstance().collection("usuarios").doc(id).delete().catch((err: any) => {
       console.error(`[Firestore Sync] Error al eliminar usuario ${id} de Firestore:`, err);
@@ -1364,7 +1597,9 @@ app.get("/api/limites-numeros", (req, res) => {
   res.json(db.configuracion.limites_numeros || []);
 });
 
-app.post("/api/limites-numeros", requireAdmin, (req, res) => {
+app.post("/api/limites-numeros", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const {
     juego,
     numero,
@@ -1405,11 +1640,13 @@ app.post("/api/limites-numeros", requireAdmin, (req, res) => {
 
   db.configuracion.limites_numeros = db.configuracion.limites_numeros || [];
   db.configuracion.limites_numeros.push(newLimit);
-  saveToDB();
+  saveToDB({ configFields: ["limites_numeros"] });
   res.status(201).json(newLimit);
 });
 
-app.put("/api/limites-numeros/:id", requireAdmin, (req, res) => {
+app.put("/api/limites-numeros/:id", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const { id } = req.params;
   const {
     juego,
@@ -1455,25 +1692,29 @@ app.put("/api/limites-numeros/:id", requireAdmin, (req, res) => {
   };
 
   db.configuracion.limites_numeros[index] = updatedLimit;
-  saveToDB();
+  saveToDB({ configFields: ["limites_numeros"] });
   res.json(updatedLimit);
 });
 
 
-app.delete("/api/limites-numeros", requireAdmin, (req, res) => {
+app.delete("/api/limites-numeros", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const id = req.query.id;
   if (!id) {
     return res.status(400).json({ error: "Límite ID es requerido." });
   }
   db.configuracion.limites_numeros = (db.configuracion.limites_numeros || []).filter((l: any) => l.id !== id);
-  saveToDB();
+  saveToDB({ configFields: ["limites_numeros"] });
   res.json({ success: true, message: "Límite eliminado." });
 });
 
-app.delete("/api/limites-numeros/:id", requireAdmin, (req, res) => {
+app.delete("/api/limites-numeros/:id", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const id = req.params.id || req.query.id;
   db.configuracion.limites_numeros = (db.configuracion.limites_numeros || []).filter((l: any) => l.id !== id);
-  saveToDB();
+  saveToDB({ configFields: ["limites_numeros"] });
   res.json({ success: true, message: "Límite eliminado." });
 });
 
@@ -1586,7 +1827,8 @@ async function escrutarTickets(id_sorteo: string, sorteoName: string, fecha: str
       venta.monto_premio = prize;
     }
 
-    saveToDB();
+    // Sin guardado masivo: el escrutinio ya actualizó cada ticket en Firestore
+    // y no debe tocar configuración/usuarios/cierres.
     console.log(`[Escrutinio] Completado: ${scrutinized} tickets escrutados, ${winners} ganadores.`);
     return { scrutinized, winners };
   } catch (err) {
@@ -1620,6 +1862,8 @@ app.get("/api/resultados", (req, res) => {
 });
 
 app.post("/api/resultados", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const { id_sorteo, fecha, numero_ganador, sorteo, pais } = req.body;
   if (!id_sorteo || !fecha || !numero_ganador) {
     return res.status(400).json({ error: "Sorteo, Fecha y Número ganador son requeridos." });
@@ -1653,7 +1897,7 @@ app.post("/api/resultados", requireAdmin, async (req, res) => {
 
   db.configuracion.resultados = db.configuracion.resultados || [];
   db.configuracion.resultados.push(newResult);
-  saveToDB();
+  saveToDB({ configFields: ["resultados"] });
 
   // Sync to Firestore 'resultados' collection
   try {
@@ -1674,6 +1918,8 @@ app.post("/api/resultados", requireAdmin, async (req, res) => {
 });
 
 app.put("/api/resultados/:id", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const { id } = req.params;
   const { id_sorteo, fecha, numero_ganador, sorteo, pais } = req.body;
   if (!id_sorteo || !fecha || !numero_ganador) {
@@ -1707,7 +1953,7 @@ app.put("/api/resultados/:id", requireAdmin, async (req, res) => {
   db.configuracion.resultados[idx].fecha = fecha;
   db.configuracion.resultados[idx].numero_ganador = resultadoGanador;
 
-  saveToDB();
+  saveToDB({ configFields: ["resultados"] });
 
   // Sync to Firestore 'resultados' collection
   try {
@@ -1721,9 +1967,11 @@ app.put("/api/resultados/:id", requireAdmin, async (req, res) => {
 });
 
 app.delete("/api/resultados/:id", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const { id } = req.params;
   db.configuracion.resultados = (db.configuracion.resultados || []).filter((r: any) => r.id !== id);
-  saveToDB();
+  saveToDB({ configFields: ["resultados"] });
 
   // Sync to Firestore 'resultados' collection
   try {
@@ -1742,6 +1990,8 @@ app.get("/api/cobros", (req, res) => {
 });
 
 app.post("/api/cobros", checkAuth(), async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const { id_vendedor, id_supervisor, monto_cs, monto_usd, comentario, fecha: fechaOverride } = req.body;
   if (!id_vendedor || !id_supervisor || monto_cs === undefined || monto_usd === undefined) {
     return res.status(400).json({ error: "Vendedor, Supervisor, monto en C$ y monto en USD son obligatorios." });
@@ -1768,15 +2018,17 @@ app.post("/api/cobros", checkAuth(), async (req, res) => {
   db.configuracion.cobros = db.configuracion.cobros || [];
   db.configuracion.cobros.push(newCobro);
 
+  const cierresAfectados: any[] = [];
   if (db.cierres_caja) {
     db.cierres_caja.forEach((cc: any) => {
       if (cc.id_vendedor === id_vendedor) {
         cc.cobrado = true;
+        cierresAfectados.push(cc);
       }
     });
   }
 
-  await saveToDB();
+  await saveToDB({ configFields: ["cobros"], cierres: cierresAfectados });
 
   try {
     const firestoreDb = getFirestoreInstance();
@@ -1795,6 +2047,8 @@ app.post("/api/cobros", checkAuth(), async (req, res) => {
 
 // Update cobro (admin only)
 app.put("/api/cobros/:id", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const { id } = req.params;
   const { monto_cs, monto_usd, comentario, id_vendedor, fecha: fechaOverride } = req.body;
 
@@ -1825,7 +2079,7 @@ app.put("/api/cobros/:id", requireAdmin, async (req, res) => {
 
   db.configuracion.cobros[index] = updatedCobro;
 
-  await saveToDB();
+  await saveToDB({ configFields: ["cobros"] });
 
   try {
     const firestoreDb = getFirestoreInstance();
@@ -1844,6 +2098,8 @@ app.put("/api/cobros/:id", requireAdmin, async (req, res) => {
 
 // Delete cobro (admin only)
 app.delete("/api/cobros/:id", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const { id } = req.params;
 
   db.configuracion.cobros = db.configuracion.cobros || [];
@@ -1855,7 +2111,7 @@ app.delete("/api/cobros/:id", requireAdmin, async (req, res) => {
 
   db.configuracion.cobros.splice(index, 1);
 
-  await saveToDB();
+  await saveToDB({ configFields: ["cobros"] });
 
   try {
     const firestoreDb = getFirestoreInstance();
@@ -1878,6 +2134,8 @@ app.get("/api/ingresos", checkAuth(), (req, res) => {
 });
 
 app.post("/api/ingresos", checkAuth(), async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const { id_vendedor, id_supervisor, monto_cs, monto_usd, comentario, fecha: fechaOverride } = req.body;
   if (!id_vendedor || !id_supervisor) {
     return res.status(400).json({ error: "Vendedor y Supervisor son obligatorios." });
@@ -1904,7 +2162,7 @@ app.post("/api/ingresos", checkAuth(), async (req, res) => {
   (db.configuracion as any).ingresos = (db.configuracion as any).ingresos || [];
   (db.configuracion as any).ingresos.push(newIngreso);
 
-  await saveToDB();
+  await saveToDB({ configFields: ["ingresos"] });
 
   try {
     const firestoreDb = getFirestoreInstance();
@@ -1923,6 +2181,8 @@ app.post("/api/ingresos", checkAuth(), async (req, res) => {
 
 // Update income (admin only)
 app.put("/api/ingresos/:id", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const { id } = req.params;
   const { monto_cs, monto_usd, comentario, id_vendedor, fecha: fechaOverride } = req.body;
 
@@ -1953,7 +2213,7 @@ app.put("/api/ingresos/:id", requireAdmin, async (req, res) => {
 
   (db.configuracion as any).ingresos[index] = updatedIngreso;
 
-  await saveToDB();
+  await saveToDB({ configFields: ["ingresos"] });
 
   try {
     const firestoreDb = getFirestoreInstance();
@@ -1972,6 +2232,8 @@ app.put("/api/ingresos/:id", requireAdmin, async (req, res) => {
 
 // Delete income (admin only)
 app.delete("/api/ingresos/:id", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const { id } = req.params;
 
   (db.configuracion as any).ingresos = (db.configuracion as any).ingresos || [];
@@ -1983,7 +2245,7 @@ app.delete("/api/ingresos/:id", requireAdmin, async (req, res) => {
 
   (db.configuracion as any).ingresos.splice(index, 1);
 
-  await saveToDB();
+  await saveToDB({ configFields: ["ingresos"] });
 
   try {
     const firestoreDb = getFirestoreInstance();
@@ -2008,32 +2270,66 @@ app.put("/api/cierres/:id/cobrar", requireAdmin, (req, res) => {
     return res.status(404).json({ error: "Cierre de caja no encontrado." });
   }
   cc.cobrado = true;
-  saveToDB();
+  saveToDB({ cierres: [cc] });
   res.json({ success: true, message: "Cierre de caja marcado como cobrado.", closure: cc });
 });
 
 // Configuration
-app.get("/api/configuracion", (req, res) => {
+app.get("/api/configuracion", async (_req, res) => {
+  // Si el arranque no pudo cargar Firestore (timeout/cold start), reintenta
+  // antes de responder. Así nunca se sirve la config por defecto como si
+  // fuera la real ni se propaga a escrituras posteriores.
+  await ensureConfigFresh(5000);
   res.json(db.configuracion);
 });
 
-app.put("/api/configuracion", requireAdmin, (req, res) => {
+app.put("/api/configuracion", requireAdmin, async (req, res) => {
+  if (!(await ensureConfigForMutation(res))) return;
+
   const { tasa_cambio, formato_ticket, sorteos } = req.body;
+  const changedFields: ConfigField[] = [];
 
   if (tasa_cambio !== undefined) {
     db.configuracion.tasa_cambio = Number(tasa_cambio);
+    changedFields.push("tasa_cambio");
   }
   if (formato_ticket !== undefined) {
     db.configuracion.formato_ticket = {
       ...db.configuracion.formato_ticket,
       ...formato_ticket
     };
+    changedFields.push("formato_ticket");
   }
   if (sorteos !== undefined) {
+    if (!Array.isArray(sorteos)) {
+      return res.status(400).json({ error: "El campo sorteos debe ser un arreglo." });
+    }
+    const before = (db.configuracion.sorteos || []).map((s: any) => s?.id).filter(Boolean);
     db.configuracion.sorteos = sorteos;
+    changedFields.push("sorteos");
+    process.stdout.write(
+      `[Config][SORTEOS] instance=${INSTANCE_ID} user=${(req as any).user?.id} ANTES=${before.length} [${before.join(",")}] DESPUES=${sorteos.length} [${sorteos.map((s: any) => s?.id).filter(Boolean).join(",")}]\n`
+    );
   }
 
-  saveToDB();
+  if (changedFields.length > 0) {
+    await saveToDB({ configFields: changedFields });
+  }
+
+  try {
+    const firestoreDb = getFirestoreInstance();
+    await firestoreDb.collection("logs_auditoria").add({
+      admin_id: (req as any).user.id,
+      accion: "UPDATE_CONFIGURACION",
+      campos: changedFields,
+      sorteos_count: (db.configuracion.sorteos || []).length,
+      sorteos_ids: (db.configuracion.sorteos || []).map((s: any) => s?.id).filter(Boolean),
+      timestamp: getNicaraguaISOString()
+    });
+  } catch (err) {
+    console.error("[Audit Log] Error writing UPDATE_CONFIGURACION logs_auditoria:", err);
+  }
+
   res.json(db.configuracion);
 });
 
@@ -2155,6 +2451,17 @@ app.get("/api/ventas", async (req, res) => {
 app.post("/api/ventas", checkAuth(), async (req, res) => {
   const { juego, sorteo, id_sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente,
           premio_posible_cs, jugadas, fecha_venta } = req.body;
+
+  // Alinear sorteos/tasa/techos con Firestore (otra instancia pudo cambiarlos).
+  // Si la configuración no se puede leer, NO se vende: evita aceptar tickets
+  // con sorteos/tasas por defecto que luego sobrescriban la configuración real.
+  const configOk = await ensureConfigFresh(15000);
+  if (!configOk || !Array.isArray(db.configuracion.sorteos) || db.configuracion.sorteos.length === 0) {
+    return res.status(503).json({
+      error: "No se pudo verificar la configuración de sorteos. Intente nuevamente en unos segundos.",
+      retryable: true
+    });
+  }
 
   if (!juego || !sorteo || !numero_jugado || !monto_pago || !moneda || !id_vendedor) {
     console.log("Validación de venta fallida, detalles:", { juego, sorteo, numero_jugado, monto_pago, moneda, id_vendedor, nombre_cliente });
@@ -2459,7 +2766,7 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
     }
   }
 
-  // 3. ATOMIC COUNTER: Firestore transaction to get sequential ticket ID and auto-ID doc
+  // 3. ATOMIC COUNTER: Firestore transaction to get sequential ticket ID (used as doc ID)
   const serverTimeStr = getNicaraguaISOString();
   let numero_ticket = "";
   let ticketDocId = "";
@@ -2469,8 +2776,6 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
   try {
     const firestoreDb = getFirestoreInstance();
     const configRef = firestoreDb.collection("configuracion").doc("general");
-    const ticketRef = firestoreDb.collection("tickets").doc(); // Auto-ID document reference
-    ticketDocId = ticketRef.id;
 
     await firestoreDb.runTransaction(async (transaction) => {
       const configSnap = await transaction.get(configRef);
@@ -2483,6 +2788,10 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
       const currentCounter = configData.contador_global_tickets || 0;
       const newCounter = currentCounter + 1;
       numero_ticket = String(newCounter).padStart(6, "0");
+
+      // El ID del documento SIEMPRE es el id_ticket (ej. "040850"), nunca un Auto-ID
+      ticketDocId = numero_ticket;
+      const ticketRef = firestoreDb.collection("tickets").doc(ticketDocId);
 
       // Atomically increment the counter
       transaction.update(configRef, { contador_global_tickets: newCounter });
@@ -2573,7 +2882,6 @@ app.post("/api/ventas", checkAuth(), async (req, res) => {
   };
 
   db.ventas.push(newSale);
-  saveToDB();
 
   // NOTIFICATION TRIGGER: Send live real-time and FCM alerts
   const notifTitle = "Nuevo Ticket Generado";
@@ -2686,7 +2994,8 @@ app.post("/api/ventas/:id/anular", async (req, res) => {
     }
   }
 
-  saveToDB();
+  // El ticket ya fue actualizado atómicamente en Firestore. No se hace
+  // guardado masivo para evitar reescribir configuración/usuarios/cierres.
   return res.status(200).json({
     success: true,
     message: "Ticket anulado con éxito.",
@@ -2789,7 +3098,6 @@ app.post("/api/ventas/:id/pagar", requireAdmin, async (req, res) => {
         }
       }
 
-      saveToDB();
       return res.json({
         message: "¡Ganador!",
         ganador: true,
@@ -2812,7 +3120,6 @@ app.post("/api/ventas/:id/pagar", requireAdmin, async (req, res) => {
         }
       }
 
-      saveToDB();
       return res.json({
         message: "Ticket No Premiado.",
         ganador: false,
@@ -2952,43 +3259,142 @@ app.get("/api/cierres", (req, res) => {
   res.json(db.cierres_caja);
 });
 
-app.post("/api/cierres", requireAdmin, (req, res) => {
-  const { id_vendedor, denominaciones, monto_entregado_cs, monto_entregado_usd } = req.body;
+app.post("/api/cierres", checkAuth(), async (req, res) => {
+  const sessionUser = (req as any).user;
+  const { id_vendedor, denominaciones, monto_entregado_cs, monto_entregado_usd, fecha: fechaBody } = req.body || {};
 
   if (!id_vendedor || !denominaciones) {
     return res.status(400).json({ error: "Datos de arqueo incompletos." });
   }
 
-  const user = db.usuarios.find((u: any) => u.id === id_vendedor);
+  // Un vendedor solo puede cerrar SU propia caja. Admin/supervisor pueden
+  // registrar cierres de cualquier vendedor.
+  if (sessionUser?.rol === "vendedor" && sessionUser.id !== id_vendedor) {
+    return res.status(403).json({ error: "No puede registrar el cierre de caja de otro vendedor." });
+  }
+
+  let user: any = db.usuarios.find((u: any) => u.id === id_vendedor);
+  if (!user && initFirebaseAdmin()) {
+    // La memoria puede estar incompleta tras un cold start; leer el usuario
+    // real de Firestore antes de rechazar el cierre.
+    try {
+      const userSnap = await getFirestoreInstance().collection("usuarios").doc(id_vendedor).get();
+      if (userSnap.exists) {
+        user = { id: userSnap.id, ...userSnap.data() };
+      }
+    } catch (err: any) {
+      process.stdout.write(`[Cierre][WARN] instance=${INSTANCE_ID} no se pudo leer vendedor ${id_vendedor}: ${err?.message || err}\n`);
+    }
+  }
   if (!user) {
     return res.status(404).json({ error: "Vendedor no encontrado." });
   }
 
-  // Calculate system sales for this seller today that are not voided (anulado)
-  const sellerSales = db.ventas.filter(
-    (v: any) => v.id_vendedor === id_vendedor && !v.anulado
-  );
+  // Fecha del corte: por defecto HOY en Nicaragua. El cierre NUNCA debe sumar
+  // el historial completo del vendedor (ese era el origen del descuadre).
+  const fecha = (typeof fechaBody === "string" && /^\d{4}-\d{2}-\d{2}$/.test(fechaBody))
+    ? fechaBody
+    : getLocalDateString();
 
+  // Fuente de verdad: Firestore. La memoria de una instancia puede estar
+  // incompleta (cold start / otra instancia / ticket creado en otro proceso).
+  let rawTickets: any[] = [];
+  let source = "memory";
+  if (initFirebaseAdmin()) {
+    try {
+      const firestoreDb = getFirestoreInstance();
+      const snap = await firestoreDb.collection("tickets").where("fecha_venta", "==", fecha).get();
+      snap.forEach((doc: any) => rawTickets.push({ id: doc.id, ...doc.data() }));
+
+      // Tickets legacy sin fecha_venta: se incluyen por rango de
+      // timestamp_servidor (que sí guarda la fecha local con offset -06:00).
+      try {
+        const startIso = `${fecha}T00:00:00`;
+        const nextIso = getLocalDateString(new Date(new Date(`${fecha}T12:00:00Z`).getTime() + 24 * 60 * 60 * 1000));
+        const endIso = `${nextIso}T00:00:00`;
+        const legacySnap = await firestoreDb.collection("tickets")
+          .where("timestamp_servidor", ">=", startIso)
+          .where("timestamp_servidor", "<", endIso)
+          .get();
+        legacySnap.forEach((doc: any) => rawTickets.push({ id: doc.id, ...doc.data() }));
+      } catch (legacyErr: any) {
+        process.stdout.write(`[Cierre][WARN] instance=${INSTANCE_ID} consulta legacy por timestamp falló: ${legacyErr?.message || legacyErr}\n`);
+      }
+
+      source = "firestore";
+    } catch (err: any) {
+      process.stdout.write(`[Cierre][WARN] instance=${INSTANCE_ID} Firestore falló, usando memoria: ${err?.message || err}\n`);
+    }
+  }
+
+  if (source !== "firestore") {
+    rawTickets = db.ventas.filter((v: any) => getTicketDateStr(v) === fecha);
+  }
+
+  const seen = new Set<string>();
+  const sellerNameNorm = (user.nombre || "").toUpperCase().trim();
   let systemCs = 0;
   let systemUsd = 0;
+  let countedTickets = 0;
+  let cancelledTickets = 0;
+  let otherSellerTickets = 0;
+  let zeroAmountTickets = 0;
+  const countedIds: string[] = [];
 
-  sellerSales.forEach((v: any) => {
-    if (v.moneda === "C$") systemCs += v.monto_pago;
-    if (v.moneda === "USD") systemUsd += v.monto_pago;
-  });
+  for (const t of rawTickets) {
+    const key = String(t.id || t.numero_ticket || t.id_ticket || "");
+    if (key) {
+      if (seen.has(key)) continue; // deduplicación por si se mezclan fuentes
+      seen.add(key);
+    }
 
-  const entregadoCs = Number(monto_entregado_cs) || 0;
-  const entregadoUsd = Number(monto_entregado_usd) || 0;
+    // Mismo criterio que el frontend: id_vendedor manda; solo si el ticket
+    // legacy no tiene id se acepta por nombre normalizado.
+    const belongsToSeller = t.id_vendedor
+      ? t.id_vendedor === id_vendedor
+      : String(t.nombre_vendedor || "").toUpperCase().trim() === sellerNameNorm;
+    if (!belongsToSeller) {
+      otherSellerTickets++;
+      continue;
+    }
 
-  const descuadreCs = entregadoCs - systemCs;
-  const descuadreUsd = entregadoUsd - systemUsd;
+    // Excluir anulados y cancelados explícitamente.
+    if (t.anulado || t.estado === "anulado" || t.estado === "cancelado") {
+      cancelledTickets++;
+      continue;
+    }
+
+    const amount = getTicketAmountForClosure(t);
+    if (!(amount > 0)) {
+      zeroAmountTickets++;
+      continue;
+    }
+
+    const moneda = String(t.moneda || "C$").trim().toUpperCase();
+    if (moneda === "USD" || moneda === "$" || moneda === "US$") {
+      systemUsd += amount;
+    } else {
+      systemCs += amount;
+    }
+    countedTickets++;
+    if (key) countedIds.push(key);
+  }
+
+  systemCs = roundMoney(systemCs);
+  systemUsd = roundMoney(systemUsd);
+
+  const entregadoCs = roundMoney(Number(monto_entregado_cs) || 0);
+  const entregadoUsd = roundMoney(Number(monto_entregado_usd) || 0);
+
+  const descuadreCs = roundMoney(entregadoCs - systemCs);
+  const descuadreUsd = roundMoney(entregadoUsd - systemUsd);
 
   const cierreId = "cierre_" + Math.random().toString(36).substring(2, 9);
   const newCierre = {
     id: cierreId,
     id_vendedor,
     nombre_vendedor: user.nombre,
-    fecha: getLocalDateString(),
+    fecha,
     denominaciones,
     monto_entregado_cs: entregadoCs,
     monto_entregado_usd: entregadoUsd,
@@ -2996,23 +3402,49 @@ app.post("/api/cierres", requireAdmin, (req, res) => {
     monto_sistema_usd: systemUsd,
     descuadre_cs: descuadreCs,
     descuadre_usd: descuadreUsd,
+    tickets_contados: countedTickets,
+    ticket_ids: countedIds.slice(0, 100),
+    fuente: source,
     timestamp: getNicaraguaISOString()
   };
 
   db.cierres_caja.push(newCierre);
-  saveToDB();
+  await saveToDB({ cierres: [newCierre] });
+
+  process.stdout.write(
+    `[Cierre][CALC] instance=${INSTANCE_ID} vendedor=${id_vendedor} fecha=${fecha} fuente=${source} tickets=${countedTickets} anulados=${cancelledTickets} otros_vendedores=${otherSellerTickets} monto_cero=${zeroAmountTickets} sistema_C$=${systemCs} sistema_USD=${systemUsd} entregado_C$=${entregadoCs} entregado_USD=${entregadoUsd} descuadre_C$=${descuadreCs} descuadre_USD=${descuadreUsd}\n`
+  );
+
+  try {
+    const firestoreDb = getFirestoreInstance();
+    await firestoreDb.collection("logs_auditoria").add({
+      admin_id: sessionUser?.id || "",
+      accion: "CREATE_CIERRE",
+      id_cierre: cierreId,
+      id_vendedor,
+      fecha,
+      monto_sistema_cs: systemCs,
+      monto_sistema_usd: systemUsd,
+      tickets_contados: countedTickets,
+      fuente: source,
+      timestamp: getNicaraguaISOString()
+    });
+  } catch (err) {
+    console.error("[Audit Log] Error writing CREATE_CIERRE logs_auditoria:", err);
+  }
+
   res.status(201).json(newCierre);
 });
 
 // Marcar cierre como cobrado
-app.patch("/api/cierres/:id", (req, res) => {
+app.patch("/api/cierres/:id", checkAuth(["administrador", "supervisor"]), (req, res) => {
   const { id } = req.params;
   const cc = db.cierres_caja.find((c: any) => c.id === id);
   if (!cc) {
     return res.status(404).json({ error: "Cierre de caja no encontrado." });
   }
   cc.cobrado = true;
-  saveToDB();
+  saveToDB({ cierres: [cc] });
   res.json({ success: true, message: "Cierre marcado como cobrado exitosamente.", closure: cc });
 });
 
@@ -3041,7 +3473,7 @@ function getOrCreateResumenDiario(id_vendedor: string, nombre_vendedor: string, 
       timestamp_actualizacion: getNicaraguaISOString()
     };
     db.resumenes_diarios.push(resumen);
-    saveToDB();
+    saveToDB({ resumenes: [resumen] });
   }
   return resumen;
 }
@@ -3120,7 +3552,7 @@ app.post("/api/admin/backfill-resumenes", requireAdmin, (req, res) => {
     }
   }
 
-  saveToDB();
+  saveToDB({ resumenes: true });
   res.json({ success: true, message: `Migración completada. ${migrados} resúmenes diarios actualizados/creados.` });
 });
 
@@ -3142,6 +3574,7 @@ app.post("/api/cobros/:id/anular", requireAdmin, (req, res) => {
 
   // 2. Revertir los resumenes_diarios asociados
   let resumenesRevertidos = 0;
+  const resumenesAfectados: any[] = [];
   db.resumenes_diarios.forEach((r: any) => {
     if (r.id_cobro === id) {
       r.cierre = 'pendiente';
@@ -3151,19 +3584,22 @@ app.post("/api/cobros/:id/anular", requireAdmin, (req, res) => {
       delete r.procesado_por;
       r.timestamp_actualizacion = getNicaraguaISOString();
       resumenesRevertidos++;
+      resumenesAfectados.push(r);
     }
   });
 
   // 3. Anular pagos de comisión relacionados
   let comisionesAnuladas = 0;
+  const pagosAfectados: any[] = [];
   db.pagos_comision.forEach((p: any) => {
     if (p.id_cobro_relacionado === id && p.estado !== 'anulado') {
       p.estado = 'anulado';
       comisionesAnuladas++;
+      pagosAfectados.push(p);
     }
   });
 
-  saveToDB();
+  saveToDB({ cobrosAdmin: [cobro], resumenes: resumenesAfectados, pagosComision: pagosAfectados });
   res.json({
     success: true,
     message: "Cobro anulado exitosamente.",
@@ -3258,6 +3694,7 @@ app.post("/api/cobros/procesar", requireAdmin, (req, res) => {
 
   db.cobros_admin.push(nuevoCobro);
 
+  const resumenesAfectados: any[] = [];
   for (const dia of dias_cerrados) {
     let rd = db.resumenes_diarios.find((r: any) => r.id === dia.id);
     if (!rd) {
@@ -3270,9 +3707,10 @@ app.post("/api/cobros/procesar", requireAdmin, (req, res) => {
     rd.timestamp_cobro = timestamp;
     rd.procesado_por = procesadorId;
     rd.timestamp_actualizacion = timestamp;
+    resumenesAfectados.push(rd);
   }
 
-  saveToDB();
+  saveToDB({ cobrosAdmin: [nuevoCobro], resumenes: resumenesAfectados });
   res.json({ success: true, cobro: nuevoCobro });
 });
 
@@ -3292,7 +3730,7 @@ app.post("/api/pagos/registrar", requireAdmin, (req, res) => {
   };
 
   db.pagos_comision.push(nuevoPago);
-  saveToDB();
+  saveToDB({ pagosComision: [nuevoPago] });
   res.json({ success: true, pago: nuevoPago });
 });
 

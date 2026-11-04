@@ -50,6 +50,7 @@ import toast from "react-hot-toast";
 import { motion, AnimatePresence } from "framer-motion";
 import TicketPreviewModal from "./TicketPreviewModal";
 import AdminPanel from "./AdminPanel";
+import TicketEditSection from "./TicketEditSection";
 import { QrScannerModal } from "./QrScannerModal";
 import {
   ResponsiveContainer,
@@ -185,7 +186,7 @@ export default function AdminInterface({
   onDeleteUser,
   simulatedSupervisorId
 }: AdminInterfaceProps) {
-  const [activeSection, setActiveSection] = useState<"dashboard" | "cierres" | "config" | "usuarios" | "resultados" | "limites" | "reportes" | "finanzas" | "buscador" | "adminpanel">("dashboard");
+  const [activeSection, setActiveSection] = useState<"dashboard" | "cierres" | "config" | "usuarios" | "resultados" | "limites" | "reportes" | "finanzas" | "buscador" | "ticketedit" | "adminpanel">("dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Local form states
@@ -2007,6 +2008,18 @@ export default function AdminInterface({
               </button>
             )}
 
+            {((user.rol as string) === "admin" || (user.rol as string) === "admin_1" || (user.rol as string) === "administrador") && (
+              <button
+                id="sidebar-ticketedit"
+                onClick={() => { setActiveSection("ticketedit"); setAlertText(null); setSuccessText(null); setIsSidebarOpen(false); }}
+                className={`w-full flex items-center space-x-3 px-4 py-3.5 min-h-[44px] rounded-xl font-display font-bold text-xs uppercase tracking-wider transition-all text-left cursor-pointer ${activeSection === "ticketedit" ? "bg-white text-blue-900 shadow-md scale-102" : "hover:bg-blue-800 text-blue-100"
+                  }`}
+              >
+                <Edit2 className="w-4 h-4 stroke-[2]" />
+                <span>Edición de Ticket</span>
+              </button>
+            )}
+
             {((user.rol as string) === "administrador") && (
               <button
                 id="sidebar-adminpanel"
@@ -2067,6 +2080,7 @@ export default function AdminInterface({
                 {activeSection === "reportes" && "Reportería de Facturación General"}
                 {activeSection === "finanzas" && "Módulo de Finanzas y Cobros"}
                 {activeSection === "buscador" && "Buscador y Recuperación de Boletos"}
+                {activeSection === "ticketedit" && "Edición Rápida de Tickets"}
                 {activeSection === "adminpanel" && "Panel Modular Admin"}
               </h2>
               <p className="text-xs text-gray-500 font-sans mt-0.5 line-clamp-1">
@@ -2078,6 +2092,7 @@ export default function AdminInterface({
                 {activeSection === "reportes" && "Estadísticas y reportes de facturación detallada por vendedor, por número de juego, o general."}
                 {activeSection === "finanzas" && "Consultar balances de vendedores, aplicar cobros y registrar pagos de comisiones."}
                 {activeSection === "buscador" && "Localice boletos dañados mediante filtros optimizados y visualice su representación oficial."}
+                {activeSection === "ticketedit" && "Busque un ticket por su número y corrija la fecha/hora de emisión o la fecha de venta."}
                 {activeSection === "adminpanel" && "Gestión de Rescate de Boletos y Control Centralizado de Ingresos."}
               </p>
             </div>
@@ -4636,6 +4651,10 @@ export default function AdminInterface({
               </div>
             </div>
           </div>
+        )}
+
+        {activeSection === "ticketedit" && (
+          <TicketEditSection />
         )}
 
         {activeSection === "adminpanel" && (

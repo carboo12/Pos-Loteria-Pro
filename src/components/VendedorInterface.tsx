@@ -1061,11 +1061,40 @@ export default function VendedorInterface({
   const [declaradoCsManual, setDeclaradoCsManual] = useState<string>("");
   const [declaradoUsdManual, setDeclaradoUsdManual] = useState<string>("");
   const [cierreEnviado, setCierreEnviado] = useState(false);
+  const [todayTickets, setTodayTickets] = useState<Venta[]>([]);
 
   // Helper to format Date as YYYY-MM-DD in Nicaragua time
   const getTodayString = () => {
     return getLocalTodayStr();
   };
+
+  // Consulta dedicada SOLO a los tickets de hoy de este vendedor. El listener
+  // global de App.tsx está limitado a 500 tickets, por lo que en días de alta
+  // venta el total del cierre podía quedar incompleto en la UI y no coincidir
+  // con el total real que registra el servidor.
+  const todayKey = getTodayString();
+  useEffect(() => {
+    if (!user.id) {
+      setTodayTickets([]);
+      return;
+    }
+    const q = query(
+      collection(firestore, "tickets"),
+      where("id_vendedor", "==", user.id),
+      where("fecha_venta", "==", todayKey)
+    );
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        setTodayTickets(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Venta)));
+      },
+      (err) => {
+        console.error("[VendedorInterface] Error en tickets de hoy:", err);
+        setTodayTickets([]);
+      }
+    );
+    return () => unsubscribe();
+  }, [user.id, todayKey]);
 
   const [filterDate, setFilterDate] = useState<string>(getTodayString());
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -1200,10 +1229,31 @@ export default function VendedorInterface({
     });
   }, [allMySales, filterDate, searchQuery]);
 
-  // Calculations for current cashier (based on today's active sales)
-  const myTodaySales = allMySales.filter(s => getTicketDate(s) === getTodayString());
-  const systemCs = myTodaySales.filter(s => !s.anulado && s.moneda === "C$").reduce((sum, s) => sum + s.monto_pago, 0);
-  const systemUsd = myTodaySales.filter(s => !s.anulado && s.moneda === "USD").reduce((sum, s) => sum + s.monto_pago, 0);
+  // Calculations for current cashier (based on today's active sales).
+  // Se combinan los tickets del listener global (incluye legacy por nombre)
+  // con la consulta dedicada de hoy (sin límite de 500) para que el total
+  // mostrado coincida con el que calcula el servidor al registrar el cierre.
+  const cierreSales = useMemo(() => {
+    const byId = new Map<string, Venta>();
+    allMySales.forEach(s => byId.set(s.id, s));
+    todayTickets.forEach(t => byId.set(t.id, { ...(byId.get(t.id) || {}), ...t } as Venta));
+    return Array.from(byId.values());
+  }, [allMySales, todayTickets]);
+
+  const isActiveTicket = (s: Venta) => {
+    const estado = String(s.estado || "");
+    return !s.anulado && estado !== "anulado" && estado !== "cancelado";
+  };
+  const isUsdTicket = (s: Venta) =>
+    ["USD", "$", "US$"].includes(String(s.moneda || "").trim().toUpperCase());
+
+  const myTodaySales = cierreSales.filter(s => getTicketDate(s) === getTodayString());
+  const systemCs = myTodaySales
+    .filter(s => isActiveTicket(s) && !isUsdTicket(s) && getTicketAmount(s) > 0)
+    .reduce((sum, s) => sum + getTicketAmount(s), 0);
+  const systemUsd = myTodaySales
+    .filter(s => isActiveTicket(s) && isUsdTicket(s) && getTicketAmount(s) > 0)
+    .reduce((sum, s) => sum + getTicketAmount(s), 0);
 
   // Helper to format 24h string to standard AM/PM format
   const formatHourToAmPm = (timeStr: string): string => {
