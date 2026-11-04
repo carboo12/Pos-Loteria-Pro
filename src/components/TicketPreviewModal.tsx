@@ -3,7 +3,7 @@ import { useState, useRef, useCallback } from "react";
 import { toBlob } from "html-to-image";
 
 import { Venta, Configuracion } from "../types";
-import { toDateStr, parseISOTimeParts, getNicaraguaNow } from "../lib/date-utils";
+import { toDateStr, parseISOTimeParts, getNicaraguaNow, getTicketEmissionISOString } from "../lib/date-utils";
 import { calculatePrizeMultiplier } from "../lib/prize-utils";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -239,7 +239,7 @@ export default function TicketPreviewModal({ ticket, config, onClose, userRole =
 ${hasTitulo ? config.formato_ticket.titulo + "\n" : ""}${config.formato_ticket.ruc}
 --------------------------------
   TICKET: #${ticket.numero_ticket}
-  FECHA: ${formatTicketDate(ticket.timestamp_servidor)}
+  FECHA: ${formatTicketDate(getTicketEmissionISOString(ticket))}
   VENDEDOR: ${ticket.nombre_vendedor}
 ${ticket.nombre_cliente ? `  CLIENTE: ${ticket.nombre_cliente}\n` : ""}  --------------------------------
   JUEGO: ${formattedJuego.toUpperCase()}
@@ -266,7 +266,7 @@ ${config.formato_ticket.mensaje_pie}
 
     // Información del ticket
     t += `[L]TICKET: [R]#${ticket.numero_ticket}\n`;
-    t += `[L]FECHA: [R]${toDateStr(ticket.timestamp_servidor)}\n`;
+    t += `[L]FECHA: [R]${toDateStr(getTicketEmissionISOString(ticket))}\n`;
     t += `[L]VEND: ${ticket.nombre_vendedor || 'JOSE'} [R]CLI: ${ticket.nombre_cliente || 'GENERICO'}\n`;
     t += "[C]--------------------------------\n";
 
@@ -466,7 +466,7 @@ ${config.formato_ticket.mensaje_pie}
               )}
               <div className="flex justify-between">
                 <span>FECHA:</span>
-                <span className="text-black">{formatTicketDate(ticket.timestamp_servidor)}</span>
+                <span className="text-black">{formatTicketDate(getTicketEmissionISOString(ticket))}</span>
               </div>
               <div className="flex justify-between">
                 <span>VENDEDOR:</span>

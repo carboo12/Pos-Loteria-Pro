@@ -54,6 +54,8 @@ export default function TicketEditSection() {
   const [foundTicket, setFoundTicket] = useState<FoundTicket | null>(null);
   const [fechaEmision, setFechaEmision] = useState("");
   const [fechaVenta, setFechaVenta] = useState("");
+  const [originalFechaEmision, setOriginalFechaEmision] = useState("");
+  const [originalFechaVenta, setOriginalFechaVenta] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -61,6 +63,8 @@ export default function TicketEditSection() {
     setFoundTicket(null);
     setFechaEmision("");
     setFechaVenta("");
+    setOriginalFechaEmision("");
+    setOriginalFechaVenta("");
     setError(null);
     setSuccess(null);
   };
@@ -112,8 +116,12 @@ export default function TicketEditSection() {
 
       const data = snap.data() as any;
       setFoundTicket({ id: snap.id, data, matchedBy });
-      setFechaEmision(toDateTimeLocal(data.fecha_emision || data.timestamp_servidor));
-      setFechaVenta(toDateLocal(data.fecha_venta));
+      const emisionValue = toDateTimeLocal(data.fecha_emision || data.timestamp_servidor || data.timestamp);
+      const ventaValue = toDateLocal(data.fecha_venta);
+      setFechaEmision(emisionValue);
+      setFechaVenta(ventaValue);
+      setOriginalFechaEmision(emisionValue);
+      setOriginalFechaVenta(ventaValue);
     } catch (err: any) {
       console.error("[TicketEditSection] Error buscando ticket:", err);
       setError(err?.message || "Error al consultar el ticket en Firestore.");
@@ -124,7 +132,10 @@ export default function TicketEditSection() {
 
   const handleSave = async () => {
     if (!foundTicket) return;
-    if (!fechaEmision && !fechaVenta) {
+
+    const emissionChanged = !!fechaEmision && fechaEmision !== originalFechaEmision;
+    const saleDateChanged = !!fechaVenta && fechaVenta !== originalFechaVenta;
+    if (!emissionChanged && !saleDateChanged) {
       setError("Modifique al menos una de las fechas antes de guardar.");
       return;
     }
@@ -135,8 +146,20 @@ export default function TicketEditSection() {
 
     try {
       const updates: Record<string, string> = {};
-      if (fechaEmision) updates.fecha_emision = buildEmisionISO(fechaEmision);
-      if (fechaVenta) updates.fecha_venta = fechaVenta;
+
+      if (fechaEmision) {
+        const emissionISO = buildEmisionISO(fechaEmision);
+        updates.fecha_emision = emissionISO;
+        updates.timestamp_servidor = emissionISO;
+        updates.timestamp = emissionISO;
+        updates.created_at = emissionISO;
+      }
+
+      if (saleDateChanged) {
+        updates.fecha_venta = fechaVenta;
+      } else if (emissionChanged) {
+        updates.fecha_venta = fechaEmision.substring(0, 10);
+      }
 
       await updateDoc(doc(firestore, "tickets", foundTicket.id), updates);
 
@@ -144,6 +167,12 @@ export default function TicketEditSection() {
         ...foundTicket,
         data: { ...foundTicket.data, ...updates },
       });
+      setOriginalFechaEmision(fechaEmision);
+      setOriginalFechaVenta(updates.fecha_venta || fechaVenta);
+
+      window.dispatchEvent(
+        new CustomEvent("ticket-updated", { detail: { id: foundTicket.id, updates } })
+      );
 
       const message = `Ticket ${ticketNumber.trim().replace(/^#/, "")} actualizado correctamente.`;
       setSuccess(message);

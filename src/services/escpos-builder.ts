@@ -1,5 +1,5 @@
 import { Venta, Configuracion } from "../types";
-import { getNicaraguaISOString } from "../lib/date-utils";
+import { getTicketEmissionISOString } from "../lib/date-utils";
 
 export const ESCPOS = {
   INIT: [0x1B, 0x40],
@@ -427,9 +427,7 @@ export function ticketDataFromVenta(venta: Venta, config: Configuracion): Ticket
     ruc: sanitizeText(config.formato_ticket?.ruc || ""),
     direccion: undefined,
     numero_ticket: numTicket,
-    fecha_completa: sanitizeText(venta.timestamp_servidor
-      ? formatTicketDate(venta.timestamp_servidor)
-      : formatTicketDate(getNicaraguaISOString())),
+    fecha_completa: sanitizeText(formatTicketDate(getTicketEmissionISOString(venta))),
     vendedor: sanitizeText(venta.nombre_vendedor || ""),
     cliente: sanitizeText(venta.nombre_cliente || "GENERICO"),
     juego: sanitizeText(formatted.juego),

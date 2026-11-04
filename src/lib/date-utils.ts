@@ -79,6 +79,43 @@ export function getTicketDate(ticket: { fecha_venta?: string; timestamp_servidor
 }
 
 /**
+ * Returns the ticket EMISSION date as a JS Date.
+ * Single source of truth for "Fecha Emisión" across the admin search table,
+ * the ticket preview, and the thermal print. Priority matches the fields
+ * written by TicketEditSection: fecha_emision > timestamp_servidor > timestamp > fecha_venta.
+ */
+export function getTicketEmissionDate(ticket: {
+  fecha_emision?: unknown;
+  timestamp_servidor?: unknown;
+  timestamp?: unknown;
+  fecha_venta?: unknown;
+  [key: string]: unknown;
+}): Date {
+  if (!ticket) return new Date();
+  const candidates = [
+    ticket.fecha_emision,
+    ticket.timestamp_servidor,
+    ticket.timestamp,
+    ticket.fecha_venta,
+  ];
+  for (const raw of candidates) {
+    if (!raw) continue;
+    if (typeof raw === "string") {
+      const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (dateOnly) return new Date(+dateOnly[1], +dateOnly[2] - 1, +dateOnly[3]);
+    }
+    const d = toDateSafe(raw, new Date(NaN));
+    if (!isNaN(d.getTime())) return d;
+  }
+  return new Date();
+}
+
+/** Emission date normalized to an ISO string with Nicaragua offset (-06:00). */
+export function getTicketEmissionISOString(ticket: Parameters<typeof getTicketEmissionDate>[0]): string {
+  return getNicaraguaISOString(getTicketEmissionDate(ticket));
+}
+
+/**
  * Extract the monetary amount from a ticket, normalizing across field names and string values.
  * Priority: total_apostado (new) > monto_pago (legacy).
  */

@@ -39,7 +39,7 @@ import {
   Hash
 } from "lucide-react";
 import { Usuario, Configuracion, Venta, CierreCaja, Sorteo } from "../types";
-import { toDateStr, getTicketDate, getLocalTodayStr, getNicaraguaISOString, parseISOTimeParts, getNicaraguaNow } from "../lib/date-utils";
+import { toDateStr, getTicketDate, getLocalTodayStr, getNicaraguaISOString, parseISOTimeParts, getNicaraguaNow, getTicketEmissionISOString } from "../lib/date-utils";
 import { isJuega4, canonicalGameName } from "../lib/game-utils";
 
 import { useFacturacion } from "../hooks/useFacturacion";
@@ -763,6 +763,22 @@ export default function AdminInterface({
 
   // Ticket QR/ID Search states for Admin Dashboard
   const [activeTicket, setActiveTicket] = useState<Venta | null>(null);
+
+  useEffect(() => {
+    const handleTicketUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string; updates?: Record<string, unknown> }>).detail;
+      if (!detail?.id || !detail.updates) return;
+      const applyUpdates = (ticket: any) =>
+        ticket && (ticket.id === detail.id || ticket.numero_ticket === detail.id || ticket.id_ticket === detail.id)
+          ? { ...ticket, ...detail.updates }
+          : ticket;
+      setSearchResults((prev) => prev.map(applyUpdates));
+      setActiveTicket((prev) => applyUpdates(prev));
+    };
+    window.addEventListener("ticket-updated", handleTicketUpdated);
+    return () => window.removeEventListener("ticket-updated", handleTicketUpdated);
+  }, []);
+
   const [qrSearchInput, setQrSearchInput] = useState("");
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [qrSearchError, setQrSearchError] = useState<string | null>(null);
@@ -4607,7 +4623,13 @@ export default function AdminInterface({
                         const isAnulado = ticket.estado === "anulado" || ticket.anulado;
                         return (
                           <tr key={ticket.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                            <td className="p-3 text-gray-800 font-semibold">{ticket.timestamp_servidor ? new Date(ticket.timestamp_servidor).toLocaleString("es-NI") : ticket.fecha_venta}</td>
+                            <td className="p-3 text-gray-800 font-semibold">
+                              {(() => {
+                                const iso = getTicketEmissionISOString(ticket);
+                                const { year, month, day } = parseISOTimeParts(iso);
+                                return `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year} ${formatTo12HourTime(iso, false)}`;
+                              })()}
+                            </td>
                             <td className="p-3 text-gray-600 font-mono font-bold">{ticket.numero_ticket || ticket.id.substring(0, 8).toUpperCase()}</td>
                             <td className="p-3 font-bold text-blue-900">{ticket.nombre_vendedor}</td>
                             <td className="p-3 text-gray-700">
