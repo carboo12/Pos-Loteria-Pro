@@ -16,9 +16,13 @@ const SuspenseLoader = () => (
   </div>
 );
 
-import { auth, firestore } from "./lib/firebase";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import { collection, doc, onSnapshot, query, orderBy, limit } from "firebase/firestore";
+import { signOutUser } from "./services/authService";
+import { subscribeToAuthState } from "./services/authService";
+import { getGeneralConfig, subscribeToGeneralConfig, subscribeToResults } from "./services/configService";
+import { listRecentTickets, subscribeToTickets } from "./services/ticketService";
+import { listCashClosures, subscribeToCashClosures } from "./services/cashClosureService";
+import { changeUserPassword, createUser, deactivateUser, listUsers, subscribeToUsers, updateUser } from "./services/userService";
+import { isSupabaseEnabled } from "./lib/dataBackend";
 import { AlertTriangle, Lock, Sun } from "lucide-react";
 import { Toaster } from "react-hot-toast";
 
@@ -56,7 +60,7 @@ export default function App() {
 
   const fetchUsers = async () => {
     try {
-      const data = await safeFetchJson("/api/usuarios");
+      const data = await listUsers();
       setUsers(data);
       // Keep selected user reference in sync with latest fields (like activo, estado)
       if (currentUser) {
@@ -70,8 +74,8 @@ export default function App() {
 
   const fetchConfig = async () => {
     try {
-      const data = await safeFetchJson("/api/configuracion");
-      setConfig(data);
+      const data = await getGeneralConfig();
+      setConfig(prev => ({ ...prev, ...data } as Configuracion));
     } catch (e) {
       console.error("Error loading configuration:", e);
     }
@@ -79,8 +83,8 @@ export default function App() {
 
   const fetchSales = async () => {
     try {
-      const data = await safeFetchJson("/api/ventas");
-      setSales(data);
+      const data = await listRecentTickets(500);
+      setSales(data.map(ticket => ({ ...ticket.data, id: ticket.data.id || ticket.id })));
     } catch (e) {
       console.error("Error loading sales:", e);
     }
@@ -88,7 +92,7 @@ export default function App() {
 
   const fetchClosures = async () => {
     try {
-      const data = await safeFetchJson("/api/cierres");
+      const data = await listCashClosures();
       setClosures(data);
     } catch (e) {
       console.error("Error loading closures:", e);
@@ -106,6 +110,11 @@ export default function App() {
 
   // Attempt session rehydration from localStorage on mount
   useEffect(() => {
+    if (isSupabaseEnabled) {
+      localStorage.removeItem("localToken");
+      localStorage.removeItem("currentUser");
+      return;
+    }
     const token = localStorage.getItem("localToken");
     const storedUser = localStorage.getItem("currentUser");
     if (token && storedUser) {
@@ -140,8 +149,19 @@ export default function App() {
 
   // Listen to Firebase Auth state
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
+    const unsubscribe = subscribeToAuthState((fbUser) => {
       if (fbUser) {
+        if (isSupabaseEnabled) {
+          void listUsers().then((usersList) => {
+            setUsers(usersList);
+            const matched = usersList.find((candidate) => candidate.id === fbUser.uid);
+            if (matched) {
+              setCurrentUser(matched);
+              void Promise.all([fetchConfig(), fetchSales(), fetchClosures()]);
+            }
+          }).catch((error) => console.error("Error cargando perfil de Supabase:", error));
+          return;
+        }
         // Find user by email or UID
         const matched = users.find(
           (u) => u.email.toLowerCase() === fbUser.email?.toLowerCase() || u.id === fbUser.uid
@@ -163,52 +183,22 @@ export default function App() {
 
   // Listener 1: Tickets en tiempo real (limitado a los últimos 500 para máximo rendimiento móvil)
   useEffect(() => {
-    const ticketsQuery = query(
-      collection(firestore, "tickets"),
-      orderBy("timestamp_servidor", "desc"),
-      limit(500)
-    );
-
-    const unsubscribe = onSnapshot(
-      ticketsQuery,
-      (snapshot) => {
-        // Process only what actually changed — prevents re-inserting deleted tickets
-        let hasChanges = false;
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === "added" || change.type === "modified" || change.type === "removed") {
-            hasChanges = true;
-          }
-        });
-        // Rebuild full list from current snapshot (excludes deleted docs)
-        if (hasChanges) {
-          const ticketsList = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Venta));
-          setSales(ticketsList);
-        }
-      },
-      (err) => console.error("[onSnapshot tickets] Error:", err)
-    );
+    const unsubscribe = subscribeToTickets({ limit: 500 }, (tickets) => setSales(tickets.map(ticket => ({ ...ticket.data, id: ticket.data.id || ticket.id }))),
+      (err) => console.error("[tickets live] Error:", err));
     return () => unsubscribe();
   }, []);
 
   // Listener 2: Cierres de caja en tiempo real → setClosures
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(firestore, "cierres_caja"),
-      (snapshot) => {
-        const closuresList = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as CierreCaja));
-        setClosures(closuresList);
-      },
-      (err) => console.error("[onSnapshot cierres] Error:", err)
-    );
+    const unsubscribe = subscribeToCashClosures(setClosures, (err) => console.error("[cierres live] Error:", err));
     return () => unsubscribe();
   }, []);
 
   // Listener 3: Usuarios en tiempo real → setUsers
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(firestore, "usuarios"),
-      (snapshot) => {
-        const usersList = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Usuario));
+    if (isSupabaseEnabled && !currentUser) return;
+    const unsubscribe = subscribeToUsers(
+      (usersList) => {
         setUsers(usersList);
         setCurrentUser(prev => {
           if (!prev) return null;
@@ -216,24 +206,19 @@ export default function App() {
           return updated || prev;
         });
       },
-      (err) => console.error("[onSnapshot usuarios] Error:", err)
+      (err) => console.error("[users live] Error:", err)
     );
     return () => unsubscribe();
-  }, []);
+  }, [currentUser?.id]);
 
   // Listener 4: Configuración en tiempo real → setConfig
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      doc(firestore, "configuracion", "general"),
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data() as Configuracion;
-          setConfig(prev => ({
-            ...data,
-            resultados: prev?.resultados || data.resultados || []
-          }));
-        }
-      },
+    const unsubscribe = subscribeToGeneralConfig(
+      (data) => setConfig(prev => ({
+        ...prev,
+        ...data,
+        resultados: prev?.resultados || data.resultados || []
+      }) as Configuracion),
       (err) => console.error("[onSnapshot configuracion] Error:", err)
     );
     return () => unsubscribe();
@@ -241,11 +226,8 @@ export default function App() {
 
   // Listener 5: Resultados en tiempo real de Firestore → setConfig.resultados
   useEffect(() => {
-    const q = query(collection(firestore, "resultados"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const resultadosList = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    const unsubscribe = subscribeToResults(
+      (resultadosList) => {
         setConfig(prev => ({
           ...(prev || { sorteos: [] }),
           resultados: resultadosList as any
@@ -294,13 +276,8 @@ export default function App() {
 
   const handleUpdateUser = async (userId: string, updates: Partial<Usuario>) => {
     try {
-      const res = await fetch(`/api/usuarios/${userId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates)
-      });
-      if (res.ok) {
-        const updatedUser = await res.json();
+      const updatedUser = await updateUser(userId, updates);
+      if (updatedUser) {
         // Update users array
         setUsers(prev => prev.map(u => u.id === userId ? updatedUser : u));
         if (currentUser?.id === userId) {
@@ -316,17 +293,12 @@ export default function App() {
 
   const handleCreateUser = async (newUser: Omit<Usuario, "id" | "estado">) => {
     try {
-      const res = await fetch("/api/usuarios", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newUser)
-      });
-      if (res.ok) {
+      const result = await createUser(newUser as any);
+      if (result.success) {
         await fetchUsers();
         return { success: true, error: null };
       }
-      const body = await res.json().catch(() => ({}));
-      return { success: false, error: body.error || `Error del servidor (HTTP ${res.status})` };
+      return result;
     } catch (e: any) {
       console.error("Error creating user:", e);
       return { success: false, error: e.message || "Error de red al contactar el servidor" };
@@ -335,10 +307,8 @@ export default function App() {
 
   const handleDeleteUser = async (userId: string) => {
     try {
-      const res = await fetch(`/api/usuarios/${userId}`, {
-        method: "DELETE"
-      });
-      if (res.ok) {
+      const success = await deactivateUser(userId);
+      if (success) {
         await fetchUsers();
         return true;
       }
@@ -346,6 +316,16 @@ export default function App() {
       console.error("Error deleting user:", e);
     }
     return false;
+  };
+
+  const handleChangeUserPassword = async (userId: string, newPassword: string) => {
+    try {
+      await changeUserPassword(userId, newPassword);
+      return true;
+    } catch (error) {
+      console.error("Error actualizando contraseña:", error);
+      return false;
+    }
   };
 
   const handleNewSaleCreated = (newSale: Venta) => {
@@ -382,7 +362,7 @@ export default function App() {
         <RoleSelector config={config} 
           currentUser={currentUser} 
           onLogout={async () => {
-            await signOut(auth);
+            await signOutUser();
             setCurrentUser(null);
             localStorage.removeItem("localToken");
             localStorage.removeItem("currentUser");
@@ -434,6 +414,7 @@ export default function App() {
                 onUpdateUser={handleUpdateUser}
                 onCreateUser={handleCreateUser}
                 onDeleteUser={handleDeleteUser}
+                onChangeUserPassword={handleChangeUserPassword}
                 simulatedSupervisorId={simulatedSupervisorId}
               />
                 </Suspense>
@@ -479,8 +460,10 @@ export default function App() {
           <div className="flex-1 overflow-y-auto p-4 flex items-center justify-center">
             <Login config={config} users={users} onLoginSuccess={(u) => {
               setCurrentUser(u);
+              void fetchUsers();
+              if (isSupabaseEnabled) void Promise.all([fetchConfig(), fetchSales(), fetchClosures()]);
               // [FASE 3] Get or Create resumen_diario at startup
-              if (u.rol === 'vendedor') {
+              if (u.rol === 'vendedor' && !isSupabaseEnabled) {
                 fetch("/api/resumen-diario/init", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },

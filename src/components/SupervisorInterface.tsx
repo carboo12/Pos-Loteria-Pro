@@ -28,12 +28,11 @@ import {
 import { Usuario, Configuracion, Venta, CierreCaja, CobroVendedor } from "../types";
 import { toDateStr, getLocalTodayStr, getNicaraguaISOString, getNicaraguaNow } from "../lib/date-utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
-import { firestore } from "../lib/firebase";
 import FacturacionVendedorCard from "./FacturacionVendedorCard";
 import ResumenFacturacionCard from "./ResumenFacturacionCard";
 import LiveClock from "./LiveClock";
 import { useFacturacion } from "../hooks/useFacturacion";
+import { subscribeToTickets } from "../services/ticketService";
 
 const formatTo12HourTime = (dateInput: Date | string | number, includeSeconds: boolean = true): string => {
   try {
@@ -212,34 +211,10 @@ export default function SupervisorInterface({
   useEffect(() => {
     if (linkedSellersIds.length === 0) return;
 
-    // Firestore `in` supports up to 30 values. If more, fall back to polling.
-    const sellerSlice = linkedSellersIds.slice(0, 30);
-    const q = query(
-      collection(firestore, "tickets"),
-      where("id_vendedor", "in", sellerSlice)
-    );
-
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      // Explicitly handle docChanges to detect removals
-      let hasRemoved = false;
-      let hasOtherChanges = false;
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "removed") {
-          hasRemoved = true;
-        } else {
-          hasOtherChanges = true;
-        }
-      });
-
-      // Trigger a full re-sync from the global sales state (App.tsx handles the actual state update)
-      if (hasRemoved || hasOtherChanges) {
-        if (refreshTimeout) clearTimeout(refreshTimeout);
-        refreshTimeout = setTimeout(() => {
-          onRefreshSales();
-        }, 800);
-      }
+    const unsubscribe = subscribeToTickets({ sellerIds: linkedSellersIds.slice(0, 30) }, () => {
+      if (refreshTimeout) clearTimeout(refreshTimeout);
+      refreshTimeout = setTimeout(() => onRefreshSales(), 800);
     }, (err) => {
       console.error("Error in onSnapshot tickets (supervisor):", err);
     });

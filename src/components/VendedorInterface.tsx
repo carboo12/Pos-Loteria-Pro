@@ -41,6 +41,7 @@ import { useFacturacion } from "../hooks/useFacturacion";
 import { MAX_MONTO_POR_NUMERO_CS } from "../lib/prize-utils";
 import { collection, query, where, getDocs, doc, updateDoc, getDoc, onSnapshot, orderBy, limit } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
+import { subscribeToTickets } from "../services/ticketService";
 import { BluetoothPrinterService, PrinterStatus } from "../services/BluetoothPrinterService";
 import { buildTicketBuffer, ticketDataFromVenta, loadLogoBitmap } from "../services/escpos-builder";
 import { isSorteoHabilitado, getDiasHabilitadosShortLabel, isDateValidForSorteo, getNextValidDate } from "../lib/sorteo-utils";
@@ -819,30 +820,19 @@ export default function VendedorInterface({
   useEffect(() => {
     if (!user.id || !reportFilterFechaInicio || !reportFilterFechaFin) return;
     setReportLoading(true);
-    const q = query(
-      collection(firestore, "tickets"),
-      where("id_vendedor", "==", user.id),
-      where("fecha_venta", ">=", reportFilterFechaInicio),
-      where("fecha_venta", "<=", reportFilterFechaFin)
-    );
-
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      // Rebuild full list from current snapshot (excludes deleted docs)
-      const tickets = querySnapshot.docs.map(docVal => {
-        const data = docVal.data();
-        return {
-          id: docVal.id,
-          ...data,
-          fecha_emision_date: toDateSafe(data.timestamp_servidor || data.fecha_emision || data.fecha_venta)
-        };
-      });
+    const unsubscribe = subscribeToTickets({ sellerId: user.id, fechaInicio: reportFilterFechaInicio, fechaFin: reportFilterFechaFin }, (records) => {
+      const tickets = records.map(({ id, data }) => ({
+        ...data,
+        id: data.id || id,
+        fecha_emision_date: toDateSafe(data.timestamp_servidor || data.fecha_emision || data.fecha_venta)
+      }));
       // Sort descending by emission date/time
       tickets.sort((a, b) => b.fecha_emision_date.getTime() - a.fecha_emision_date.getTime());
       setReportTickets(tickets);
       setReportLoading(false);
     }, (err) => {
       console.error("Error in onSnapshot tickets:", err);
-      toast.error("Error de conexión en tiempo real con Firestore");
+      toast.error("Error de conexión en tiempo real con la base de datos");
       setReportLoading(false);
     });
 
@@ -1078,16 +1068,8 @@ export default function VendedorInterface({
       setTodayTickets([]);
       return;
     }
-    const q = query(
-      collection(firestore, "tickets"),
-      where("id_vendedor", "==", user.id),
-      where("fecha_venta", "==", todayKey)
-    );
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        setTodayTickets(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Venta)));
-      },
+    const unsubscribe = subscribeToTickets({ sellerId: user.id, fechaInicio: todayKey, fechaFin: todayKey },
+      (records) => setTodayTickets(records.map(({ id, data }) => ({ ...data, id: data.id || id } as Venta))),
       (err) => {
         console.error("[VendedorInterface] Error en tickets de hoy:", err);
         setTodayTickets([]);

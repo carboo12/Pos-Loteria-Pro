@@ -67,7 +67,7 @@ window.fetch = async (input, init) => {
   if (isForceLoggingOut) return response;
 
   // Si la respuesta es 401/403 en una petición autenticada → sesión muerta
-  if ((response.status === 401 || response.status === 403) && url.includes('/api/') && !url.includes('/api/login') && !url.includes('/api/auth/me') && !url.includes('/api/setup-admin') && !url.includes('/api/ping') && !url.includes('/api/reloj') && !url.includes('/api/notifications') && !url.includes('/api/usuarios')) {
+  if ((response.status === 401 || response.status === 403) && url.includes('/api/') && !url.includes('/api/supabase/') && !url.includes('/api/login') && !url.includes('/api/auth/me') && !url.includes('/api/setup-admin') && !url.includes('/api/ping') && !url.includes('/api/reloj') && !url.includes('/api/notifications') && !url.includes('/api/usuarios')) {
     console.warn(`[Auth] Sesión expirada o rechazada (${response.status}). Cerrando sesión...`);
     isForceLoggingOut = true;
     

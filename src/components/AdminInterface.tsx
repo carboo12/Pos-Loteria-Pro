@@ -1,6 +1,7 @@
 import { useState, useEffect, FormEvent, useMemo } from "react";
 import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy, serverTimestamp, onSnapshot, where, limit } from "firebase/firestore";
 import { firestore } from "../lib/firebase";
+import { subscribeToResults } from "../services/configService";
 import {
   LayoutDashboard,
   Users,
@@ -167,6 +168,7 @@ interface AdminInterfaceProps {
   onUpdateUser: (userId: string, updates: Partial<Usuario>) => Promise<boolean>;
   onCreateUser: (newUser: any) => Promise<{ success: boolean; error: string | null }>;
   onDeleteUser: (userId: string) => Promise<boolean>;
+  onChangeUserPassword: (userId: string, newPassword: string) => Promise<boolean>;
   simulatedSupervisorId?: string;
 }
 
@@ -184,6 +186,7 @@ export default function AdminInterface({
   onUpdateUser,
   onCreateUser,
   onDeleteUser,
+  onChangeUserPassword,
   simulatedSupervisorId
 }: AdminInterfaceProps) {
   const [activeSection, setActiveSection] = useState<"dashboard" | "cierres" | "config" | "usuarios" | "resultados" | "limites" | "reportes" | "finanzas" | "buscador" | "ticketedit" | "adminpanel">("dashboard");
@@ -204,7 +207,6 @@ export default function AdminInterface({
   const [editingUser, setEditingUser] = useState<Usuario | null>(null);
 
   const [userFormName, setUserFormName] = useState("");
-  const [userFormEmail, setUserFormEmail] = useState("");
   const [userFormUsername, setUserFormUsername] = useState("");
   const [userFormPassword, setUserFormPassword] = useState("");
   const [showUserFormPassword, setShowUserFormPassword] = useState(false);
@@ -219,6 +221,9 @@ export default function AdminInterface({
 
   // Deletion Custom Modal
   const [deletingUser, setDeletingUser] = useState<Usuario | null>(null);
+  const [passwordTargetUserId, setPasswordTargetUserId] = useState<string | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
 
   // Supervisor Assignment Interactive Panel
   const [selectedSupervisorForAssignment, setSelectedSupervisorForAssignment] = useState<Usuario | null>(null);
@@ -404,19 +409,7 @@ export default function AdminInterface({
   // Fetch lists
   // Real-time Firestore listener for resultados (handles added/modified/removed)
   useEffect(() => {
-    const q = query(collection(firestore, "resultados"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      let changed = false;
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "added" || change.type === "modified" || change.type === "removed") {
-          changed = true;
-        }
-      });
-      if (changed) {
-        const data = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setResultsList(data);
-      }
-    }, (err) => {
+    const unsubscribe = subscribeToResults((results) => setResultsList(results), (err) => {
       console.error("[onSnapshot resultados] Error:", err);
     });
     return () => unsubscribe();
@@ -1215,7 +1208,6 @@ export default function AdminInterface({
   const openCreateUserModal = () => {
     setEditingUser(null);
     setUserFormName("");
-    setUserFormEmail("");
     setUserFormUsername("");
     setUserFormPassword("");
     setShowUserFormPassword(false);
@@ -1230,7 +1222,6 @@ export default function AdminInterface({
   const openCreateAdminModal = () => {
     setEditingUser(null);
     setUserFormName("");
-    setUserFormEmail("");
     setUserFormUsername("");
     setUserFormPassword("");
     setShowUserFormPassword(false);
@@ -1245,7 +1236,6 @@ export default function AdminInterface({
   const openEditUserModal = (targetUser: Usuario) => {
     setEditingUser(targetUser);
     setUserFormName(targetUser.nombre);
-    setUserFormEmail(targetUser.email);
     setUserFormUsername(targetUser.usuario || "");
     setUserFormPassword("");
     setShowUserFormPassword(false);
@@ -1262,8 +1252,8 @@ export default function AdminInterface({
     setAlertText(null);
     setSuccessText(null);
 
-    if (!userFormName.trim() || !userFormEmail.trim() || !userFormUsername.trim()) {
-      setAlertText("Por favor complete todos los campos obligatorios: Nombre, Nickname (usuario) y Correo Electrónico.");
+    if (!userFormName.trim() || !userFormUsername.trim()) {
+      setAlertText("Por favor complete el nombre y el nombre de usuario.");
       return;
     }
 
@@ -1277,7 +1267,7 @@ export default function AdminInterface({
       nombre: userFormName.trim(),
       usuario: userFormUsername.trim().toLowerCase(),
       rol: userFormRole,
-      email: userFormEmail.trim(),
+      email: `${userFormUsername.trim().toLowerCase()}@app.local`,
       estado: userFormStatus,
       activo: userFormStatus === "activo",
       region: userFormRegion,
@@ -1310,6 +1300,26 @@ export default function AdminInterface({
       } else {
         setAlertText(result.error || "Ocurrió un error al guardar el usuario.");
       }
+    }
+  };
+
+  const handleSaveUserPassword = async (e: FormEvent, targetUser: Usuario) => {
+    e.preventDefault();
+    if (passwordDraft.length < 8) {
+      toast.error("La contraseña debe tener al menos 8 caracteres.");
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      const saved = await onChangeUserPassword(targetUser.id, passwordDraft);
+      if (!saved) throw new Error("No se pudo actualizar la contraseña.");
+      toast.success(`Contraseña de @${targetUser.usuario} actualizada.`);
+      setPasswordTargetUserId(null);
+      setPasswordDraft("");
+    } catch (error: any) {
+      toast.error(error?.message || "No se pudo actualizar la contraseña.");
+    } finally {
+      setPasswordSaving(false);
     }
   };
 
@@ -3138,9 +3148,7 @@ export default function AdminInterface({
                             </div>
 
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 font-sans">
-                              <span className="font-mono font-bold text-blue-950">@{u.usuario || u.email.split("@")[0]}</span>
-                              <span className="text-gray-300">|</span>
-                              <span className="font-mono">{u.email}</span>
+                              <span className="font-mono font-bold text-blue-950">@{u.usuario || "sin-username"}</span>
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -3176,6 +3184,14 @@ export default function AdminInterface({
 
                           {/* Right Controls */}
                           <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 shrink-0 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100">
+                            <button
+                              onClick={() => { setPasswordTargetUserId(passwordTargetUserId === u.id ? null : u.id); setPasswordDraft(""); }}
+                              className="px-3 py-2 min-h-[44px] flex items-center justify-center gap-1.5 rounded-lg text-[10px] font-bold uppercase border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 cursor-pointer"
+                              title="Cambiar contraseña desde el panel"
+                            >
+                              <Lock className="w-3.5 h-3.5" />
+                              <span>Contraseña</span>
+                            </button>
                             {/* Manage Team Button (Only for Supervisors) */}
                             {isSupervisor && (
                               <button
@@ -3234,6 +3250,26 @@ export default function AdminInterface({
                               </button>
                             )}
                           </div>
+                          {passwordTargetUserId === u.id && (
+                            <form onSubmit={(event) => void handleSaveUserPassword(event, u)} className="w-full flex flex-col sm:flex-row gap-2 pt-3 border-t border-amber-100">
+                              <label className="sr-only" htmlFor={`new-password-${u.id}`}>Nueva contraseña para {u.usuario}</label>
+                              <input
+                                id={`new-password-${u.id}`}
+                                type="password"
+                                autoComplete="new-password"
+                                minLength={8}
+                                required
+                                value={passwordDraft}
+                                onChange={(event) => setPasswordDraft(event.target.value)}
+                                placeholder="Nueva contraseña (mínimo 8 caracteres)"
+                                className="flex-1 px-3 py-2 min-h-[44px] rounded-lg border border-amber-200 bg-white text-sm"
+                              />
+                              <button disabled={passwordSaving} className="px-4 py-2 min-h-[44px] rounded-lg bg-amber-700 text-white text-xs font-bold disabled:opacity-50">
+                                {passwordSaving ? "Guardando…" : "Guardar contraseña"}
+                              </button>
+                              <button type="button" onClick={() => { setPasswordTargetUserId(null); setPasswordDraft(""); }} className="px-3 py-2 min-h-[44px] rounded-lg border border-gray-200 text-xs font-bold">Cancelar</button>
+                            </form>
+                          )}
                         </div>
                       );
                     })}
@@ -4823,29 +4859,18 @@ export default function AdminInterface({
                 </span>
               </div>
 
-              {/* Email */}
-              <div>
-                <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">Correo Electrónico *</label>
-                <input
-                  type="email"
-                  required
-                  placeholder="e.g. juan@empresa.com"
-                  value={userFormEmail}
-                  onChange={(e) => setUserFormEmail(e.target.value)}
-                  className="w-full px-4 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-blue-900 focus:bg-white transition-all font-mono"
-                />
-              </div>
-
               {/* Password */}
-              <div>
+              {!editingUser && <div>
                 <label className="block text-xs font-display font-black text-gray-700 uppercase tracking-wider mb-1">
-                  {editingUser ? "Contraseña (Opcional)" : "Contraseña de Acceso *"}
+                  Contraseña de Acceso *
                 </label>
                 <div className="relative">
                   <input
                     type={showUserFormPassword ? "text" : "password"}
-                    required={!editingUser}
-                    placeholder={editingUser ? "Dejar en blanco para no modificar" : "Mínimo 6 caracteres"}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                    placeholder="Mínimo 8 caracteres"
                     value={userFormPassword}
                     onChange={(e) => setUserFormPassword(e.target.value)}
                     className="w-full pl-4 pr-11 py-2.5 min-h-[44px] bg-gray-50 border border-gray-300 rounded-xl font-sans text-xs font-bold text-gray-900 focus:outline-none focus:border-blue-900 focus:bg-white transition-all font-mono"
@@ -4858,7 +4883,7 @@ export default function AdminInterface({
                     {showUserFormPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
                   </button>
                 </div>
-              </div>
+              </div>}
 
               {/* Roles selection */}
               <div>

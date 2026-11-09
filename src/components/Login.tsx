@@ -4,7 +4,6 @@ import { Usuario } from "../types";
 import toast from "react-hot-toast";
 import { 
   Lock, 
-  Mail, 
   Eye, 
   EyeOff, 
   Sun, 
@@ -16,6 +15,7 @@ import {
   Copy 
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { signInWithUsername } from "../services/authService";
 
 interface LoginProps {
   config?: any;
@@ -24,7 +24,7 @@ interface LoginProps {
 }
 
 export default function Login({ users, onLoginSuccess, config }: LoginProps) {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -32,37 +32,9 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
   const [showDemoAccounts, setShowDemoAccounts] = useState(true);
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
-  const [setupLoading, setSetupLoading] = useState(false);
-  const [setupSuccessMsg, setSetupSuccessMsg] = useState<string | null>(null);
-
-    const handleSetupAdmin = async () => {
-    setSetupLoading(true);
-    setError(null);
-    setSetupSuccessMsg(null);
-    try {
-      const res = await fetch("/api/setup-admin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSetupSuccessMsg(`¡Inicialización exitosa! ${data.fbStatus}`);
-        // setEmail("carboo12@gmail.com");
-        // setPassword("Loto123456!");
-      } else {
-        setError(data.message || "Error al inicializar el usuario administrador.");
-      }
-    } catch (err) {
-      console.error(err);
-      setError("Error de comunicación con el servidor al inicializar.");
-    } finally {
-      setSetupLoading(false);
-    }
-  };
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
+    if (!username || !password) {
       setError("Por favor complete todos los campos.");
       return;
     }
@@ -71,37 +43,11 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
     setError(null);
 
     try {
-      // 1. Autenticar contra el backend (bcrypt)
-      const res = await fetch("/api/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ email: email.trim(), password })
-      });
-
-      // 1. Validar primero si la respuesta es correcta de manera segura
-      if (!res.ok) {
-        const textError = await res.text();
-        let errorMessage = "Ocurrió un error en la autenticación.";
-        try {
-          const jsonError = JSON.parse(textError);
-          errorMessage = jsonError.error || errorMessage;
-        } catch {
-          errorMessage = textError || errorMessage;
-        }
-        throw new Error(errorMessage);
-      }
-
-      // 2. Si la respuesta es OK, procesar el JSON con seguridad
-      const data = await res.json();
-
-      // 2. Extraer el perfil seguro y redirigir
-      const matchedUser = data.user;
-      
-      if (data.localToken) {
-        localStorage.setItem("localToken", data.localToken);
-      }
+      const result = await signInWithUsername(username, password);
+      const matchedUser = result.profile as unknown as Usuario | null;
+      if (!matchedUser) throw new Error("No se encontró el perfil del usuario autenticado.");
+      if (result.localToken) localStorage.setItem("localToken", result.localToken);
+      else localStorage.removeItem("localToken");
       localStorage.setItem("currentUser", JSON.stringify(matchedUser));
       
       toast.success(`¡Bienvenido de nuevo, ${matchedUser.nombre}!`, { position: 'top-center' });
@@ -121,8 +67,8 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
     }
   };
 
-  const fillCredentials = (demoEmail: string) => {
-    setEmail(demoEmail);
+  const fillCredentials = (demoUsername: string) => {
+    setUsername(demoUsername);
     // setPassword("Loto123456!");
     setError(null);
   };
@@ -171,19 +117,20 @@ export default function Login({ users, onLoginSuccess, config }: LoginProps) {
         )}
 
         <form onSubmit={handleLogin} className="space-y-5">
-          {/* Email Input */}
+          {/* Username Input */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block">
-              Correo Electrónico
+              Nombre de Usuario
             </label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
-                type="email"
+                type="text"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="usuario@loteria.com"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                placeholder="nombredeusuario"
                 className="w-full pl-10 pr-4 py-3 min-h-[44px] bg-gray-50 border border-gray-200 rounded-xl text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
               />
             </div>

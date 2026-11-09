@@ -1,15 +1,5 @@
 import { useState } from "react";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  query,
-  updateDoc,
-  where,
-} from "firebase/firestore";
-import { firestore } from "../lib/firebase";
+import { findTicketByPublicId, updateTicketByDocumentId } from "../services/ticketService";
 import { getTicketDate, toDateSafe } from "../lib/date-utils";
 import { AlertCircle, CalendarClock, CheckCircle, Edit2, Hash, Loader2, Save, Search } from "lucide-react";
 import toast from "react-hot-toast";
@@ -80,42 +70,14 @@ export default function TicketEditSection() {
     resetResult();
 
     try {
-      let snap: any = null;
-      let matchedBy = "";
-
-      const directSnap = await getDoc(doc(firestore, "tickets", cleanNum));
-      if (directSnap.exists()) {
-        snap = directSnap;
-        matchedBy = "ID de documento";
-      }
-
-      if (!snap) {
-        const byIdTicket = await getDocs(
-          query(collection(firestore, "tickets"), where("id_ticket", "==", cleanNum), limit(1))
-        );
-        if (!byIdTicket.empty) {
-          snap = byIdTicket.docs[0];
-          matchedBy = "campo id_ticket";
-        }
-      }
-
-      if (!snap) {
-        const byNumeroTicket = await getDocs(
-          query(collection(firestore, "tickets"), where("numero_ticket", "==", cleanNum), limit(1))
-        );
-        if (!byNumeroTicket.empty) {
-          snap = byNumeroTicket.docs[0];
-          matchedBy = "campo numero_ticket";
-        }
-      }
-
-      if (!snap) {
+      const record = await findTicketByPublicId(cleanNum);
+      if (!record) {
         setError(`No se encontró ningún ticket con número "${cleanNum}".`);
         return;
       }
 
-      const data = snap.data() as any;
-      setFoundTicket({ id: snap.id, data, matchedBy });
+      const { id, data } = record;
+      setFoundTicket({ id, data, matchedBy: id === cleanNum ? "ID de documento" : "id_ticket / numero_ticket" });
       const emisionValue = toDateTimeLocal(data.fecha_emision || data.timestamp_servidor || data.timestamp);
       const ventaValue = toDateLocal(data.fecha_venta);
       setFechaEmision(emisionValue);
@@ -161,7 +123,7 @@ export default function TicketEditSection() {
         updates.fecha_venta = fechaEmision.substring(0, 10);
       }
 
-      await updateDoc(doc(firestore, "tickets", foundTicket.id), updates);
+      await updateTicketByDocumentId(foundTicket.id, updates);
 
       setFoundTicket({
         ...foundTicket,

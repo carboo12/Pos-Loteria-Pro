@@ -8,6 +8,7 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { createRequire } from "node:module";
 import dotenv from "dotenv";
+import { createClient } from "@supabase/supabase-js";
 
 // ─── ENVIRONMENT: load .env.local ONLY for local development ────────
 // App Hosting inyecta FIREBASE_CONFIG_JSON via Secret Manager — NO usa archivos.
@@ -39,6 +40,12 @@ if (!firebaseAdmin) {
 
 const app = express();
 const activePaymentLocks = new Set<string>();
+const getSupabaseAdminClient = () => {
+  const url = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRoleKey) return null;
+  return createClient(url, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
+};
 
 // Identificador de instancia para rastrear en logs qué proceso escribe/lee.
 // App Hosting puede tener varias instancias simultáneas (maxInstances: 2).
@@ -233,6 +240,26 @@ function checkAuth(allowedRoles?: string[]) {
 }
 
 const requireAdmin = checkAuth(["administrador"]);
+
+const requireSupabaseAdmin: express.RequestHandler = async (req, res, next) => {
+  const client = getSupabaseAdminClient();
+  if (!client) return res.status(503).json({ error: "La administración de Supabase no está configurada en el servidor." });
+  const token = req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.slice(7) : "";
+  if (!token) return res.status(401).json({ error: "Sesión de Supabase requerida." });
+  try {
+    const { data: { user }, error: authError } = await client.auth.getUser(token);
+    if (authError || !user) return res.status(401).json({ error: "Sesión de Supabase inválida o expirada." });
+    const { data: profile, error: profileError } = await client.from("profiles").select("rol,estado").eq("id", user.id).single();
+    if (profileError || !profile || profile.estado !== "activo") return res.status(403).json({ error: "Perfil administrativo inactivo o no disponible." });
+    if (!["admin", "administrador"].includes(profile.rol)) return res.status(403).json({ error: "Se requiere rol de administrador." });
+    (req as any).supabaseAdminClient = client;
+    (req as any).supabaseActor = user;
+    return next();
+  } catch (error) {
+    console.error("[Supabase Admin] Error validando sesión:", error);
+    return res.status(500).json({ error: "No se pudo validar la sesión administrativa." });
+  }
+};
 
 
 
@@ -1081,7 +1108,8 @@ app.get("/api/reloj", (req, res) => {
 // ─── LOGIN ENDPOINT (Firestore-direct con logs garantizados) ──────────
 app.post("/api/login", async (req, res) => {
   const ts = getNicaraguaISOString();
-  const { email, password } = req.body || {};
+  const { username, password } = req.body || {};
+  const loginName = String(username || "").trim();
 
   // Logs con process.stdout.write para garantizar que aparecen en Cloud Logging
   const log = (msg: string) => {
@@ -1091,14 +1119,14 @@ app.post("/api/login", async (req, res) => {
   };
 
   log(`════════════════════════════════════════`);
-  log(`Buscando en colección: 'usuarios', email: "${email}"`);
+  log(`Buscando en colección: 'usuarios', username: "${loginName}"`);
 
-  if (!email || !password) {
-    log(`RECHAZADO 400: campos vacíos (email=${!!email}, password=${!!password})`);
-    return res.status(400).json({ error: "Email y contraseña son requeridos." });
+  if (!loginName || !password) {
+    log(`RECHAZADO 400: campos vacíos (username=${!!loginName}, password=${!!password})`);
+    return res.status(400).json({ error: "Nombre de usuario y contraseña son requeridos." });
   }
 
-  const emailLower = email.toLowerCase().trim();
+  const usernameLower = loginName.toLowerCase();
 
   // ─── PASO 1: Intentar Firebase Admin ──────────────────────────────
   const adminReady = initFirebaseAdmin();
@@ -1111,39 +1139,18 @@ app.post("/api/login", async (req, res) => {
     return res.status(503).json({ error: "Servidor sin conexión a base de datos. Contacte al administrador." });
   }
 
-  // ─── PASO 2: Buscar en Firestore por campo 'email' ───────────────
+  // ─── PASO 2: Buscar exclusivamente por username ───────────────────
   const firestoreDb = getFirestoreInstance();
   let userDoc: any = null;
   let user: any = null;
-  let sourceField = "";
 
   try {
-    log(`Consultando Firestore: collection('usuarios').where('email','==','${emailLower}')`);
-    const byEmail = await firestoreDb.collection('usuarios').where('email', '==', emailLower).get();
-    log(`¿Documento encontrado?: ${!byEmail.empty} (${byEmail.size} resultado(s))`);
-
-    if (!byEmail.empty) {
-      userDoc = byEmail.docs[0];
-      sourceField = "email";
-    }
+    log(`Consultando Firestore por username.`);
+    const byUsuario = await firestoreDb.collection("usuarios").where("usuario", "==", usernameLower).get();
+    log(`¿Documento encontrado?: ${!byUsuario.empty} (${byUsuario.size} resultado(s))`);
+    if (!byUsuario.empty) userDoc = byUsuario.docs[0];
   } catch (err: any) {
-    log(`ERROR en query Firestore (email): ${err.message}`);
-  }
-
-  // ─── PASO 3: Si no encontró por email, buscar por campo 'usuario' ─
-  if (!userDoc) {
-    try {
-      log(`Consultando Firestore: collection('usuarios').where('usuario','==','${emailLower}')`);
-      const byUsuario = await firestoreDb.collection('usuarios').where('usuario', '==', emailLower).get();
-      log(`¿Documento encontrado?: ${!byUsuario.empty} (${byUsuario.size} resultado(s))`);
-
-      if (!byUsuario.empty) {
-        userDoc = byUsuario.docs[0];
-        sourceField = "usuario";
-      }
-    } catch (err: any) {
-      log(`ERROR en query Firestore (usuario): ${err.message}`);
-    }
+    log(`ERROR en query Firestore (username): ${err.message}`);
   }
 
   // ─── PASO 4: Listar todos los documentos para diagnóstico ─────────
@@ -1154,7 +1161,7 @@ app.post("/api/login", async (req, res) => {
       log(`Total documentos en colección 'usuarios': ${allDocs.size}`);
       allDocs.forEach((d: any) => {
         const data = d.data();
-        log(`  → doc ${d.id}: email="${data.email || "N/A"}", usuario="${data.usuario || "N/A"}", activo=${data.activo}, password=${data.password ? "SÍ" : "NO"}`);
+        log(`  → doc ${d.id}: username="${data.usuario || "N/A"}", activo=${data.activo}, password=${data.password ? "SÍ" : "NO"}`);
       });
     } catch (err: any) {
       log(`ERROR listando documentos: ${err.message}`);
@@ -1165,8 +1172,9 @@ app.post("/api/login", async (req, res) => {
 
   // ─── PASO 5: Usuario encontrado — preparar datos ─────────────────
   user = { id: userDoc.id, ...userDoc.data() };
-  log(`Usuario encontrado. Validando password...`);
-  log(`Estructura de usuario recibida: ${JSON.stringify({ ...user, password: "***" })}`);
+  const storedEmail = user.email;
+  user.email = `${String(user.usuario || "").toLowerCase()}@app.local`;
+  log(`Usuario encontrado (@${user.usuario}). Validando contraseña...`);
 
   if (!user.activo) {
     log(`USUARIO DESACTIVADO (activo=false) → 403`);
@@ -1183,14 +1191,14 @@ app.post("/api/login", async (req, res) => {
   }
 
   const isBcrypt = user.password.startsWith("$2");
-  log(`Hash stored: "${user.password.substring(0, 24)}..." (len=${user.password.length}, tipo=${isBcrypt ? "bcrypt" : "texto_plano"})`);
+  log(`Contraseña almacenada: ${isBcrypt ? "hash bcrypt" : "formato legado"}`);
 
   let isMatch = false;
   let wasPlaintext = false;
 
   if (isBcrypt) {
     isMatch = bcrypt.compareSync(password, user.password);
-    log(`bcrypt.compareSync("${password}", "${user.password.substring(0, 20)}...") → ${isMatch}`);
+    log(`Comparación bcrypt completada → ${isMatch}`);
   } else {
     isMatch = user.password === password;
     wasPlaintext = isMatch;
@@ -1201,6 +1209,12 @@ app.post("/api/login", async (req, res) => {
     log(`Error: La comparación de password devolvió false.`);
     log(`════════════════════════════════════════`);
     return res.status(401).json({ error: "Credenciales incorrectas." });
+  }
+
+  if (storedEmail !== user.email) {
+    await firestoreDb.collection("usuarios").doc(user.id).update({ email: user.email }).catch((error: any) => {
+      log(`No se pudo normalizar el correo interno legado: ${error?.message || error}`);
+    });
   }
 
   // ─── PASO 7: Migración texto plano → bcrypt ──────────────────────
@@ -1228,7 +1242,7 @@ app.post("/api/login", async (req, res) => {
   }
 
   const sessionToken = createSession(safeUser);
-  log(`LOGIN EXITOSO → id=${user.id}, email=${user.email}, rol=${user.rol}`);
+  log(`LOGIN EXITOSO → id=${user.id}, username=@${user.usuario}, rol=${user.rol}`);
   log(`════════════════════════════════════════`);
 
   res.json({ success: true, user: safeUser, localToken: sessionToken, message: "Autenticación exitosa" });
@@ -1263,10 +1277,10 @@ app.get("/api/auth/me", checkAuth(), (req, res) => {
 // Registro protegido — solo administradores pueden crear usuarios
 app.post("/api/auth/register", requireAdmin, async (req, res) => {
   try {
-    const { nombre, usuario, email, password, rol, region, id_supervisor } = req.body;
+    const { nombre, usuario, password, rol, region, id_supervisor } = req.body;
 
-    if (!nombre || !usuario || !email || !password) {
-      return res.status(400).json({ error: "Nombre, usuario, email y contraseña son requeridos." });
+    if (!nombre || !usuario || !password) {
+      return res.status(400).json({ error: "Nombre, usuario y contraseña son requeridos." });
     }
 
     if (password.length < 6) {
@@ -1276,10 +1290,6 @@ app.post("/api/auth/register", requireAdmin, async (req, res) => {
     const usernameLower = usuario.trim().toLowerCase();
     if (db.usuarios.some((u: any) => u.usuario.toLowerCase() === usernameLower)) {
       return res.status(400).json({ error: `El nickname "${usuario}" ya está en uso.` });
-    }
-
-    if (db.usuarios.some((u: any) => u.email && u.email.toLowerCase() === email.trim().toLowerCase())) {
-      return res.status(400).json({ error: `El email "${email}" ya está registrado.` });
     }
 
     const prefix = "U-";
@@ -1296,7 +1306,7 @@ app.post("/api/auth/register", requireAdmin, async (req, res) => {
       nombre: nombre.trim(),
       usuario: usernameLower,
       rol: resolvedRol,
-      email: email.trim(),
+      email: `${usernameLower}@app.local`,
       password: bcrypt.hashSync(password, 10),
       estado: "activo" as const,
       conexion: "offline" as const,
@@ -1395,7 +1405,7 @@ app.post("/api/setup-admin", async (req, res) => {
     return res.status(403).json({ success: false, message: "Ya existe un administrador en el sistema." });
   }
 
-  const adminEmail = req.body.email || "admin@sistema.com";
+  const adminEmail = "admin@app.local";
   const adminPassword = req.body.password || "Admin123456!";
 
   let userInDb = db.usuarios.find((u: any) => u.email.toLowerCase() === adminEmail.toLowerCase());
@@ -1429,18 +1439,144 @@ app.post("/api/setup-admin", async (req, res) => {
 });
 
 // Users
+app.get("/api/supabase/admin/users", requireSupabaseAdmin, async (req, res) => {
+  const client = (req as any).supabaseAdminClient;
+  const { data: profiles, error } = await client.from("profiles").select("*").order("nombre");
+  if (error) return res.status(500).json({ error: "No se pudo cargar el directorio de usuarios." });
+  const users = (profiles || []).map((profile: any) => ({
+    id: profile.id, nombre: profile.nombre, usuario: profile.usuario, rol: profile.rol,
+    estado: profile.estado, activo: profile.estado === "activo", conexion: "offline",
+    region: profile.region, email: profile.email, id_supervisor: profile.id_supervisor || "",
+    vendedoresAsignados: (profiles || []).filter((seller: any) => seller.id_supervisor === profile.id).map((seller: any) => seller.id),
+  }));
+  return res.json(users);
+});
+
+app.post("/api/supabase/admin/users", requireSupabaseAdmin, async (req, res) => {
+  const client = (req as any).supabaseAdminClient;
+  const { nombre, usuario, username, rol, region, password, estado, id_supervisor, vendedoresAsignados } = req.body || {};
+  const usernameLower = String(username || usuario || "").trim().toLowerCase();
+  const internalEmail = `${usernameLower}@app.local`;
+  const allowedRoles = ["vendedor", "supervisor", "administrador", "admin"];
+  const allowedRegions = ["Nicaragua", "Costa Rica", "Honduras", "El Salvador"];
+  if (!nombre || !/^[a-z0-9_]{2,40}$/.test(usernameLower) || !allowedRoles.includes(rol) || !allowedRegions.includes(region) || typeof password !== "string" || password.length < 8) {
+    return res.status(400).json({ error: "Nombre, username válido, rol, región y contraseña de al menos 8 caracteres son requeridos." });
+  }
+  const { data: duplicate } = await client.from("profiles").select("id").eq("usuario", usernameLower).maybeSingle();
+  if (duplicate) return res.status(409).json({ error: "Ese nombre de usuario ya está registrado." });
+  const { data: created, error: authError } = await client.auth.admin.createUser({
+    email: internalEmail, password, email_confirm: true, user_metadata: { username: usernameLower },
+  });
+  if (authError || !created.user) return res.status(400).json({ error: authError?.message || "No se pudo crear la cuenta." });
+  const normalizedRole = rol === "admin" ? "admin" : rol;
+  const profile = {
+    id: created.user.id, nombre: String(nombre).trim(), usuario: usernameLower,
+    rol: normalizedRole, estado: estado === "inactivo" ? "inactivo" : "activo",
+    region, email: internalEmail, id_supervisor: id_supervisor || null,
+  };
+  const { data: saved, error: profileError } = await client.from("profiles").insert(profile).select("*").single();
+  if (profileError) {
+    await client.auth.admin.deleteUser(created.user.id);
+    return res.status(400).json({ error: profileError.message });
+  }
+  if (normalizedRole === "supervisor" && Array.isArray(vendedoresAsignados) && vendedoresAsignados.length) {
+    await client.from("profiles").update({ id_supervisor: saved.id }).in("id", vendedoresAsignados).eq("rol", "vendedor");
+  }
+  return res.status(201).json({
+    id: saved.id, nombre: saved.nombre, usuario: saved.usuario, rol: saved.rol, estado: saved.estado,
+    activo: saved.estado === "activo", conexion: "offline", region: saved.region, email: saved.email,
+    id_supervisor: saved.id_supervisor || "", vendedoresAsignados: vendedoresAsignados || [],
+  });
+});
+
+app.put("/api/supabase/admin/users/:id", requireSupabaseAdmin, async (req, res) => {
+  const client = (req as any).supabaseAdminClient;
+  const { id } = req.params;
+  const { data: existing, error: lookupError } = await client.from("profiles").select("*").eq("id", id).single();
+  if (lookupError || !existing) return res.status(404).json({ error: "Usuario no encontrado." });
+  const body = req.body || {};
+  const patch: Record<string, any> = {};
+  if (body.nombre !== undefined) patch.nombre = String(body.nombre).trim();
+  if (body.rol !== undefined && ["vendedor", "supervisor", "administrador", "admin"].includes(body.rol)) patch.rol = body.rol;
+  if (body.estado !== undefined) patch.estado = body.estado === "activo" ? "activo" : "inactivo";
+  if (body.activo !== undefined && body.estado === undefined) patch.estado = body.activo ? "activo" : "inactivo";
+  if (body.region !== undefined && ["Nicaragua", "Costa Rica", "Honduras", "El Salvador"].includes(body.region)) patch.region = body.region;
+  if (body.id_supervisor !== undefined) patch.id_supervisor = body.id_supervisor || null;
+  if (body.usuario !== undefined) {
+    const usernameLower = String(body.usuario).trim().toLowerCase();
+    if (!/^[a-z0-9_]{2,40}$/.test(usernameLower)) return res.status(400).json({ error: "Nombre de usuario inválido." });
+    const { data: duplicate } = await client.from("profiles").select("id").eq("usuario", usernameLower).neq("id", id).maybeSingle();
+    if (duplicate) return res.status(409).json({ error: "Ese nombre de usuario ya está registrado." });
+    const internalEmail = `${usernameLower}@app.local`;
+    const { error: authError } = await client.auth.admin.updateUserById(id, { email: internalEmail, email_confirm: true });
+    if (authError) return res.status(400).json({ error: authError.message });
+    patch.usuario = usernameLower;
+    patch.email = internalEmail;
+  }
+  const { data: saved, error } = await client.from("profiles").update(patch).eq("id", id).select("*").single();
+  if (error) return res.status(400).json({ error: error.message });
+  if (Array.isArray(body.vendedoresAsignados) && (saved.rol === "supervisor" || existing.rol === "supervisor")) {
+    const { data: sellers } = await client.from("profiles").select("id").eq("rol", "vendedor");
+    const assigned = new Set(body.vendedoresAsignados.map(String));
+    for (const seller of sellers || []) {
+      const shouldAssign = assigned.has(seller.id);
+      await client.from("profiles").update({ id_supervisor: shouldAssign ? id : null }).eq("id", seller.id).eq("id_supervisor", id);
+      if (shouldAssign) await client.from("profiles").update({ id_supervisor: id }).eq("id", seller.id);
+    }
+  }
+  return res.json({
+    id: saved.id, nombre: saved.nombre, usuario: saved.usuario, rol: saved.rol, estado: saved.estado,
+    activo: saved.estado === "activo", conexion: "offline", region: saved.region, email: saved.email,
+    id_supervisor: saved.id_supervisor || "", vendedoresAsignados: body.vendedoresAsignados || [],
+  });
+});
+
+app.delete("/api/supabase/admin/users/:id", requireSupabaseAdmin, async (req, res) => {
+  const client = (req as any).supabaseAdminClient;
+  const { error } = await client.from("profiles").update({ estado: "inactivo" }).eq("id", req.params.id);
+  if (error) return res.status(400).json({ error: error.message });
+  return res.json({ success: true, message: "Usuario desactivado." });
+});
+
+app.put("/api/supabase/admin/users/:id/password", requireSupabaseAdmin, async (req, res) => {
+  const client = (req as any).supabaseAdminClient;
+  const { newPassword } = req.body || {};
+  if (typeof newPassword !== "string" || newPassword.length < 8) {
+    return res.status(400).json({ error: "La contraseña nueva debe tener al menos 8 caracteres." });
+  }
+  const { data: profile, error: lookupError } = await client.from("profiles").select("id").eq("id", req.params.id).single();
+  if (lookupError || !profile) return res.status(404).json({ error: "Usuario no encontrado." });
+  const { error } = await client.auth.admin.updateUserById(profile.id, { password: newPassword });
+  if (error) return res.status(400).json({ error: error.message });
+  return res.json({ success: true });
+});
+
 app.get("/api/usuarios", (req, res) => {
   const safeUsers = db.usuarios.map((u: any) => {
     const { password, ...safeUser } = u;
-    return safeUser;
+    return { ...safeUser, email: `${String(u.usuario || "").toLowerCase()}@app.local` };
   });
   res.json(safeUsers);
 });
 
+app.put("/api/usuarios/:id/password", requireAdmin, async (req, res) => {
+  const user = db.usuarios.find((item: any) => item.id === req.params.id);
+  if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+  const { newPassword } = req.body || {};
+  if (typeof newPassword !== "string" || newPassword.length < 8) {
+    return res.status(400).json({ error: "La contraseña nueva debe tener al menos 8 caracteres." });
+  }
+  user.password = bcrypt.hashSync(newPassword, 10);
+  user.sesion_ver = (Number(user.sesion_ver) || 0) + 1;
+  user.requiereCambioPassword = false;
+  await saveToDB({ users: [user] });
+  return res.json({ success: true });
+});
+
 app.post("/api/usuarios", requireAdmin, (req, res) => {
-  const { nombre, usuario, rol, email, password, estado, region, id_supervisor, vendedoresAsignados } = req.body;
-  if (!nombre || !rol || !email || !usuario || !password) {
-    return res.status(400).json({ error: "Nombre, Usuario (nickname), Contraseña, Rol y Correo son campos obligatorios." });
+  const { nombre, usuario, rol, password, estado, region, id_supervisor, vendedoresAsignados } = req.body;
+  if (!nombre || !rol || !usuario || !password) {
+    return res.status(400).json({ error: "Nombre, username, contraseña y rol son requeridos." });
   }
 
   // Ensure unique username (usuario)
@@ -1465,7 +1601,7 @@ app.post("/api/usuarios", requireAdmin, (req, res) => {
     nombre: nombre.trim(),
     usuario: usernameLower,
     rol: resolvedRol,
-    email: email.trim(),
+    email: `${usernameLower}@app.local`,
     password: password.trim(),
     estado: isActivo ? "activo" : "inactivo",
     conexion: "offline",
@@ -1511,7 +1647,7 @@ app.put("/api/usuarios/:id", requireAdmin, (req, res) => {
   }
 
   if (nombre !== undefined) user.nombre = nombre.trim();
-  if (email !== undefined) user.email = email.trim();
+  user.email = `${String(user.usuario || "").toLowerCase()}@app.local`;
   if (rol !== undefined) {
     user.rol = rol === "admin" || rol === "administrador" ? "administrador" : (rol === "supervisor" ? "supervisor" : "vendedor");
   }
